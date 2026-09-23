@@ -1,0 +1,26 @@
+# Python & Jupyter
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# Node & Astro
+node_modules/
+dist/
+.astro/
+
+# IDE & OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Datasets cache & generated raw outputs
+**/cache/*
+!pipelines/space_launches/cache/launches_base.json
+*.tmp
+*.log
+*.png
+.env
