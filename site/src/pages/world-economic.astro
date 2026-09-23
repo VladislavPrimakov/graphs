@@ -1,0 +1,134 @@
+---
+import Layout from '../layouts/Layout.astro';
+import EChart from '../components/EChart.astro';
+import PageHeader from '../components/PageHeader.astro';
+import ChartCard from '../components/ChartCard.astro';
+import data from '../data/world-economic.json';
+import { getProject } from '../data/projects';
+import { getWorldEconomicEntity } from '../styles/charts';
+
+const project = getProject('world-economic');
+const { years, entities, charts } = data;
+
+const chartConfigs = [
+  {
+    key: 'gdp_ppp',
+    title: 'Macroeconomic Foundation: Comparative Scale of Industrial Powerhouses (2000–2024)',
+    desc: 'Real GDP at Purchasing Power Parity in constant 2021 international dollars (trillions).',
+  },
+  {
+    key: 'machinery_turnover',
+    title: 'All Machinery & Capital Goods Trade Turnover: HS Chapter 84 (2000–2024)',
+    desc: 'Total import + export trade turnover in constant 2021 US$ billions for all industrial machinery, mechanical appliances, and reactors.',
+  },
+  {
+    key: 'electricity_generation',
+    title: 'Total Electricity Generation: Physical Power Engine of Industry (2000–2024)',
+    desc: 'Annual gross electricity generation across all power sources in terawatt-hours (TWh), serving as a direct physical metric of industrial scale.',
+  },
+  {
+    key: 'manufacturing_value_added',
+    title: 'Manufacturing Value Added: Net Industrial Output of Factory Floors (2000–2024)',
+    desc: 'Net physical manufacturing output produced by factory floors in constant 2015 US$ trillions, excluding financial services and overhead.',
+  },
+  {
+    key: 'clean_power',
+    title: 'Clean Energy Transformation: Solar & Wind Electricity Generation (2000–2024)',
+    desc: 'Annual combined electricity generation from solar PV and wind turbines (TWh / year), measuring speed of decarbonization.',
+  },
+  {
+    key: 'electricity_per_capita',
+    title: 'Electricity Intensity Per Capita: Industrial & Societal Energy Density (2000–2024)',
+    desc: 'Annual gross electricity generation per inhabitant (kWh / person / year), reflecting technological and manufacturing electrification.',
+  },
+];
+
+function buildChartOption(config: typeof chartConfigs[0]) {
+  const chartData = charts[config.key as keyof typeof charts];
+  if (!chartData) return null;
+
+  const series = Object.entries(chartData.series).map(([entityCode, values]) => {
+    const ent = entities[entityCode as keyof typeof entities];
+    const seriesName = ent?.name || entityCode;
+    const entStyle = getWorldEconomicEntity(seriesName);
+    const color = entStyle.color;
+    const lw = entStyle.lineWidth;
+
+    return {
+      name: seriesName,
+      type: 'line',
+      data: values,
+      smooth: false,
+      showSymbol: false,
+      symbolSize: 6,
+      lineStyle: { width: lw },
+      itemStyle: { color },
+      endLabel: {
+        show: true,
+        formatter: 'worldEndLabel',
+        color: 'inherit',
+        fontSize: 12,
+        fontWeight: 'bold',
+        distance: 8,
+        valueAnimation: false,
+      },
+      labelLayout: {
+        moveOverlap: 'shiftY',
+      },
+    };
+  });
+
+  return {
+    title: {
+      text: config.title,
+      subtext: config.desc,
+    },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'cross' },
+      formatter: 'worldMetricTooltip',
+    },
+    grid: {
+      top: 75,
+      left: '3%',
+      right: '9%',
+      bottom: '6%',
+      containLabel: true,
+    },
+    xAxis: {
+      type: 'category',
+      data: years.map(String),
+    },
+    yAxis: {
+      type: 'value',
+      name: chartData.unit,
+    },
+    series,
+  };
+}
+---
+
+<Layout title={project.title} description={project.description}>
+  <div class="space-y-10">
+    <PageHeader
+      title={project.title}
+      description={project.description}
+      tags={project.tags}
+      sources={project.sources}
+      lastUpdated={data.last_updated}
+    />
+
+    <!-- Sequential Charts List -->
+    <div class="space-y-8">
+      {chartConfigs.map((config) => {
+        const option = buildChartOption(config);
+        if (!option) return null;
+        return (
+          <ChartCard>
+            <EChart option={option} height="480px" chartId={`chart-macro-${config.key}`} />
+          </ChartCard>
+        );
+      })}
+    </div>
+  </div>
+</Layout>

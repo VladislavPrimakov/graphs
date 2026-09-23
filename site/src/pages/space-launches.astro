@@ -1,0 +1,133 @@
+---
+import Layout from '../layouts/Layout.astro';
+import EChart from '../components/EChart.astro';
+import PageHeader from '../components/PageHeader.astro';
+import ChartCard from '../components/ChartCard.astro';
+import data from '../data/space-launches.json';
+import { getProject } from '../data/projects';
+import { SPACE_LAUNCHES_THEME } from '../styles/charts';
+
+const project = getProject('space-launches');
+const { payload_capacity, decade_costs } = data;
+const regions = SPACE_LAUNCHES_THEME.regions;
+
+// Chart 1: Annual Payload Capacity (Stacked Area Chart matching matplotlib)
+const payloadChartOption = {
+  title: {
+    text: 'Annual Mass of LEO/SSO Payload Capacity by Country/Region (1958–2026)',
+    subtext: 'Annual orbital launch vehicle payload capacity (metric tons to LEO/SSO) covering 8,000+ orbital launch attempts.',
+  },
+  tooltip: {
+    trigger: 'axis',
+    axisPointer: { type: 'cross' },
+    formatter: 'spacePayloadTooltip',
+  },
+  legend: {
+    data: regions,
+  },
+  grid: {
+    top: 100,
+    left: '3%',
+    right: '4%',
+    bottom: '14%',
+    containLabel: true,
+  },
+  dataZoom: [
+    {
+      type: 'slider',
+      show: true,
+      xAxisIndex: [0],
+      start: 0,
+      end: 100,
+      bottom: '2%',
+    },
+    {
+      type: 'inside',
+      xAxisIndex: [0],
+    },
+  ],
+  xAxis: {
+    type: 'category',
+    data: payload_capacity.years.map(String),
+  },
+  yAxis: {
+    type: 'value',
+    name: 'Payload (tons)',
+  },
+  series: regions.map((region: string) => ({
+    name: region,
+    type: 'line',
+    stack: 'Total',
+    areaStyle: { opacity: 0.85 },
+    emphasis: { focus: 'series' },
+    showSymbol: false,
+    itemStyle: { color: SPACE_LAUNCHES_THEME.colors[region] },
+    data: payload_capacity.series[region],
+  })),
+};
+
+// Chart 2: Launch Cost per kg by Decade (Logarithmic scale matching matplotlib)
+const costSeries = regions.map((region: string) => ({
+  name: region,
+  type: 'bar',
+  data: decade_costs.series[region],
+  itemStyle: { color: SPACE_LAUNCHES_THEME.colors[region] },
+}));
+
+const costChartOption = {
+  title: {
+    text: 'Launch Cost to Low Earth Orbit by Decade ($/kg, Log Scale)',
+    subtext: 'Estimated average cost to deliver 1 kg of payload to LEO across seven decades (inflation-adjusted, 2021 USD).',
+  },
+  tooltip: {
+    trigger: 'axis',
+    axisPointer: { type: 'shadow' },
+    formatter: 'spaceCostTooltip',
+  },
+  legend: {
+    data: regions,
+  },
+  grid: {
+    top: 100,
+    left: '3%',
+    right: '4%',
+    bottom: '8%',
+    containLabel: true,
+  },
+  xAxis: {
+    type: 'category',
+    data: decade_costs.decades,
+  },
+  yAxis: {
+    type: 'log',
+    logBase: 10,
+    name: 'Cost ($/kg)',
+    axisLabel: {
+      formatter: 'usdCurrency',
+    },
+  },
+  series: costSeries,
+};
+---
+
+<Layout title={project.title} description={project.description}>
+  <div class="space-y-10">
+    <PageHeader
+      title={project.title}
+      description={project.description}
+      tags={project.tags}
+      sources={project.sources}
+      lastUpdated={data.last_updated}
+    />
+
+    <!-- Chart 1: Payload Capacity -->
+    <ChartCard>
+      <EChart option={payloadChartOption} height="520px" chartId="chart-space-payloads" />
+    </ChartCard>
+
+    <!-- Chart 2: Cost per kg -->
+    <ChartCard>
+      <EChart option={costChartOption} height="480px" chartId="chart-space-costs" />
+    </ChartCard>
+  </div>
+</Layout>
