@@ -1,0 +1,256 @@
+---
+import Layout from '../layouts/Layout.astro';
+import EChart from '../components/EChart.astro';
+import PageHeader from '../components/PageHeader.astro';
+import ChartCard from '../components/ChartCard.astro';
+import KpiCard from '../components/KpiCard.astro';
+import data from '../data/war-rf-ua-attacks.json';
+import { getProject } from '../data/projects';
+import { WAR_ATTACKS_THEME } from '../styles/charts';
+import { themeColors } from '../styles/tokens.js';
+
+const project = getProject('war-rf-ua-attacks');
+const { summary, timeline } = data;
+const { uavs, ballistic, cruise } = summary;
+
+// Chart 1: Strike UAVs Monthly
+const uavChartOption = {
+  title: {
+    text: 'Monthly Dynamics of Strike UAVs (Shahed-136/131 & decoys)',
+    subtext: 'Monthly launches of long-range strike drones and decoy UAVs reported by the Ukrainian Air Force.',
+  },
+  tooltip: {
+    trigger: 'axis',
+    axisPointer: { type: 'cross' },
+    formatter: 'shahedAttacksTooltip',
+  },
+  grid: {
+    top: 75,
+    bottom: '12%',
+  },
+  dataZoom: [
+    {
+      type: 'slider',
+      show: true,
+      xAxisIndex: [0],
+      start: 0,
+      end: 100,
+      bottom: '2%',
+      fillerColor: themeColors.accent.roseGlow,
+      handleStyle: { color: themeColors.accent.rose },
+    },
+    { type: 'inside', xAxisIndex: [0] },
+  ],
+  xAxis: {
+    type: 'category',
+    data: timeline.labels,
+    axisLabel: { rotate: 45 },
+  },
+  yAxis: {
+    type: 'value',
+    name: 'Units',
+  },
+  series: [
+    {
+      name: 'Strike UAVs',
+      type: 'line',
+      data: timeline.uavs,
+      smooth: false,
+      lineStyle: { width: 2.5, color: WAR_ATTACKS_THEME.uav.line },
+      itemStyle: { color: WAR_ATTACKS_THEME.uav.line },
+      symbol: 'circle',
+      symbolSize: 6,
+      areaStyle: {
+        color: WAR_ATTACKS_THEME.uav.area,
+      },
+      label: {
+        show: true,
+        position: 'top',
+        color: themeColors.text.primary,
+        fontSize: 10,
+        fontWeight: 'bold',
+        textBorderColor: themeColors.surface.card,
+        textBorderWidth: 2,
+        formatter: 'positiveInteger',
+      },
+    },
+  ],
+};
+
+const minMissiles = WAR_ATTACKS_THEME.thresholds.minMissileLabelCount;
+
+function createMissileSeries(name: string, data: number[], color: string) {
+  return {
+    name,
+    type: 'bar',
+    stack: 'Missiles',
+    data: data.map((val) => ({
+      value: val,
+      label: {
+        show: val > minMissiles,
+        position: 'inside',
+        color: themeColors.text.primary,
+        fontSize: 9,
+        fontWeight: 'bold',
+        textBorderColor: themeColors.surface.card,
+        textBorderWidth: 2,
+        formatter: `${val}`,
+      },
+    })),
+    itemStyle: { color },
+  };
+}
+
+// Chart 2: Missile Weaponry Monthly
+const missileChartOption = {
+  title: {
+    text: 'Missile Strikes by Category: Ballistic vs Cruise & Guided',
+    subtext: 'Monthly missile launches: ballistic/aeroballistic (Iskander-M, Kinzhal, S-300) vs cruise/guided (Kh-101, Kalibr, Kh-59/69).',
+  },
+  tooltip: {
+    trigger: 'axis',
+    axisPointer: { type: 'shadow' },
+    formatter: 'missileAttacksTooltip',
+  },
+  legend: {},
+  grid: {
+    bottom: '12%',
+  },
+  dataZoom: [
+    {
+      type: 'slider',
+      show: true,
+      xAxisIndex: [0],
+      start: 0,
+      end: 100,
+      bottom: '2%',
+    },
+    { type: 'inside', xAxisIndex: [0] },
+  ],
+  xAxis: {
+    type: 'category',
+    data: timeline.labels,
+    axisLabel: { rotate: 45 },
+  },
+  yAxis: {
+    type: 'value',
+    name: 'Units',
+  },
+  series: [
+    createMissileSeries('Ballistic & Aeroballistic', timeline.ballistic, WAR_ATTACKS_THEME.missiles.ballistic),
+    createMissileSeries('Cruise & Guided', timeline.cruise, WAR_ATTACKS_THEME.missiles.cruise),
+    {
+      name: 'Total Missiles',
+      type: 'bar',
+      stack: 'Missiles',
+      silent: true,
+      data: timeline.total_missiles.map((total: number) => ({
+        value: 0,
+        label: {
+          show: total > 0,
+          position: 'top',
+          color: themeColors.text.primary,
+          fontSize: 10,
+          fontWeight: 'bold',
+          textBorderColor: themeColors.surface.card,
+          textBorderWidth: 2,
+          formatter: `${total}`,
+        },
+      })),
+      tooltip: { show: false },
+    },
+  ],
+};
+---
+
+<Layout title={project.title} description={project.description}>
+  <div class="space-y-12">
+    <PageHeader
+      title={project.title}
+      description={project.description}
+      tags={project.tags}
+      sources={project.sources}
+      lastUpdated={data.last_updated}
+    />
+
+    <!-- Section 1: Strike UAVs -->
+    <section class="space-y-4">
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <KpiCard
+          label="Total Strike UAVs"
+          value={uavs.total}
+          valueColor="text-rose-400"
+          subtext="Shahed-136/131 & decoys"
+        />
+        <KpiCard
+          label="Monthly Average"
+          value={uavs.monthly_avg}
+          valueColor="text-slate-100"
+          subtext="Documented monthly avg"
+        />
+        <KpiCard
+          label="Peak Monthly Volume"
+          value={uavs.peak_count}
+          valueColor="text-amber-400"
+          subtext={`Record month (${uavs.peak_period})`}
+        />
+        <KpiCard
+          label="Aerial Attack Share"
+          value={`${uavs.share_pct}%`}
+          valueColor="text-sky-400"
+          subtext="Of all launched aerial weapons"
+        />
+      </div>
+
+      <ChartCard>
+        <EChart option={uavChartOption} height="480px" chartId="chart-rf-uavs" />
+      </ChartCard>
+    </section>
+
+    <!-- Section 2: Missile Weaponry -->
+    <section class="space-y-4">
+      <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+        <KpiCard
+          label="Ballistic Total"
+          value={ballistic.total}
+          valueColor="text-amber-400"
+          subtext={`Iskander-M, Kinzhal (${ballistic.share_pct}%)`}
+        />
+        <KpiCard
+          label="Ballistic Monthly Avg"
+          value={ballistic.monthly_avg}
+          valueColor="text-amber-300"
+          subtext="Average launches / month"
+        />
+        <KpiCard
+          label="Ballistic Peak Volume"
+          value={ballistic.peak_count}
+          valueColor="text-amber-500"
+          subtext={`Record month (${ballistic.peak_period})`}
+        />
+        <KpiCard
+          label="Cruise & Guided Total"
+          value={cruise.total}
+          valueColor="text-cyan-400"
+          subtext={`Kh-101, Kalibr (${cruise.share_pct}%)`}
+        />
+        <KpiCard
+          label="Cruise Monthly Avg"
+          value={cruise.monthly_avg}
+          valueColor="text-cyan-300"
+          subtext="Average launches / month"
+        />
+        <KpiCard
+          label="Cruise Peak Volume"
+          value={cruise.peak_count}
+          valueColor="text-cyan-500"
+          subtext={`Record month (${cruise.peak_period})`}
+        />
+      </div>
+
+      <ChartCard>
+        <EChart option={missileChartOption} height="480px" chartId="chart-rf-missiles" />
+      </ChartCard>
+    </section>
+  </div>
+</Layout>
