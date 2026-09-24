@@ -1,0 +1,30 @@
+{
+  "name": "@graphs/pipelines",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "bun run check && bun run type-check && bun src/run-all.ts",
+    "check": "biome check --write src",
+    "type-check": "tsc --noEmit",
+    "test": "bun test",
+    "test:watch": "bun test --watch",
+    "space-launches": "bun src/space-launches/index.ts",
+    "world-economic": "bun src/world-economic/index.ts",
+    "ua-economic": "bun src/ua-economic/index.ts",
+    "war-losses": "bun src/war-rf-ua-losses/index.ts",
+    "war-attacks": "bun src/war-rf-ua-attacks/index.ts"
+  },
+  "dependencies": {
+    "cheerio": "^1.1.2",
+    "consola": "^3.4.2",
+    "fast-xml-parser": "^5.4.1",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.0",
+    "@types/cheerio": "^0.22.35",
+    "@types/node": "^22.10.2",
+    "typescript": "^5.9.3"
+  }
+}

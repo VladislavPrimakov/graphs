@@ -1,3 +1,14 @@
 {
-  "extends": "astro/tsconfigs/strict"
+  "extends": "astro/tsconfigs/strict",
+  "compilerOptions": {
+    "paths": {
+      "@/types/*": ["../types/*"],
+      "@/types": ["../types/index"],
+      "echarts": ["./node_modules/echarts"]
+    },
+
+    "incremental": true,
+    "tsBuildInfoFile": "./.cache/tsbuildinfo"
+  },
+  "include": [".astro/types.d.ts", "**/*", "../types/**/*"]
 }
