@@ -1,18 +1,30 @@
 {
-  "name": "graphs-site",
+  "name": "@graphs/site",
   "type": "module",
   "version": "1.0.0",
   "scripts": {
     "dev": "astro dev",
     "start": "astro dev",
-    "build": "astro build",
+    "build": "bun run check && bun run type-check && astro build --silent",
     "preview": "astro preview",
+    "check": "biome check --write src",
+    "type-check": "tsc --noEmit",
+    "astro-check": "astro check",
     "astro": "astro"
   },
   "dependencies": {
+    "@astrojs/react": "3.6.2",
     "@astrojs/tailwind": "^5.1.0",
     "astro": "^4.16.18",
     "echarts": "^5.5.1",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
     "tailwindcss": "^3.4.14"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.10",
+    "@types/react": "18.3.12",
+    "@types/react-dom": "18.3.1",
+    "typescript": "^5.9.3"
   }
 }

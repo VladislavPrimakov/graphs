@@ -1,5 +1,5 @@
 ---
-import { getTagClasses } from '../styles/tokens.js';
+import { getTagClasses } from '../styles/tokens';
 
 interface Props {
   tag: string;
@@ -8,12 +8,7 @@ interface Props {
   class?: string;
 }
 
-const {
-  tag,
-  interactive = false,
-  title,
-  class: className = '',
-} = Astro.props;
+const { tag, interactive = false, title, class: className = '' } = Astro.props;
 
 const style = getTagClasses(tag);
 const tooltip = title || (interactive ? `Filter by ${tag}` : undefined);
@@ -21,19 +16,11 @@ const baseClasses = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs
 ---
 
 {interactive ? (
-  <button
-    type="button"
-    data-tag-click={tag}
-    title={tooltip}
-    class={`card-tag-pill ${baseClasses} hover:scale-105 cursor-pointer ${style} ${className}`}
-  >
+  <button type="button" data-tag-click={tag} title={tooltip} class={`card-tag-pill ${baseClasses} hover:scale-105 cursor-pointer ${style} ${className}`}>
     {tag}
   </button>
 ) : (
-  <span
-    title={tooltip}
-    class={`${baseClasses} ${style} ${className}`}
-  >
+  <span title={tooltip} class={`${baseClasses} ${style} ${className}`}>
     {tag}
   </span>
 )}

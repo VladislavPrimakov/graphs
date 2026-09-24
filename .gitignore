@@ -10,6 +10,7 @@ venv/
 node_modules/
 dist/
 .astro/
+.cache/
 
 # IDE & OS
 .idea/
@@ -19,8 +20,14 @@ Thumbs.db
 
 # Datasets cache & generated raw outputs
 **/cache/*
-!pipelines/space_launches/cache/launches_base.json
+!pipelines/src/space-launches/cache/launches_base.json
+!pipelines/src/world-economic/cache/*.json
+!pipelines/src/ua-economic/cache/*.json
+!pipelines/src/war-rf-ua-attacks/cache/*.json
 *.tmp
 *.log
 *.png
+# Ephemeral build-time datasets
+site/src/data/*.json
+
 .env

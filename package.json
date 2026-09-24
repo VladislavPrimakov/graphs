@@ -1,0 +1,22 @@
+{
+  "name": "graphs",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "site",
+    "pipelines"
+  ],
+  "scripts": {
+    "dev": "bun --filter @graphs/site dev",
+    "build": "bun run pipelines && bun run site",
+    "pipelines": "bun --filter @graphs/pipelines build",
+    "site": "bun --filter @graphs/site build",
+    "test": "bun --filter @graphs/pipelines test"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.14",
+    "@types/bun": "^1.2.0",
+    "typescript": "^5.9.3"
+  }
+}

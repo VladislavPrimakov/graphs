@@ -1,4 +1,4 @@
-import { themeColors } from './src/styles/tokens.js';
+import { themeColors } from './src/styles/tokens.ts';
 
 /** @type {import('tailwindcss').Config} */
 export default {
@@ -14,6 +14,9 @@ export default {
         status: themeColors.status,
         country: themeColors.country,
         budget: themeColors.budget,
+        attacks: themeColors.attacks,
+        losses: themeColors.losses,
+        trade: themeColors.trade,
       },
       fontFamily: {
         sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
