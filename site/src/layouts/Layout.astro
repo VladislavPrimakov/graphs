@@ -1,16 +1,20 @@
 ---
 import '../styles/global.css';
-import { PROJECTS } from '../data/projects';
+import type { Project, ProjectSlug } from '@/types';
+import PageHeader from '../components/PageHeader.astro';
+import { getProject, PROJECTS } from '../data/projects';
 
 interface Props {
-  title: string;
+  title?: string;
   description?: string;
+  project?: ProjectSlug | Project;
 }
 
-const {
-  title,
-  description = 'Open data visualization platform powered by Apache ECharts and Astro.',
-} = Astro.props;
+const { project: projectProp } = Astro.props;
+const project = typeof projectProp === 'string' ? getProject(projectProp) : projectProp;
+
+const title = Astro.props.title || project?.title || 'Overview & Projects';
+const description = Astro.props.description || project?.description || 'Open data visualization platform powered by Apache ECharts and Astro.';
 
 const baseUrl = import.meta.env.BASE_URL.replace(/\/$/, '');
 
@@ -29,7 +33,7 @@ const fullTitle = `${title} | Graphs & Analytics`;
 ---
 
 <!doctype html>
-<html lang="en" class="dark scroll-smooth">
+<html lang="en" class="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -54,14 +58,11 @@ const fullTitle = `${title} | Graphs & Analytics`;
 
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
-      rel="stylesheet"
-    />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
   </head>
-  <body class="bg-slate-950 text-slate-100 flex flex-col min-h-screen">
+  <body class="bg-surface-base text-content-primary flex flex-col min-h-screen">
     <!-- Header / Navbar -->
-    <header class="sticky top-0 z-50 backdrop-blur-md bg-slate-950/80 border-b border-slate-800/80">
+    <header class="sticky top-0 z-50 backdrop-blur-md bg-surface-base/80 border-b border-border-subtle/80">
       <div class="w-full px-4 sm:px-6 lg:px-8">
         <div class="flex items-center justify-between h-16">
           <div class="flex items-center space-x-3">
@@ -71,25 +72,19 @@ const fullTitle = `${title} | Graphs & Analytics`;
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z" />
                 </svg>
               </div>
-              <span class="font-bold text-lg text-slate-100 tracking-tight group-hover:text-sky-400 transition-colors">
-                Graphs
-              </span>
+              <span class="font-bold text-lg text-content-primary tracking-tight group-hover:text-accent-primary transition-colors">Graphs</span>
             </a>
           </div>
 
           <!-- Desktop Nav -->
           <nav class="hidden md:flex items-center space-x-1">
             {navLinks.map((link) => {
-              const isActive = link.href === `${baseUrl}/`
-                ? currentPath === `${baseUrl}/` || currentPath === baseUrl
-                : currentPath.startsWith(link.href);
+              const isActive = link.href === `${baseUrl}/` ? currentPath === `${baseUrl}/` || currentPath === baseUrl : currentPath.startsWith(link.href);
               return (
                 <a
                   href={link.href}
                   class={`px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-colors ${
-                    isActive
-                      ? 'bg-slate-800 text-sky-400 font-semibold shadow-inner'
-                      : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
+                    isActive ? 'bg-surface-elevated text-accent-primary font-semibold shadow-inner' : 'text-content-secondary hover:text-content-primary hover:bg-surface-elevated/60'
                   }`}
                 >
                   {link.name}
@@ -104,22 +99,21 @@ const fullTitle = `${title} | Graphs & Analytics`;
               href="https://github.com/VladislavPrimakov/graphs"
               target="_blank"
               rel="noopener noreferrer"
-              class="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800/80 transition-colors flex items-center space-x-1.5 text-xs font-medium border border-slate-800"
+              class="p-2 rounded-lg text-content-muted hover:text-content-primary hover:bg-surface-elevated/80 transition-colors flex items-center space-x-1.5 text-xs font-medium border border-border-subtle"
               title="View on GitHub"
             >
               <svg class="w-4 h-4 fill-current" viewBox="0 0 24 24">
-                <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" />
+                <path
+                  fill-rule="evenodd"
+                  clip-rule="evenodd"
+                  d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"
+                />
               </svg>
               <span class="hidden sm:inline">GitHub</span>
             </a>
 
             <!-- Mobile menu button -->
-            <button
-              id="mobile-menu-btn"
-              type="button"
-              class="md:hidden p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
-              aria-label="Toggle navigation"
-            >
+            <button id="mobile-menu-btn" type="button" class="md:hidden p-2 rounded-lg text-content-muted hover:text-content-primary hover:bg-surface-elevated" aria-label="Toggle navigation">
               <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
               </svg>
@@ -128,19 +122,15 @@ const fullTitle = `${title} | Graphs & Analytics`;
         </div>
 
         <!-- Mobile Nav Menu -->
-        <div id="mobile-menu" class="hidden md:hidden pb-3 pt-2 border-t border-slate-800/80">
+        <div id="mobile-menu" class="hidden md:hidden pb-3 pt-2 border-t border-border-subtle/80">
           <div class="flex flex-col space-y-1">
             {navLinks.map((link) => {
-              const isActive = link.href === `${baseUrl}/`
-                ? currentPath === `${baseUrl}/` || currentPath === baseUrl
-                : currentPath.startsWith(link.href);
+              const isActive = link.href === `${baseUrl}/` ? currentPath === `${baseUrl}/` || currentPath === baseUrl : currentPath.startsWith(link.href);
               return (
                 <a
                   href={link.href}
                   class={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                    isActive
-                      ? 'bg-slate-800 text-sky-400 font-semibold'
-                      : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
+                    isActive ? 'bg-surface-elevated text-accent-primary font-semibold' : 'text-content-secondary hover:text-content-primary hover:bg-surface-elevated/60'
                   }`}
                 >
                   {link.name}
@@ -154,7 +144,16 @@ const fullTitle = `${title} | Graphs & Analytics`;
 
     <!-- Main Content -->
     <main class="flex-grow w-full px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
-      <slot />
+      {project ? (
+        <div class="flex flex-col gap-6 sm:gap-8">
+          <PageHeader title={project.title} description={project.description} tags={project.tags} sources={project.sources} lastUpdated={project.lastUpdated} />
+          <div class="flex flex-col gap-8 sm:gap-10">
+            <slot />
+          </div>
+        </div>
+      ) : (
+        <slot />
+      )}
     </main>
 
     <script>
@@ -169,12 +168,112 @@ const fullTitle = `${title} | Graphs & Analytics`;
         }
       }
 
-      if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', setupMobileNav);
-      } else {
-        setupMobileNav();
+      function setupScrollSpy() {
+        const sections = Array.from(document.querySelectorAll<HTMLElement>('[data-anchor-section]'));
+        if (!sections.length) return;
+
+        let currentHash = window.location.hash ? window.location.hash.slice(1) : '';
+        let pendingAnchor: string | null = null;
+        let idleTimer: number | undefined;
+
+        if (currentHash) {
+          const target = document.querySelector<HTMLElement>(`[data-anchor-section="${currentHash}"]`);
+          if (target) {
+            requestAnimationFrame(() => {
+              target.scrollIntoView({ behavior: 'smooth' });
+            });
+          }
+        }
+
+        const visibleSections = new Map<HTMLElement, number>();
+
+        const commitHash = () => {
+          if (window.scrollY < 100) {
+            if (window.location.hash) {
+              currentHash = '';
+              history.replaceState(null, '', window.location.pathname + window.location.search);
+            }
+            return;
+          }
+
+          if (pendingAnchor && pendingAnchor !== currentHash) {
+            currentHash = pendingAnchor;
+            history.replaceState(null, '', `#${pendingAnchor}`);
+          }
+        };
+
+        const updatePendingAnchor = () => {
+          if (visibleSections.size === 0) return;
+
+          let bestSec: HTMLElement | null = null;
+          let bestTop = Infinity;
+
+          visibleSections.forEach((top, sec) => {
+            if (top < bestTop) {
+              bestTop = top;
+              bestSec = sec;
+            }
+          });
+
+          if (bestSec) {
+            pendingAnchor = (bestSec as HTMLElement).getAttribute('data-anchor-section');
+          }
+        };
+
+        const observer = new IntersectionObserver(
+          (entries) => {
+            entries.forEach((entry) => {
+              const el = entry.target as HTMLElement;
+              if (entry.isIntersecting) {
+                visibleSections.set(el, entry.boundingClientRect.top);
+              } else {
+                visibleSections.delete(el);
+              }
+            });
+
+            updatePendingAnchor();
+
+            if (idleTimer) clearTimeout(idleTimer);
+            idleTimer = window.setTimeout(commitHash, 300);
+          },
+          {
+            rootMargin: '-80px 0px -40% 0px',
+            threshold: [0, 0.25, 0.5, 0.75, 1],
+          },
+        );
+
+        sections.forEach((sec) => observer.observe(sec));
+
+        window.addEventListener(
+          'scrollend',
+          () => {
+            if (idleTimer) clearTimeout(idleTimer);
+            idleTimer = window.setTimeout(commitHash, 50);
+          },
+          { passive: true },
+        );
+
+        window.addEventListener(
+          'scroll',
+          () => {
+            if (idleTimer) clearTimeout(idleTimer);
+            idleTimer = window.setTimeout(commitHash, 300);
+          },
+          { passive: true },
+        );
       }
-      document.addEventListener('astro:page-load', setupMobileNav);
+
+      function setupPage() {
+        setupMobileNav();
+        setupScrollSpy();
+      }
+
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', setupPage);
+      } else {
+        setupPage();
+      }
+      document.addEventListener('astro:page-load', setupPage);
     </script>
   </body>
 </html>
