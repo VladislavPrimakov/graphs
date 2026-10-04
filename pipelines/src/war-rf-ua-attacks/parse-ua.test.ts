@@ -82,35 +82,35 @@ describe('parseShotDownParagraph', () => {
     const cases = [
       {
         text: 'Air defence shot down 12 unmanned aerial vehicles (four Leleka, eight Furia) and five aircraft (three MiG-29, two Su-25).',
-        expected: { uavs: 12, ballistic: 0, cruise: 0, total_missiles: 0 },
+        expected: { uavs: 12, ballistic: 0, cruise: 0, totalMissiles: 0 },
       },
       {
         text: 'Air defence shot down 49 unmanned aerial vehicles, including 15 Bayraktar-TB2, near the line of contact.',
-        expected: { uavs: 49, ballistic: 0, cruise: 0, total_missiles: 0 },
+        expected: { uavs: 49, ballistic: 0, cruise: 0, totalMissiles: 0 },
       },
       {
         text: 'Air defence systems shot down 340 unmanned aerial vehicles, with 147 of them outside the special military operation were shot down.',
-        expected: { uavs: 340, ballistic: 0, cruise: 0, total_missiles: 0 },
+        expected: { uavs: 340, ballistic: 0, cruise: 0, totalMissiles: 0 },
       },
       {
         text: 'Over the past 24 hours, air defence intercepted 1,250 fixed-wing UAVs, twenty-four HIMARS, and one Neptune missile.',
-        expected: { uavs: 1250, ballistic: 24, cruise: 1, total_missiles: 25 },
+        expected: { uavs: 1250, ballistic: 24, cruise: 1, totalMissiles: 25 },
       },
       {
         text: 'Near S-400 and MiG-29 base, air defence shot down 18 French-made Hammer guided bombs, 87 U.S.-made HIMARS projectiles, and 50 UAVs.',
-        expected: { uavs: 50, ballistic: 87, cruise: 0, total_missiles: 87 },
+        expected: { uavs: 50, ballistic: 87, cruise: 0, totalMissiles: 87 },
       },
       {
         text: 'two Su-27s, two Su-24s, one helicopter and four Bayraktar TB-2 attack unmanned aerial vehicles of the Armed Forces of Ukraine have been shot down.',
-        expected: { uavs: 4, ballistic: 0, cruise: 0, total_missiles: 0 },
+        expected: { uavs: 4, ballistic: 0, cruise: 0, totalMissiles: 0 },
       },
       {
         text: 'During the night of March 14, 4 Ukrainian unmanned aerial vehicles were shot down by Russian air defence.',
-        expected: { uavs: 4, ballistic: 0, cruise: 0, total_missiles: 0 },
+        expected: { uavs: 4, ballistic: 0, cruise: 0, totalMissiles: 0 },
       },
       {
         text: 'Russian air defence systems shot down 5 unmanned aerial vehicles, including 2 Bayraktar TB-2 and 1 Tochka-U tactical missile.',
-        expected: { uavs: 5, ballistic: 1, cruise: 0, total_missiles: 1 },
+        expected: { uavs: 5, ballistic: 1, cruise: 0, totalMissiles: 1 },
       },
     ];
 
@@ -119,7 +119,7 @@ describe('parseShotDownParagraph', () => {
       expect(res.uavs).toBe(expected.uavs);
       expect(res.ballistic).toBe(expected.ballistic);
       expect(res.cruise).toBe(expected.cruise);
-      expect(res.total_missiles).toBe(expected.total_missiles);
+      expect(res.totalMissiles).toBe(expected.totalMissiles);
     }
   });
 
@@ -134,7 +134,7 @@ describe('parseShotDownParagraph', () => {
     expect(resWithBullets.uavs).toBe(26);
     expect(resWithBullets.ballistic).toBe(14);
     expect(resWithBullets.cruise).toBe(6);
-    expect(resWithBullets.total_missiles).toBe(20);
+    expect(resWithBullets.totalMissiles).toBe(20);
 
     const textPlain =
       'Russian air defence shot down one Su-25 aircraft near Kherson.\n\n' +
@@ -146,7 +146,7 @@ describe('parseShotDownParagraph', () => {
     expect(resPlain.uavs).toBe(26);
     expect(resPlain.ballistic).toBe(14);
     expect(resPlain.cruise).toBe(6);
-    expect(resPlain.total_missiles).toBe(20);
+    expect(resPlain.totalMissiles).toBe(20);
   });
 
   it('rejects negative lookahead matches (ground depots, launchers, workshops)', () => {
@@ -164,7 +164,7 @@ describe('parseShotDownParagraph', () => {
       expect(res.uavs).toBe(0);
       expect(res.ballistic).toBe(expectedBallistic[idx]);
       expect(res.cruise).toBe(0);
-      expect(res.total_missiles).toBe(expectedBallistic[idx]);
+      expect(res.totalMissiles).toBe(expectedBallistic[idx]);
     }
   });
 });

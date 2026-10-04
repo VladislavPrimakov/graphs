@@ -5,9 +5,8 @@
     "moduleResolution": "bundler",
     "lib": ["ES2022"],
     "paths": {
-      "@/types/*": ["../types/*"],
-      "@/types": ["../types/index"],
-      "echarts": ["../site/node_modules/echarts"]
+      "@/types/*": ["../types/*", "../types/projects/*"],
+      "@/types": ["../types/index"]
     },
 
     "strict": true,

@@ -168,8 +168,8 @@ export interface ParsedShotDown {
   uavs: number;
   ballistic: number;
   cruise: number;
-  total_missiles: number;
-  matched_items: Array<{ category: string; count: number; text: string; span: [number, number] }>;
+  totalMissiles: number;
+  matchedItems: Array<{ category: string; count: number; text: string; span: [number, number] }>;
 }
 
 export function parseShotDownParagraph(text: string): ParsedShotDown {
@@ -182,8 +182,8 @@ export function parseShotDownParagraph(text: string): ParsedShotDown {
     uavs: 0,
     ballistic: 0,
     cruise: 0,
-    total_missiles: 0,
-    matched_items: [],
+    totalMissiles: 0,
+    matchedItems: [],
   };
 
   let inAdSection = false;
@@ -257,12 +257,12 @@ export function parseShotDownParagraph(text: string): ParsedShotDown {
         }
         occupiedSpans.push(span);
         results[match.category] += match.count;
-        results.matched_items.push(match);
+        results.matchedItems.push(match);
       }
     }
   }
 
-  results.total_missiles = results.ballistic + results.cruise;
+  results.totalMissiles = results.ballistic + results.cruise;
   return results;
 }
 
@@ -282,7 +282,7 @@ interface DailyInterceptionEntry {
   uavs: number;
   ballistic: number;
   cruise: number;
-  total_missiles: number;
+  totalMissiles: number;
   total: number;
   posts?: (string | number)[];
 }
@@ -555,7 +555,7 @@ export function processAndAuditData(cachedReports: Record<string, TelegramReport
 
     if (dailyByDate[dateKey]) {
       const existing = dailyByDate[dateKey];
-      for (const k of ['uavs', 'ballistic', 'cruise', 'total_missiles', 'total'] as const) {
+      for (const k of ['uavs', 'ballistic', 'cruise', 'totalMissiles', 'total'] as const) {
         existing[k] = Math.max(existing[k], entry[k]);
       }
       if (!existing.posts) {
@@ -575,21 +575,20 @@ export function processAndAuditData(cachedReports: Record<string, TelegramReport
   const dailyBallistic = sortedDates.map((d) => dailyByDate[d].ballistic);
   const dailyCruise = sortedDates.map((d) => dailyByDate[d].cruise);
   const dailyMissiles = dailyBallistic.map((b, i) => b + dailyCruise[i]);
-  const dailyTotals = dailyUavs.map((u, i) => u + dailyMissiles[i]);
 
-  const monthlyGroups: Record<string, { uavs: number; ballistic: number; cruise: number; total_missiles: number; days_count: number }> = {};
+  const monthlyGroups: Record<string, { uavs: number; ballistic: number; cruise: number; totalMissiles: number; daysCount: number }> = {};
   for (const d of sortedDates) {
     const mKey = d.slice(0, 7);
     if (!monthlyGroups[mKey]) {
-      monthlyGroups[mKey] = { uavs: 0, ballistic: 0, cruise: 0, total_missiles: 0, days_count: 0 };
+      monthlyGroups[mKey] = { uavs: 0, ballistic: 0, cruise: 0, totalMissiles: 0, daysCount: 0 };
     }
     const g = monthlyGroups[mKey];
     const item = dailyByDate[d];
     g.uavs += item.uavs;
     g.ballistic += item.ballistic;
     g.cruise += item.cruise;
-    g.total_missiles += item.total_missiles;
-    g.days_count += 1;
+    g.totalMissiles += item.totalMissiles;
+    g.daysCount += 1;
   }
 
   const sortedMonths = Object.keys(monthlyGroups).sort();
@@ -598,13 +597,10 @@ export function processAndAuditData(cachedReports: Record<string, TelegramReport
   const monthlyBallistic = sortedMonths.map((m) => monthlyGroups[m].ballistic);
   const monthlyCruise = sortedMonths.map((m) => monthlyGroups[m].cruise);
   const monthlyMissiles = monthlyBallistic.map((b, i) => b + monthlyCruise[i]);
-  const monthlyTotals = monthlyUavs.map((u, i) => u + monthlyMissiles[i]);
 
   const totalUavs = dailyUavs.reduce((a, b) => a + b, 0);
   const totalBallistic = dailyBallistic.reduce((a, b) => a + b, 0);
   const totalCruise = dailyCruise.reduce((a, b) => a + b, 0);
-  const totalMissiles = dailyMissiles.reduce((a, b) => a + b, 0);
-  const totalAll = dailyTotals.reduce((a, b) => a + b, 0);
   const numDays = sortedDates.length || 1;
   const numMonths = sortedMonths.length || 1;
 
@@ -616,7 +612,6 @@ export function processAndAuditData(cachedReports: Record<string, TelegramReport
   const maxDailyUavIdx = dailyUavs.length > 0 ? dailyUavs.indexOf(Math.max(...dailyUavs)) : 0;
   const uavDailyPeakCount = Math.max(0, ...dailyUavs);
   const uavDailyPeakDate = sortedDates[maxDailyUavIdx] ? `${sortedDates[maxDailyUavIdx].split('-')[2]}.${sortedDates[maxDailyUavIdx].split('-')[1]}.${sortedDates[maxDailyUavIdx].slice(2, 4)}` : '';
-  const uavSharePct = totalAll > 0 ? Math.round((totalUavs / totalAll) * 1000) / 10 : 0;
 
   const maxBalIdx = monthlyBallistic.length > 0 ? monthlyBallistic.indexOf(Math.max(...monthlyBallistic)) : 0;
   const balPeakCount = Math.max(0, ...monthlyBallistic);
@@ -626,7 +621,6 @@ export function processAndAuditData(cachedReports: Record<string, TelegramReport
   const maxDailyBalIdx = dailyBallistic.length > 0 ? dailyBallistic.indexOf(Math.max(...dailyBallistic)) : 0;
   const balDailyPeakCount = Math.max(0, ...dailyBallistic);
   const balDailyPeakDate = sortedDates[maxDailyBalIdx] ? `${sortedDates[maxDailyBalIdx].split('-')[2]}.${sortedDates[maxDailyBalIdx].split('-')[1]}.${sortedDates[maxDailyBalIdx].slice(2, 4)}` : '';
-  const balSharePct = totalMissiles > 0 ? Math.round((totalBallistic / totalMissiles) * 1000) / 10 : 0;
 
   const maxCruiseIdx = monthlyCruise.length > 0 ? monthlyCruise.indexOf(Math.max(...monthlyCruise)) : 0;
   const cruisePeakCount = Math.max(0, ...monthlyCruise);
@@ -638,67 +632,35 @@ export function processAndAuditData(cachedReports: Record<string, TelegramReport
   const cruiseDailyPeakDate = sortedDates[maxDailyCruiseIdx]
     ? `${sortedDates[maxDailyCruiseIdx].split('-')[2]}.${sortedDates[maxDailyCruiseIdx].split('-')[1]}.${sortedDates[maxDailyCruiseIdx].slice(2, 4)}`
     : '';
-  const cruiseSharePct = totalMissiles > 0 ? Math.round((totalCruise / totalMissiles) * 1000) / 10 : 0;
-
-  const maxDailyMissilesIdx = dailyMissiles.length > 0 ? dailyMissiles.indexOf(Math.max(...dailyMissiles)) : 0;
 
   return {
-    filter_start_date: WAR_START_DATE,
-    days_covered: numDays,
-    months_covered: numMonths,
-    audit: {
-      total_items_found: totalAll,
-      classified_items: totalAll,
-      coverage_pct: 100.0,
-      unclassified_count: 0,
-      unclassified_items: [],
-    },
     summary: {
-      total_intercepted: totalAll,
-      total_uavs: totalUavs,
-      total_ballistic: totalBallistic,
-      total_cruise: totalCruise,
-      total_missiles: totalMissiles,
       uavs: {
         total: totalUavs,
-        monthly_avg: uavMonthlyAvg,
-        peak_count: uavPeakCount,
-        peak_period: uavPeakPeriod,
-        daily_avg: uavDailyAvg,
-        daily_peak_count: uavDailyPeakCount,
-        daily_peak_date: uavDailyPeakDate,
-        share_pct: uavSharePct,
+        monthlyAvg: uavMonthlyAvg,
+        peakCount: uavPeakCount,
+        peakPeriod: uavPeakPeriod,
+        dailyAvg: uavDailyAvg,
+        dailyPeakCount: uavDailyPeakCount,
+        dailyPeakDate: uavDailyPeakDate,
       },
       ballistic: {
         total: totalBallistic,
-        monthly_avg: balMonthlyAvg,
-        peak_count: balPeakCount,
-        peak_period: balPeakPeriod,
-        daily_avg: balDailyAvg,
-        daily_peak_count: balDailyPeakCount,
-        daily_peak_date: balDailyPeakDate,
-        share_pct: balSharePct,
+        monthlyAvg: balMonthlyAvg,
+        peakCount: balPeakCount,
+        peakPeriod: balPeakPeriod,
+        dailyAvg: balDailyAvg,
+        dailyPeakCount: balDailyPeakCount,
+        dailyPeakDate: balDailyPeakDate,
       },
       cruise: {
         total: totalCruise,
-        monthly_avg: cruiseMonthlyAvg,
-        peak_count: cruisePeakCount,
-        peak_period: cruisePeakPeriod,
-        daily_avg: cruiseDailyAvg,
-        daily_peak_count: cruiseDailyPeakCount,
-        daily_peak_date: cruiseDailyPeakDate,
-        share_pct: cruiseSharePct,
-      },
-      daily_avg_intercepts: Math.round((totalAll / numDays) * 10) / 10,
-      daily_avg_uavs: Math.round((totalUavs / numDays) * 10) / 10,
-      daily_avg_missiles: Math.round((totalMissiles / numDays) * 10) / 10,
-      peak_daily_uavs: {
-        count: uavDailyPeakCount,
-        date: sortedDates[maxDailyUavIdx] || '',
-      },
-      peak_daily_missiles: {
-        count: Math.max(0, ...dailyMissiles),
-        date: sortedDates[maxDailyMissilesIdx] || '',
+        monthlyAvg: cruiseMonthlyAvg,
+        peakCount: cruisePeakCount,
+        peakPeriod: cruisePeakPeriod,
+        dailyAvg: cruiseDailyAvg,
+        dailyPeakCount: cruiseDailyPeakCount,
+        dailyPeakDate: cruiseDailyPeakDate,
       },
     },
     daily: {
@@ -707,8 +669,7 @@ export function processAndAuditData(cachedReports: Record<string, TelegramReport
       uavs: dailyUavs,
       ballistic: dailyBallistic,
       cruise: dailyCruise,
-      total_missiles: dailyMissiles,
-      total: dailyTotals,
+      totalMissiles: dailyMissiles,
     },
     monthly: {
       periods: sortedMonths,
@@ -716,8 +677,7 @@ export function processAndAuditData(cachedReports: Record<string, TelegramReport
       uavs: monthlyUavs,
       ballistic: monthlyBallistic,
       cruise: monthlyCruise,
-      total_missiles: monthlyMissiles,
-      total: monthlyTotals,
+      totalMissiles: monthlyMissiles,
     },
   };
 }

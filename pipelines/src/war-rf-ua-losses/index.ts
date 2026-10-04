@@ -1,8 +1,18 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  type LossCategoryDetailData,
+  type LossCategoryItem,
+  type LossEquipmentModel,
+  type LossMapPoint,
+  type LossTimelineBreakdownItem,
+  WAR_LOSS_CATEGORIES,
+  type WarLossCategory,
+  type WarLossesDataset,
+  type WarLossMapDataset,
+} from '@graphs/types';
 import { XMLParser } from 'fast-xml-parser';
-import type { LossCategoryDataPoint, LossCategoryDetailData, LossCategoryItem, LossEquipmentModel, LossTimelineBreakdownItem, LossTimelineDataPoint, WarLossesDataset } from '@/types';
 import { ensureDir, fileExists, readJson, writeJson } from '../utils/fs.js';
 import { fetchWithRetry } from '../utils/http.js';
 import { getLogger, runWithLogger } from '../utils/logger.js';
@@ -19,28 +29,19 @@ const OUTPUT_FILE = path.resolve(__dirname, '../../../site/src/data/war-rf-ua-lo
 
 const GOOGLE_MAPS_KML_URL = 'https://www.google.com/maps/d/kml?mid=1dRn8TRMDLRkaaIBJad0YZvTt3dmiuxo&forcekml=1';
 
-const CATEGORY_TRANSLATIONS: Record<string, { id: string; en: string; ru: string }> = {
-  самолёты: { id: 'aircraft', en: 'Aircraft', ru: 'Самолёты' },
-  вертолеты: { id: 'helicopters', en: 'Helicopters', ru: 'Вертолёты' },
-  танки: { id: 'tanks', en: 'Tanks', ru: 'Танки' },
-  бронетехника: { id: 'armored', en: 'Armored Vehicles', ru: 'Бронетехника' },
-  артиллерия: { id: 'artillery', en: 'Artillery', ru: 'Артиллерия' },
-  рсзо: { id: 'mlrs', en: 'MLRS', ru: 'РСЗО' },
-  пво: { id: 'air_defense', en: 'Air Defense', ru: 'ПВО' },
-  автотранспорт: { id: 'vehicles', en: 'Support Vehicles', ru: 'Автотранспорт' },
-};
-
-interface ClassificationRules {
-  plot?: Record<string, Record<string, string[]>>;
-  unplot?: Record<string, Record<string, string[]>>;
-}
+type ClassificationRules = Record<string, Record<string, string[]>>;
 
 interface ParsedRecord {
   name: string;
-  type: string;
-  side: 'РФ' | 'Украина' | 'Неизвестно';
+  category: WarLossCategory;
+  side: 'RF' | 'UA' | 'UNK';
   period: string | null;
   hasDate: boolean;
+  rawDate: string;
+  lng?: number;
+  lat?: number;
+  posts: number[];
+  sources: string[];
 }
 
 /** Downloads latest KML map data from Google My Maps into cache. */
@@ -74,45 +75,184 @@ function cleanName(name: string): string {
   return n.trim();
 }
 
-/** Pre-builds an inverted hash map from raw name to (eqType, canonName). */
-function buildClassificationLookup(rules: ClassificationRules): Map<string, [string, string]> {
-  const lookup = new Map<string, [string, string]>();
-  for (const [eqType, groups] of Object.entries(rules.plot || {})) {
-    for (const [canon, raws] of Object.entries(groups)) {
+/** Pre-builds an inverted hash map from raw name to category and canonical English model. */
+function buildClassificationLookup(rules: ClassificationRules): Map<string, { category: WarLossCategory; modelEn: string }> {
+  const lookup = new Map<string, { category: WarLossCategory; modelEn: string }>();
+  for (const [category, models] of Object.entries(rules)) {
+    for (const [modelEn, raws] of Object.entries(models)) {
       for (const raw of raws) {
-        lookup.set(raw, [eqType, canon]);
-      }
-    }
-  }
-  for (const [, groups] of Object.entries(rules.unplot || {})) {
-    for (const [canon, raws] of Object.entries(groups)) {
-      for (const raw of raws) {
-        lookup.set(raw, ['Unplot', canon]);
+        lookup.set(raw.toLowerCase().trim(), { category: category as WarLossCategory, modelEn });
       }
     }
   }
   return lookup;
 }
 
-/** Parses dates formatted as DD.MM.YYYY or MM.YYYY into YYYY-MM. */
-function parseDate(dateStr?: string): string | null {
-  if (!dateStr) return null;
-  const s = dateStr.trim();
-  const m1 = s.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+const TODAY_ISO = new Date().toISOString().slice(0, 10);
+const CURRENT_PERIOD = TODAY_ISO.slice(0, 7);
+
+const RU_MONTHS: Record<string, string> = {
+  январ: '01',
+  феврал: '02',
+  март: '03',
+  апрел: '04',
+  май: '05',
+  мая: '05',
+  июн: '06',
+  июл: '07',
+  август: '08',
+  сентябр: '09',
+  октябр: '10',
+  ноябр: '11',
+  декабр: '12',
+};
+
+const SEASONS: Record<string, string> = {
+  зим: '01',
+  весн: '04',
+  лет: '07',
+  осен: '10',
+};
+
+/** Parses dates formatted as DD.MM.YYYY, DD.MM.YY, MM.YYYY, MM.YY, seasons, slash dates, or month names into YYYY-MM and formatted string. */
+function parseDate(dateStr?: string): { period: string | null; formatted: string } {
+  if (!dateStr) return { period: null, formatted: '' };
+  let s = dateStr.trim();
+
+  // Normalize volunteer punctuation typos (commas, semicolons, duplicate dots, leading dots, spaces)
+  s = s
+    .replace(/^[.\s]+/, '')
+    .replace(/[,;]/g, '.')
+    .replace(/\.{2,}/g, '.');
+  s = s.replace(/^(\d{1,2})\s+(\d{1,2})\.(\d{2,4})/, '$1.$2.$3');
+  s = s.replace(/^(\d{1,2})\.(\d{1,2})\s+(\d{2,4})/, '$1.$2.$3');
+  s = s.replace(/^(\d{1,2})-\d{1,2}\./, '$1.');
+
+  // Match DD.MM.YYYY or DD/MM/YYYY (with optional trailing text)
+  const m1 = s.match(/^(\d{1,2})[./](\d{1,2})[./](\d{4})(?:\b|$)/);
   if (m1) {
-    const [, , month, year] = m1;
-    return `${year}-${month}`;
+    const [, day, month, year] = m1;
+    const yNum = Number(year);
+    const mNum = Number(month);
+    const dNum = Number(day);
+    if (yNum >= 2022 && mNum >= 1 && mNum <= 12 && dNum >= 1 && dNum <= 31) {
+      const mm = month.padStart(2, '0');
+      const dd = day.padStart(2, '0');
+      const formatted = `${year}-${mm}-${dd}`;
+      if (formatted <= TODAY_ISO) {
+        return { period: `${year}-${mm}`, formatted };
+      }
+    }
   }
-  const m2 = s.match(/^(\d{2})\.(\d{4})$/);
+
+  // Match DD.MM.YY or DD/MM/YY (with optional trailing text)
+  const m2 = s.match(/^(\d{1,2})[./](\d{1,2})[./](\d{2})(?:\b|$)/);
   if (m2) {
-    const [, month, year] = m2;
-    return `${year}-${month}`;
+    const [, day, month, yy] = m2;
+    const year = Number(yy) > 50 ? `19${yy}` : `20${yy}`;
+    const yNum = Number(year);
+    const mNum = Number(month);
+    const dNum = Number(day);
+    if (yNum >= 2022 && mNum >= 1 && mNum <= 12 && dNum >= 1 && dNum <= 31) {
+      const mm = month.padStart(2, '0');
+      const dd = day.padStart(2, '0');
+      const formatted = `${year}-${mm}-${dd}`;
+      if (formatted <= TODAY_ISO) {
+        return { period: `${year}-${mm}`, formatted };
+      }
+    }
   }
-  return null;
+
+  // Match MM.YYYY or MM/YYYY
+  const m3 = s.match(/^(\d{1,2})[./](\d{4})(?:\b|$)/);
+  if (m3) {
+    const [, month, year] = m3;
+    const yNum = Number(year);
+    const mNum = Number(month);
+    if (yNum >= 2022 && mNum >= 1 && mNum <= 12) {
+      const mm = month.padStart(2, '0');
+      const period = `${year}-${mm}`;
+      if (period <= CURRENT_PERIOD) {
+        return { period, formatted: period };
+      }
+    }
+  }
+
+  // Match MM.YY or MM/YY (e.g. 03.22, 05.23)
+  const m4 = s.match(/^(\d{1,2})[./](\d{2})(?:\b|$)/);
+  if (m4) {
+    const [, month, yy] = m4;
+    const year = Number(yy) > 50 ? `19${yy}` : `20${yy}`;
+    const yNum = Number(year);
+    const mNum = Number(month);
+    if (yNum >= 2022 && mNum >= 1 && mNum <= 12) {
+      const mm = month.padStart(2, '0');
+      const period = `${year}-${mm}`;
+      if (period <= CURRENT_PERIOD) {
+        return { period, formatted: period };
+      }
+    }
+  }
+
+  const lower = s.toLowerCase();
+
+  // Match Seasons to centroid month (e.g. "Весна 2022", "Осень 2024", "Зима-Весна 2023", "лето 2023", "Весна (Лето) 2023")
+  for (const [prefix, mm] of Object.entries(SEASONS)) {
+    if (lower.includes(prefix)) {
+      const ym = lower.match(/\b(20\d{2})\b/);
+      if (ym) {
+        const year = ym[1];
+        const period = `${year}-${mm}`;
+        if (Number(year) >= 2022 && period <= CURRENT_PERIOD) {
+          return { period, formatted: period };
+        }
+      }
+    }
+  }
+
+  // Match Russian textual months or month ranges (e.g. "Январь 2024", "Февраль-Март 2022", "Март (Апрель) 2022")
+  let firstMonthPos = -1;
+  let firstMonthCode = '';
+  for (const [prefix, mm] of Object.entries(RU_MONTHS)) {
+    const pos = lower.indexOf(prefix);
+    if (pos !== -1 && (firstMonthPos === -1 || pos < firstMonthPos)) {
+      firstMonthPos = pos;
+      firstMonthCode = mm;
+    }
+  }
+
+  if (firstMonthCode) {
+    const ym = lower.match(/\b(20\d{2})\b/);
+    if (ym) {
+      const year = ym[1];
+      const period = `${year}-${firstMonthCode}`;
+      if (Number(year) >= 2022 && period <= CURRENT_PERIOD) {
+        return { period, formatted: period };
+      }
+    }
+  }
+
+  return { period: null, formatted: '' };
+}
+
+interface ParseKmlResult {
+  records: ParsedRecord[];
+  totalPlacemarks: number;
+  unclassifiedSideUnk: number;
+  unclassifiedNames: Map<string, number>;
+}
+
+/** Safely extracts text value from fast-xml-parser node or object. */
+function extractXmlValue(val: unknown): string {
+  if (!val) return '';
+  if (typeof val === 'object' && val !== null && '#text' in val) {
+    return String((val as Record<string, unknown>)['#text'] || '');
+  }
+  return String(val);
 }
 
 /** Parses 35MB KML map dataset using high-performance streaming fast-xml-parser. */
-async function parseKml(filePath: string, rules: ClassificationRules): Promise<{ records: ParsedRecord[]; unclassified: string[] }> {
+async function parseKml(filePath: string, rules: ClassificationRules): Promise<ParseKmlResult> {
   const logger = getLogger();
   logger.debug('Parsing KML file...');
   const xmlContent = await fs.readFile(filePath, 'utf-8');
@@ -127,7 +267,9 @@ async function parseKml(filePath: string, rules: ClassificationRules): Promise<{
   const lookup = buildClassificationLookup(rules);
 
   const records: ParsedRecord[] = [];
-  const unclassified: string[] = [];
+  let totalPlacemarks = 0;
+  let unclassifiedSideUnk = 0;
+  const unclassifiedNames = new Map<string, number>();
 
   // Traverse KML Folder hierarchy
   function collectFolders(node: unknown): Record<string, unknown>[] {
@@ -158,61 +300,124 @@ async function parseKml(filePath: string, rules: ClassificationRules): Promise<{
 
   for (const folder of allFolders) {
     const folderName = String(folder.name || '').toLowerCase();
-    let side: 'РФ' | 'Украина' | 'Неизвестно' = 'РФ';
+    let side: 'RF' | 'UA' | 'UNK' = 'RF';
     if (folderName.includes('всу')) {
-      side = 'Украина';
+      side = 'UA';
     } else if (folderName.includes('неопознанное')) {
-      side = 'Неизвестно';
+      side = 'UNK';
     }
 
     const placemarks = folder.Placemark ? (Array.isArray(folder.Placemark) ? folder.Placemark : [folder.Placemark]) : [];
 
     for (const pm of placemarks) {
+      totalPlacemarks++;
       const pmNameRaw = String(pm.name || 'Без названия');
-      const pmClean = cleanName(pmNameRaw);
-      const match = lookup.get(pmClean);
-      const eqType = match ? match[0] : 'Другое';
-      const canonName = match ? match[1] : pmClean;
+      let pmClean = cleanName(pmNameRaw);
+      let match = lookup.get(pmClean);
 
-      if (eqType === 'Unplot') continue;
-      if (eqType === 'Другое') {
-        if (side !== 'Неизвестно') {
-          unclassified.push(pmClean);
+      // Check Назва for UNK placemarks without explicit model name in title
+      if (!match && side === 'UNK' && pm.ExtendedData?.Data) {
+        const dataList = (Array.isArray(pm.ExtendedData.Data) ? pm.ExtendedData.Data : [pm.ExtendedData.Data]) as Record<string, unknown>[];
+        const nazvaItem = dataList.find((d) => d['@_name'] === 'Назва');
+        if (nazvaItem) {
+          const v = extractXmlValue(nazvaItem.value);
+          if (v && !v.startsWith('http')) {
+            const nazvaClean = cleanName(v);
+            const nazvaMatch = lookup.get(nazvaClean);
+            if (nazvaMatch) {
+              pmClean = nazvaClean;
+              match = nazvaMatch;
+            }
+          }
+        }
+      }
+
+      if (!match) {
+        if (side === 'UNK') {
+          unclassifiedSideUnk++;
+        } else {
+          unclassifiedNames.set(pmClean, (unclassifiedNames.get(pmClean) || 0) + 1);
         }
         continue;
       }
 
       let dateVal: string | undefined;
+      const allTexts: string[] = [String(pm.description || '')];
       const extData = pm.ExtendedData;
       if (extData?.Data) {
-        const dataList = Array.isArray(extData.Data) ? extData.Data : [extData.Data];
+        const dataList = (Array.isArray(extData.Data) ? extData.Data : [extData.Data]) as Record<string, unknown>[];
         for (const d of dataList) {
           if (d['@_name'] === 'дата') {
-            dateVal = typeof d.value === 'object' ? String(d.value['#text'] || '') : String(d.value || '');
-            break;
+            dateVal = extractXmlValue(d.value);
+          }
+          const v = extractXmlValue(d.value);
+          if (v) allTexts.push(v);
+        }
+      }
+
+      const { period, formatted: rawDate } = parseDate(dateVal);
+
+      // Extract all external HTTP(S) links across description, Назва, опис, описание
+      const extUrls = new Set<string>();
+      for (const text of allTexts) {
+        const matches = text.match(/https?:\/\/[^\s<"'>]+/g) || [];
+        for (const m of matches) {
+          if (!m.includes('google.com') && !m.includes('usercontent')) {
+            extUrls.add(m);
           }
         }
       }
 
-      const monthStr = parseDate(dateVal);
+      const posts: number[] = [];
+      const sources: string[] = [];
+      for (const url of extUrls) {
+        const m = url.match(/lost_warinua\/(\d+)/);
+        if (m) {
+          const num = Number.parseInt(m[1], 10);
+          if (num > 0 && !posts.includes(num)) {
+            posts.push(num);
+          }
+        } else {
+          if (!sources.includes(url)) {
+            sources.push(url);
+          }
+        }
+      }
+
+      let lng: number | undefined;
+      let lat: number | undefined;
+      if (pm.Point?.coordinates) {
+        const coords = String(pm.Point.coordinates).trim().split(',');
+        const parsedLng = Number(Number(coords[0]).toFixed(4));
+        const parsedLat = Number(Number(coords[1]).toFixed(4));
+        if (!Number.isNaN(parsedLng) && !Number.isNaN(parsedLat)) {
+          lng = parsedLng;
+          lat = parsedLat;
+        }
+      }
+
       records.push({
-        name: canonName,
-        type: eqType,
+        name: match.modelEn,
+        category: match.category,
         side,
-        period: monthStr,
-        hasDate: monthStr != null,
+        period,
+        hasDate: period != null,
+        rawDate,
+        lng,
+        lat,
+        posts,
+        sources,
       });
     }
   }
 
-  return { records, unclassified };
+  return { records, totalPlacemarks, unclassifiedSideUnk, unclassifiedNames };
 }
 
 /** Aggregates statistics, timeline pivots, and model breakdowns into WarLossesDataset. */
-function aggregateLossesData(records: ParsedRecord[], rules: ClassificationRules): WarLossesDataset {
+function aggregateLossesData(records: ParsedRecord[], totalPlacemarks: number): WarLossesDataset {
   const logger = getLogger();
   logger.debug('Aggregating statistics for JSON export...');
-  const types = Object.keys(rules.plot || {});
 
   const datedRecords = records.filter((r) => r.hasDate && r.period != null);
   const periodsSet = new Set<string>();
@@ -223,54 +428,47 @@ function aggregateLossesData(records: ParsedRecord[], rules: ClassificationRules
 
   let totalRf = 0;
   let totalUa = 0;
-  let totalUnk = 0;
 
   for (const r of records) {
-    if (r.side === 'РФ') totalRf++;
-    else if (r.side === 'Украина') totalUa++;
-    else totalUnk++;
+    if (r.side === 'RF') totalRf++;
+    else if (r.side === 'UA') totalUa++;
   }
 
   const categorySummary: LossCategoryItem[] = [];
-  const byCategory: Record<string, LossCategoryDetailData & { timeline: { rf: number[]; ua: number[]; unknown: number[] } }> = {};
+  const categoryTimelines: Partial<Record<WarLossCategory, { rf: number[]; ua: number[] }>> = {};
+  const byCategory = {} as Record<WarLossCategory, LossCategoryDetailData>;
 
-  for (const eqType of types) {
-    const catRecords = records.filter((r) => r.type === eqType);
+  for (const catId of WAR_LOSS_CATEGORIES) {
+    const catRecords = records.filter((r) => r.category === catId);
     let catRf = 0;
     let catUa = 0;
 
     for (const r of catRecords) {
-      if (r.side === 'РФ') catRf++;
-      else if (r.side === 'Украина') catUa++;
+      if (r.side === 'RF') catRf++;
+      else if (r.side === 'UA') catUa++;
     }
 
-    const trans = CATEGORY_TRANSLATIONS[eqType] || { id: eqType, en: eqType, ru: eqType };
-
     categorySummary.push({
-      id: trans.id,
-      label_en: trans.en,
-      label_ru: trans.ru,
+      id: catId,
       rf: catRf,
       ua: catUa,
-      ratio: catUa > 0 ? String(Math.round((catRf / catUa) * 100) / 100) : undefined,
+      ratio: catUa > 0 ? Math.round((catRf / catUa) * 100) / 100 : undefined,
     });
 
     // Monthly timelines
     const rfTimeline = new Array(allPeriods.length).fill(0);
     const uaTimeline = new Array(allPeriods.length).fill(0);
-    const unkTimeline = new Array(allPeriods.length).fill(0);
 
     const catDated = catRecords.filter((r) => r.hasDate && r.period != null);
     for (const r of catDated) {
       const idx = allPeriods.indexOf(r.period!);
       if (idx !== -1) {
-        if (r.side === 'РФ') rfTimeline[idx]++;
-        else if (r.side === 'Украина') uaTimeline[idx]++;
-        else unkTimeline[idx]++;
+        if (r.side === 'RF') rfTimeline[idx]++;
+        else if (r.side === 'UA') uaTimeline[idx]++;
       }
     }
 
-    function getTopModels(side: 'РФ' | 'Украина' | 'Неизвестно', limit?: number): LossEquipmentModel[] {
+    function getTopModels(side: 'RF' | 'UA', limit?: number): LossEquipmentModel[] {
       const counts = new Map<string, number>();
       for (const r of catRecords) {
         if (r.side === side) {
@@ -284,15 +482,14 @@ function aggregateLossesData(records: ParsedRecord[], rules: ClassificationRules
       return sorted;
     }
 
-    byCategory[trans.id] = {
-      timeline: {
-        rf: rfTimeline,
-        ua: uaTimeline,
-        unknown: unkTimeline,
-      },
+    categoryTimelines[catId] = {
+      rf: rfTimeline,
+      ua: uaTimeline,
+    };
+    byCategory[catId] = {
       models: {
-        rf: getTopModels('РФ'),
-        ua: getTopModels('Украина'),
+        rf: getTopModels('RF'),
+        ua: getTopModels('UA'),
       },
     };
   }
@@ -304,73 +501,75 @@ function aggregateLossesData(records: ParsedRecord[], rules: ClassificationRules
   for (const r of datedRecords) {
     const idx = allPeriods.indexOf(r.period!);
     if (idx !== -1) {
-      if (r.side === 'РФ') overallRf[idx]++;
-      else if (r.side === 'Украина') overallUa[idx]++;
+      if (r.side === 'RF') overallRf[idx]++;
+      else if (r.side === 'UA') overallUa[idx]++;
     }
   }
 
-  const timelineRfSeries: LossTimelineDataPoint[] = [];
-  const timelineUaSeries: LossTimelineDataPoint[] = [];
+  const breakdowns: LossTimelineBreakdownItem[][] = [];
 
   for (let idx = 0; idx < allPeriods.length; idx++) {
-    const rfVal = overallRf[idx];
-    const uaVal = overallUa[idx];
-
     const breakdown: LossTimelineBreakdownItem[] = categorySummary.map((c) => ({
-      name: c.label_en,
-      rf: byCategory[c.id]?.timeline.rf[idx] || 0,
-      ua: byCategory[c.id]?.timeline.ua[idx] || 0,
+      category: c.id,
+      rf: categoryTimelines[c.id]?.rf[idx] || 0,
+      ua: categoryTimelines[c.id]?.ua[idx] || 0,
     }));
     breakdown.sort((a, b) => b.rf + b.ua - (a.rf + a.ua));
-
-    timelineRfSeries.push({
-      value: rfVal,
-      rf: rfVal,
-      ua: uaVal,
-      breakdown,
-    });
-    timelineUaSeries.push({
-      value: uaVal,
-      rf: rfVal,
-      ua: uaVal,
-      breakdown,
-    });
+    breakdowns.push(breakdown);
   }
 
-  const rfCategoryPoints: LossCategoryDataPoint[] = categorySummary.map((c) => ({
-    value: c.rf,
-    label_en: c.label_en,
-    label_ru: c.label_ru,
-    ratio: c.ratio,
-  }));
+  // Build compact map dataset
+  const modelsList: string[] = [];
+  const modelIdxMap = new Map<string, number>();
+  const mapPoints: LossMapPoint[] = [];
 
-  const uaCategoryPoints: LossCategoryDataPoint[] = categorySummary.map((c) => ({
-    value: c.ua,
-    label_en: c.label_en,
-    label_ru: c.label_ru,
-    ratio: c.ratio,
-  }));
+  for (const r of records) {
+    if (r.lng == null || r.lat == null) continue;
+    let mIdx = modelIdxMap.get(r.name);
+    if (mIdx === undefined) {
+      mIdx = modelsList.length;
+      modelsList.push(r.name);
+      modelIdxMap.set(r.name, mIdx);
+    }
+    const sideIdx = r.side === 'RF' ? 0 : r.side === 'UA' ? 1 : 2;
+    const catIdx = WAR_LOSS_CATEGORIES.indexOf(r.category);
+    const pt: LossMapPoint = [r.lng, r.lat, sideIdx, catIdx, mIdx, r.rawDate, r.posts];
+    if (r.sources.length > 0) {
+      pt.push(r.sources);
+    }
+    mapPoints.push(pt);
+  }
+
+  const mapDataset: WarLossMapDataset = {
+    categories: [...WAR_LOSS_CATEGORIES],
+    models: modelsList,
+    sides: ['RF', 'UA', 'UNK'],
+    points: mapPoints,
+  };
 
   const dataset: WarLossesDataset = {
     summary: {
-      total_records: records.length,
-      total_rf: totalRf,
-      total_ua: totalUa,
-      total_unknown: totalUnk,
-      overall_ratio: totalUa > 0 ? String(Math.round((totalRf / totalUa) * 100) / 100) : '0',
+      totalRecords: records.length,
+      unclassifiedRecords: Math.max(0, totalPlacemarks - records.length),
+      totalRf,
+      totalUa,
+      overallRatio: totalUa > 0 ? Math.round((totalRf / totalUa) * 100) / 100 : 0,
       categories: categorySummary,
     },
-    category_chart: {
-      labels: categorySummary.map((c) => c.label_en),
-      rf_series: rfCategoryPoints,
-      ua_series: uaCategoryPoints,
+    categoryChart: {
+      categories: categorySummary.map((c) => c.id),
+      rf: categorySummary.map((c) => c.rf),
+      ua: categorySummary.map((c) => c.ua),
+      ratios: categorySummary.map((c) => c.ratio ?? 0),
     },
     periods: allPeriods,
-    overall_timeline: {
-      rf_series: timelineRfSeries,
-      ua_series: timelineUaSeries,
+    overallTimeline: {
+      rf: overallRf,
+      ua: overallUa,
+      breakdowns,
     },
-    by_category: byCategory,
+    byCategory,
+    map: mapDataset,
   };
 
   return dataset;
@@ -386,12 +585,33 @@ export async function runWarLossesPipeline(verbose?: boolean): Promise<WarLosses
 
       await downloadKml(KML_FILE);
       const rules = await readJson<ClassificationRules>(CLASSIFICATION_FILE);
-      const { records } = await parseKml(KML_FILE, rules);
-      const dataset = aggregateLossesData(records, rules);
+      const { records, totalPlacemarks, unclassifiedSideUnk, unclassifiedNames } = await parseKml(KML_FILE, rules);
+      const dataset = aggregateLossesData(records, totalPlacemarks);
 
+      await ensureDir(OUTPUT_FILE);
       await writeJson(OUTPUT_FILE, dataset, 0);
+
       await updateMetadata('war-rf-ua-losses');
-      logger.success(`Exported war-losses dataset (${records.length.toLocaleString()} verified losses, ${dataset.periods.length} months)`);
+
+      const classifiedCount = records.length;
+      const unclassifiedCount = totalPlacemarks - classifiedCount;
+      const classifiedPct = ((classifiedCount / totalPlacemarks) * 100).toFixed(2);
+      const namelessCount = unclassifiedNames.get('без названия') || 0;
+      const otherUnclassified = [...unclassifiedNames.entries()].filter(([name]) => name !== 'без названия' && name !== '').sort((a, b) => b[1] - a[1]);
+      const otherCount = otherUnclassified.reduce((sum, [, count]) => sum + count, 0);
+
+      logger.info(
+        `Classification: ${classifiedCount.toLocaleString()} / ${totalPlacemarks.toLocaleString()} (${classifiedPct}%) classified | ${unclassifiedCount} skipped (${unclassifiedSideUnk} unknown attribution, ${namelessCount} nameless pins, ${otherCount} excluded/markers)`,
+      );
+      if (otherUnclassified.length > 0) {
+        const topSkipped = otherUnclassified
+          .slice(0, 6)
+          .map(([name, count]) => `"${name}" (${count})`)
+          .join(', ');
+        logger.debug(`Skipped items: ${topSkipped}`);
+      }
+
+      logger.success(`Exported war-losses dataset (${classifiedCount.toLocaleString()} verified losses, ${dataset.map.points.length.toLocaleString()} map points, ${dataset.periods.length} months)`);
       return dataset;
     },
     verbose,

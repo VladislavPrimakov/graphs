@@ -1,0 +1,58 @@
+/* -------------------------------------------------------------------------- */
+/* MapLibre Dark Glassmorphic Popup (matching ECharts chart tooltips)         */
+/* -------------------------------------------------------------------------- */
+
+.maplibregl-map .maplibregl-popup {
+  max-width: 400px;
+}
+
+.maplibregl-map .maplibregl-popup-content {
+  background: rgba(15, 23, 42, 0.95);
+  backdrop-filter: blur(8px);
+  border: 1px solid #334155;
+  border-radius: 12px;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.6);
+  padding: 10px 14px;
+  color: #f8fafc;
+  font-family: inherit;
+  box-sizing: border-box;
+  width: max-content;
+  min-width: 220px;
+  max-width: 380px;
+}
+
+.maplibregl-map .maplibregl-popup-anchor-top .maplibregl-popup-tip,
+.maplibregl-map .maplibregl-popup-anchor-top-left .maplibregl-popup-tip,
+.maplibregl-map .maplibregl-popup-anchor-top-right .maplibregl-popup-tip {
+  border-bottom-color: rgba(15, 23, 42, 0.95);
+}
+
+.maplibregl-map .maplibregl-popup-anchor-bottom .maplibregl-popup-tip,
+.maplibregl-map .maplibregl-popup-anchor-bottom-left .maplibregl-popup-tip,
+.maplibregl-map .maplibregl-popup-anchor-bottom-right .maplibregl-popup-tip {
+  border-top-color: rgba(15, 23, 42, 0.95);
+}
+
+.maplibregl-map .maplibregl-popup-anchor-left .maplibregl-popup-tip {
+  border-right-color: rgba(15, 23, 42, 0.95);
+}
+
+.maplibregl-map .maplibregl-popup-anchor-right .maplibregl-popup-tip {
+  border-left-color: rgba(15, 23, 42, 0.95);
+}
+
+.maplibregl-map .maplibregl-popup-close-button {
+  color: #94a3b8;
+  font-size: 16px;
+  line-height: 1;
+  padding: 6px 8px;
+  border-radius: 0 12px 0 6px;
+  transition:
+    color 0.15s ease,
+    background-color 0.15s ease;
+}
+
+.maplibregl-map .maplibregl-popup-close-button:hover {
+  color: #38bdf8;
+  background-color: rgba(255, 255, 255, 0.08);
+}

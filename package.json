@@ -1,22 +1,26 @@
 {
   "name": "graphs",
-  "version": "1.0.0",
   "private": true,
+  "license": "AGPL-3.0-or-later",
   "type": "module",
   "workspaces": [
     "site",
-    "pipelines"
+    "pipelines",
+    "types"
   ],
   "scripts": {
     "dev": "bun --filter @graphs/site dev",
-    "build": "bun run pipelines && bun run site",
-    "pipelines": "bun --filter @graphs/pipelines build",
-    "site": "bun --filter @graphs/site build",
-    "test": "bun --filter @graphs/pipelines test"
+    "build": "bun run build:pipeline && bun run build:site",
+    "build:pipeline": "bun --filter @graphs/pipelines --silent build",
+    "build:site": "bun --filter @graphs/site build",
+    "preview": "bun --filter @graphs/site preview",
+    "test": "bun --filter @graphs/pipelines test",
+    "check:knip": "knip"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",
     "@types/bun": "^1.2.0",
+    "knip": "^6.39.0",
     "typescript": "^5.9.3"
   }
 }
