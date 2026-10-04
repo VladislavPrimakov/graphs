@@ -1,13 +1,14 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { ProjectSlug } from '@/types';
+import { runAiTokensPipeline } from './ai-tokens/index';
 import { runSpaceLaunchesPipeline } from './space-launches/index';
-import { runUaEconomicPipeline } from './ua-economic/index';
+import { runUkrainePipeline } from './ukraine/index';
 import { fileExists, readJson } from './utils/fs';
 import { getLogger, isVerbose } from './utils/logger';
 import { runWarAttacksPipeline } from './war-rf-ua-attacks/index';
 import { runWarLossesPipeline } from './war-rf-ua-losses/index';
-import { runWorldEconomicPipeline } from './world-economic/index';
+import { runWorldPipeline } from './world/index';
 
 try {
   process.loadEnvFile?.();
@@ -25,12 +26,16 @@ interface PipelineTask {
 
 const PIPELINES: PipelineTask[] = [
   {
-    name: 'ua-economic',
-    run: ({ update, verbose }) => runUaEconomicPipeline(update, verbose),
+    name: 'ai-tokens',
+    run: ({ update, verbose }) => runAiTokensPipeline(update, verbose),
   },
   {
-    name: 'world-economic',
-    run: ({ update, verbose }) => runWorldEconomicPipeline(update, verbose),
+    name: 'ukraine',
+    run: ({ update, verbose }) => runUkrainePipeline(update, verbose),
+  },
+  {
+    name: 'world',
+    run: ({ update, verbose }) => runWorldPipeline(update, verbose),
   },
   {
     name: 'space-launches',

@@ -1,4 +1,4 @@
-name: Deploy Astro Site to GitHub Pages
+name: Deploy Site to GitHub Pages
 
 on:
   schedule:
@@ -19,10 +19,10 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
@@ -32,37 +32,42 @@ jobs:
       - name: Install workspace dependencies
         run: bun install --frozen-lockfile
 
-      - name: Cache pipeline datasets
-        uses: actions/cache@v4
+      - name: Cache datasets and build caches
+        uses: actions/cache@v6
         with:
           path: |
             pipelines/**/cache
+            site/.cache
+            pipelines/.cache
           key: pipeline-cache-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
             pipeline-cache-${{ runner.os }}-
             pipeline-cache-
 
       - name: Run ETL data pipelines
-        run: bun run pipelines
+        run: bun run build:pipeline
         env:
           COMTRADE_API_KEY: ${{ secrets.COMTRADE_API_KEY }}
           KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
 
-      - name: Build Astro site
-        run: bun run site
+      - name: Build site
+        run: |
+          bun run build:site
+          cp -r ./site/dist/client/graphs/* ./site/dist/client/
+          cp ./site/dist/client/404/index.html ./site/dist/client/404.html
 
       - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
-          path: ./site/dist
+          path: ./site/dist/client
 
   deploy:
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

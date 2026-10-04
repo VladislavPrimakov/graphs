@@ -1,17 +1,107 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+@import "./tags.css";
+@import "./changelog.css";
+@import "./map.css";
 
-@layer base {
-  body {
-    @apply bg-surface-base text-content-primary antialiased min-h-screen selection:bg-accent-blue selection:text-content-primary;
-    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
-  }
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: "Inter", system-ui, -apple-system, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  /* Surface tokens */
+  --color-surface-base: #020617;
+  --color-surface-card: #0f172a;
+  --color-surface-elevated: #1e293b;
+  --color-surface-overlay: rgba(15, 23, 42, 0.95);
+
+  /* Border tokens */
+  --color-border-subtle: #1e293b;
+  --color-border-muted: #334155;
+  --color-border-active: #475569;
+
+  /* Content (text) tokens */
+  --color-content-primary: #f8fafc;
+  --color-content-secondary: #cbd5e1;
+  --color-content-muted: #94a3b8;
+  --color-content-dim: #64748b;
+
+  /* Accent tokens */
+  --color-accent-primary: #38bdf8;
+  --color-accent-hover: #7dd3fc;
+  --color-accent-glow: rgba(56, 189, 248, 0.15);
+  --color-accent-blue: #3b82f6;
+  --color-accent-blue-light: #93c5fd;
+  --color-accent-indigo: #6366f1;
+  --color-accent-rose: #f43f5e;
+  --color-accent-rose-glow: rgba(244, 63, 94, 0.15);
+  --color-accent-orange: #fb923c;
+
+  /* Status tokens */
+  --color-status-success: #10b981;
+  --color-status-success-light: #34d399;
+  --color-status-warning: #f59e0b;
+  --color-status-danger: #ef4444;
+  --color-status-danger-light: #fca5a5;
+  --color-status-danger-muted: #f87171;
+  --color-status-info: #06b6d4;
+
+  /* Domain tokens: Attacks */
+  --color-attacks-rf-uav: #f43f5e;
+  --color-attacks-rf-ballistic: #f59e0b;
+  --color-attacks-rf-cruise: #ef4444;
+  --color-attacks-ua-uav: #0ea5e9;
+  --color-attacks-ua-ballistic: #818cf8;
+  --color-attacks-ua-cruise: #22d3ee;
+  --color-attacks-uav: #f43f5e;
+  --color-attacks-ballistic: #f59e0b;
+  --color-attacks-cruise: #ef4444;
+
+  /* Domain tokens: Losses */
+  --color-losses-rf: #ef4444;
+  --color-losses-ua: #3b82f6;
+  --color-losses-unk: #7c3aed;
+  --color-losses-rf-light: #fca5a5;
+  --color-losses-ua-light: #93c5fd;
+  --color-losses-unk-light: #c4b5fd;
+
+  /* Domain tokens: Budget */
+  --color-budget-defense: #b91c1c;
+  --color-budget-other-exp: #475569;
+  --color-budget-domestic-rev: #16a34a;
+  --color-budget-grants: #d97706;
+  --color-budget-loans: #facc15;
+  --color-budget-debt: #64748b;
+  --color-budget-gdp: #2563eb;
+
+  /* Domain tokens: Trade */
+  --color-trade-export: #3b82f6;
+  --color-trade-import: #f97316;
+  --color-trade-balance: #38bdf8;
+  --color-trade-export-total: #3b82f6;
+  --color-trade-import-total: #f97316;
+  --color-trade-balance-line: #38bdf8;
 }
 
-/* Ensure Astro island containers behave as standard block elements for flex gap and box-model spacing */
-astro-island {
-  display: block;
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background-color: var(--color-surface-base);
+    color: var(--color-content-primary);
+    min-height: 100vh;
+    font-family: var(--font-sans);
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  ::selection {
+    background-color: var(--color-accent-blue);
+    color: var(--color-content-primary);
+  }
 }
 
 /* Custom scrollbars */
@@ -20,13 +110,14 @@ astro-island {
   height: 8px;
 }
 ::-webkit-scrollbar-track {
-  @apply bg-surface-card;
+  background-color: var(--color-surface-card);
 }
 ::-webkit-scrollbar-thumb {
-  @apply bg-border-muted rounded;
+  background-color: var(--color-border-muted);
+  border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  @apply bg-border-active;
+  background-color: var(--color-border-active);
 }
 
 /* Chart loading skeleton placeholder */
@@ -44,4 +135,66 @@ astro-island {
   100% {
     background-position: -200% 0;
   }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Reusable Tailwind v4 Utilities & Component Shortcuts                      */
+/* -------------------------------------------------------------------------- */
+
+/* Glassmorphic sticky header & navigation bars */
+@utility glass-bar {
+  @apply backdrop-blur-md bg-surface-base/80 border-b border-border-subtle/80;
+}
+
+/* Glassmorphic floating popups, tooltips, and dropdowns */
+@utility glass-overlay {
+  @apply bg-surface-overlay backdrop-blur-md border border-border-muted shadow-xl rounded-xl;
+}
+
+/* Major dashboard & page cards */
+@utility card {
+  @apply bg-surface-card border border-border-subtle/80 rounded-2xl p-4 shadow-xl relative;
+}
+
+/* Interactive hover cards (e.g. catalog cards) */
+@utility card-elevated {
+  @apply bg-surface-card/60 border border-border-subtle/80 hover:border-border-muted rounded-2xl shadow-lg transition-all duration-300;
+}
+
+/* Sub-cards & nested metric blocks (KPIs, breakdown cards) */
+@utility card-subtle {
+  @apply bg-surface-card/60 border border-border-subtle/80 hover:border-border-muted/80 rounded-xl p-4 transition-colors;
+}
+
+/* Compact controls container (sliders, view toggles, metadata pills) */
+@utility control-panel {
+  @apply bg-surface-card border border-border-subtle rounded-lg;
+}
+
+/* Standard subtle button / control */
+@utility btn-subtle {
+  @apply inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors duration-150 cursor-pointer shadow-sm bg-surface-card border border-border-subtle hover:bg-surface-elevated hover:border-border-muted text-content-secondary hover:text-accent-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-primary/50;
+}
+
+/* Primary glowing action button / CTA */
+@utility btn-accent {
+  @apply inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors duration-150 cursor-pointer shadow-sm bg-accent-glow text-accent-primary border border-accent-primary/30 hover:bg-accent-glow/80 hover:text-accent-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-primary/50;
+}
+
+/* Section anchor deep-link button */
+@utility anchor-btn {
+  @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-surface-base/70 hover:bg-surface-elevated border border-border-subtle/70 hover:border-border-muted text-[11px] font-mono font-medium text-content-muted hover:text-accent-primary transition-all cursor-pointer backdrop-blur-sm shadow-xs shrink-0;
+}
+
+/* Navigation & Outline pills */
+@utility nav-pill {
+  @apply shrink-0 px-2.5 py-0.5 rounded-full font-mono text-xs leading-normal transition-all duration-150 select-none border cursor-pointer focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-accent-primary/50;
+}
+
+@utility nav-pill-active {
+  @apply bg-surface-elevated text-accent-primary border-accent-primary/40 font-semibold shadow-xs;
+}
+
+@utility nav-pill-idle {
+  @apply text-content-muted hover:text-content-primary hover:bg-surface-elevated/70 bg-surface-card/40 border-border-subtle/40;
 }

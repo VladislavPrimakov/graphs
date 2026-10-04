@@ -210,16 +210,12 @@ export async function parseRfAttacks(forceUpdate = false): Promise<AttackDataGro
 
   // Monthly Aggregation
   const monthlyLaunched: Record<string, Record<string, number>> = {};
-  const monthlyTotalLaunched: Record<string, number> = {};
-  const monthlyTotalDestroyed: Record<string, number> = {};
 
   for (const r of expandedRows) {
     if (!monthlyLaunched[r.month]) {
       monthlyLaunched[r.month] = { UAVs: 0, Ballistic: 0, Cruise: 0, Other: 0 };
     }
     monthlyLaunched[r.month][r.category] = (monthlyLaunched[r.month][r.category] || 0) + r.launched;
-    monthlyTotalLaunched[r.month] = (monthlyTotalLaunched[r.month] || 0) + r.launched;
-    monthlyTotalDestroyed[r.month] = (monthlyTotalDestroyed[r.month] || 0) + r.destroyed;
   }
 
   const periods = Object.keys(monthlyLaunched).sort();
@@ -229,21 +225,15 @@ export async function parseRfAttacks(forceUpdate = false): Promise<AttackDataGro
   const monthlyBallistic = periods.map((p) => monthlyLaunched[p].Ballistic || 0);
   const monthlyCruise = periods.map((p) => monthlyLaunched[p].Cruise || 0);
   const monthlyMissiles = monthlyBallistic.map((b, i) => b + monthlyCruise[i]);
-  const monthlyTotalsLaunched = periods.map((p) => monthlyTotalLaunched[p] || 0);
-  const monthlyTotalsDestroyed = periods.map((p) => monthlyTotalDestroyed[p] || 0);
 
   // Daily Aggregation
   const dailyLaunched: Record<string, Record<string, number>> = {};
-  const dailyTotalLaunched: Record<string, number> = {};
-  const dailyTotalDestroyed: Record<string, number> = {};
 
   for (const r of expandedRows) {
     if (!dailyLaunched[r.date]) {
       dailyLaunched[r.date] = { UAVs: 0, Ballistic: 0, Cruise: 0, Other: 0 };
     }
     dailyLaunched[r.date][r.category] = (dailyLaunched[r.date][r.category] || 0) + r.launched;
-    dailyTotalLaunched[r.date] = (dailyTotalLaunched[r.date] || 0) + r.launched;
-    dailyTotalDestroyed[r.date] = (dailyTotalDestroyed[r.date] || 0) + r.destroyed;
   }
 
   const dailyDates = Object.keys(dailyLaunched).sort();
@@ -256,34 +246,26 @@ export async function parseRfAttacks(forceUpdate = false): Promise<AttackDataGro
   const dailyBallistic = dailyDates.map((d) => dailyLaunched[d].Ballistic || 0);
   const dailyCruise = dailyDates.map((d) => dailyLaunched[d].Cruise || 0);
   const dailyMissiles = dailyBallistic.map((b, i) => b + dailyCruise[i]);
-  const dailyTotalsLaunched = dailyDates.map((d) => dailyTotalLaunched[d] || 0);
-  const dailyTotalsDestroyed = dailyDates.map((d) => dailyTotalDestroyed[d] || 0);
 
   const totalUavs = monthlyUavs.reduce((a, b) => a + b, 0);
   const totalBallistic = monthlyBallistic.reduce((a, b) => a + b, 0);
   const totalCruise = monthlyCruise.reduce((a, b) => a + b, 0);
-  const totalMissilesLaunched = totalBallistic + totalCruise;
-  const totalAllLaunched = monthlyTotalsLaunched.reduce((a, b) => a + b, 0);
-  const totalAllDestroyed = monthlyTotalsDestroyed.reduce((a, b) => a + b, 0);
 
   const numMonths = periods.length || 1;
   const maxUavIdx = monthlyUavs.length > 0 ? monthlyUavs.indexOf(Math.max(...monthlyUavs)) : 0;
   const uavPeakCount = Math.max(0, ...monthlyUavs);
   const uavPeakPeriod = formattedMonths[maxUavIdx] || '';
   const uavMonthlyAvg = Math.round(totalUavs / numMonths);
-  const uavSharePct = totalAllLaunched > 0 ? Math.round((totalUavs / totalAllLaunched) * 1000) / 10 : 0;
 
   const maxBalIdx = monthlyBallistic.length > 0 ? monthlyBallistic.indexOf(Math.max(...monthlyBallistic)) : 0;
   const balPeakCount = Math.max(0, ...monthlyBallistic);
   const balPeakPeriod = formattedMonths[maxBalIdx] || '';
   const balMonthlyAvg = Math.round(totalBallistic / numMonths);
-  const balSharePct = totalMissilesLaunched > 0 ? Math.round((totalBallistic / totalMissilesLaunched) * 1000) / 10 : 0;
 
   const maxCruiseIdx = monthlyCruise.length > 0 ? monthlyCruise.indexOf(Math.max(...monthlyCruise)) : 0;
   const cruisePeakCount = Math.max(0, ...monthlyCruise);
   const cruisePeakPeriod = formattedMonths[maxCruiseIdx] || '';
   const cruiseMonthlyAvg = Math.round(totalCruise / numMonths);
-  const cruiseSharePct = totalMissilesLaunched > 0 ? Math.round((totalCruise / totalMissilesLaunched) * 1000) / 10 : 0;
 
   const numDays = dailyDates.length || 1;
   const maxUavDayIdx = dailyUavs.length > 0 ? dailyUavs.indexOf(Math.max(...dailyUavs)) : 0;
@@ -303,42 +285,32 @@ export async function parseRfAttacks(forceUpdate = false): Promise<AttackDataGro
 
   return {
     summary: {
-      total_launched: totalAllLaunched,
-      total_destroyed: totalAllDestroyed,
-      total_uavs: totalUavs,
-      total_ballistic: totalBallistic,
-      total_cruise: totalCruise,
-      total_missiles: totalMissilesLaunched,
-      intercept_rate_pct: totalAllLaunched > 0 ? Math.round((totalAllDestroyed / totalAllLaunched) * 1000) / 10 : 0,
       uavs: {
         total: totalUavs,
-        monthly_avg: uavMonthlyAvg,
-        peak_count: uavPeakCount,
-        peak_period: uavPeakPeriod,
-        daily_avg: uavDailyAvg,
-        daily_peak_count: uavDailyPeakCount,
-        daily_peak_date: uavDailyPeakDate,
-        share_pct: uavSharePct,
+        monthlyAvg: uavMonthlyAvg,
+        peakCount: uavPeakCount,
+        peakPeriod: uavPeakPeriod,
+        dailyAvg: uavDailyAvg,
+        dailyPeakCount: uavDailyPeakCount,
+        dailyPeakDate: uavDailyPeakDate,
       },
       ballistic: {
         total: totalBallistic,
-        monthly_avg: balMonthlyAvg,
-        peak_count: balPeakCount,
-        peak_period: balPeakPeriod,
-        daily_avg: balDailyAvg,
-        daily_peak_count: balDailyPeakCount,
-        daily_peak_date: balDailyPeakDate,
-        share_pct: balSharePct,
+        monthlyAvg: balMonthlyAvg,
+        peakCount: balPeakCount,
+        peakPeriod: balPeakPeriod,
+        dailyAvg: balDailyAvg,
+        dailyPeakCount: balDailyPeakCount,
+        dailyPeakDate: balDailyPeakDate,
       },
       cruise: {
         total: totalCruise,
-        monthly_avg: cruiseMonthlyAvg,
-        peak_count: cruisePeakCount,
-        peak_period: cruisePeakPeriod,
-        daily_avg: cruiseDailyAvg,
-        daily_peak_count: cruiseDailyPeakCount,
-        daily_peak_date: cruiseDailyPeakDate,
-        share_pct: cruiseSharePct,
+        monthlyAvg: cruiseMonthlyAvg,
+        peakCount: cruisePeakCount,
+        peakPeriod: cruisePeakPeriod,
+        dailyAvg: cruiseDailyAvg,
+        dailyPeakCount: cruiseDailyPeakCount,
+        dailyPeakDate: cruiseDailyPeakDate,
       },
     },
     daily: {
@@ -347,9 +319,7 @@ export async function parseRfAttacks(forceUpdate = false): Promise<AttackDataGro
       uavs: dailyUavs,
       ballistic: dailyBallistic,
       cruise: dailyCruise,
-      total_missiles: dailyMissiles,
-      total_launched: dailyTotalsLaunched,
-      total_destroyed: dailyTotalsDestroyed,
+      totalMissiles: dailyMissiles,
     },
     monthly: {
       periods,
@@ -357,9 +327,7 @@ export async function parseRfAttacks(forceUpdate = false): Promise<AttackDataGro
       uavs: monthlyUavs,
       ballistic: monthlyBallistic,
       cruise: monthlyCruise,
-      total_missiles: monthlyMissiles,
-      total_launched: monthlyTotalsLaunched,
-      total_destroyed: monthlyTotalsDestroyed,
+      totalMissiles: monthlyMissiles,
     },
   };
 }

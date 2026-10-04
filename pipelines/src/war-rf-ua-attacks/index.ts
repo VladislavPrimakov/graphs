@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { WarAttacksDataset } from '@graphs/types';
 import { writeJson } from '../utils/fs';
 import { getLogger, runWithLogger } from '../utils/logger';
 import { updateMetadata } from '../utils/metadata';
@@ -24,8 +25,8 @@ interface AttackDataSubRecord {
 
 /** Builds unified monthly time series aligning RF and UA data points. */
 function buildUnifiedMonthly(
-  rfMonthly: { periods: string[]; uavs: number[]; ballistic: number[]; cruise: number[]; total_missiles: number[] },
-  uaMonthly: { periods: string[]; uavs: number[]; ballistic: number[]; cruise: number[]; total_missiles: number[] },
+  rfMonthly: { periods: string[]; uavs: number[]; ballistic: number[]; cruise: number[]; totalMissiles: number[] },
+  uaMonthly: { periods: string[]; uavs: number[]; ballistic: number[]; cruise: number[]; totalMissiles: number[] },
 ) {
   const rfDict: Record<string, AttackDataSubRecord> = {};
   rfMonthly.periods.forEach((p, idx) => {
@@ -33,7 +34,7 @@ function buildUnifiedMonthly(
       uavs: rfMonthly.uavs[idx] || 0,
       ballistic: rfMonthly.ballistic[idx] || 0,
       cruise: rfMonthly.cruise[idx] || 0,
-      missiles: rfMonthly.total_missiles[idx] || 0,
+      missiles: rfMonthly.totalMissiles[idx] || 0,
     };
   });
 
@@ -43,7 +44,7 @@ function buildUnifiedMonthly(
       uavs: uaMonthly.uavs[idx] || 0,
       ballistic: uaMonthly.ballistic[idx] || 0,
       cruise: uaMonthly.cruise[idx] || 0,
-      missiles: uaMonthly.total_missiles[idx] || 0,
+      missiles: uaMonthly.totalMissiles[idx] || 0,
     };
   });
 
@@ -53,21 +54,19 @@ function buildUnifiedMonthly(
   return {
     periods: allPeriods,
     labels,
-    rf_uavs: allPeriods.map((p) => rfDict[p]?.uavs || 0),
-    rf_ballistic: allPeriods.map((p) => rfDict[p]?.ballistic || 0),
-    rf_cruise: allPeriods.map((p) => rfDict[p]?.cruise || 0),
-    rf_missiles: allPeriods.map((p) => rfDict[p]?.missiles || 0),
-    ua_uavs: allPeriods.map((p) => uaDict[p]?.uavs || 0),
-    ua_ballistic: allPeriods.map((p) => uaDict[p]?.ballistic || 0),
-    ua_cruise: allPeriods.map((p) => uaDict[p]?.cruise || 0),
-    ua_missiles: allPeriods.map((p) => uaDict[p]?.missiles || 0),
+    rfUavs: allPeriods.map((p) => rfDict[p]?.uavs || 0),
+    rfBallistic: allPeriods.map((p) => rfDict[p]?.ballistic || 0),
+    rfCruise: allPeriods.map((p) => rfDict[p]?.cruise || 0),
+    uaUavs: allPeriods.map((p) => uaDict[p]?.uavs || 0),
+    uaBallistic: allPeriods.map((p) => uaDict[p]?.ballistic || 0),
+    uaCruise: allPeriods.map((p) => uaDict[p]?.cruise || 0),
   };
 }
 
 /** Builds unified daily time series aligning RF and UA data points. */
 function buildUnifiedDaily(
-  rfDaily: { dates: string[]; uavs: number[]; ballistic: number[]; cruise: number[]; total_missiles: number[] },
-  uaDaily: { dates: string[]; uavs: number[]; ballistic: number[]; cruise: number[]; total_missiles: number[] },
+  rfDaily: { dates: string[]; uavs: number[]; ballistic: number[]; cruise: number[]; totalMissiles: number[] },
+  uaDaily: { dates: string[]; uavs: number[]; ballistic: number[]; cruise: number[]; totalMissiles: number[] },
 ) {
   const rfDict: Record<string, AttackDataSubRecord> = {};
   rfDaily.dates.forEach((d, idx) => {
@@ -75,7 +74,7 @@ function buildUnifiedDaily(
       uavs: rfDaily.uavs[idx] || 0,
       ballistic: rfDaily.ballistic[idx] || 0,
       cruise: rfDaily.cruise[idx] || 0,
-      missiles: rfDaily.total_missiles[idx] || 0,
+      missiles: rfDaily.totalMissiles[idx] || 0,
     };
   });
 
@@ -85,7 +84,7 @@ function buildUnifiedDaily(
       uavs: uaDaily.uavs[idx] || 0,
       ballistic: uaDaily.ballistic[idx] || 0,
       cruise: uaDaily.cruise[idx] || 0,
-      missiles: uaDaily.total_missiles[idx] || 0,
+      missiles: uaDaily.totalMissiles[idx] || 0,
     };
   });
 
@@ -95,14 +94,12 @@ function buildUnifiedDaily(
   return {
     dates: allDates,
     labels,
-    rf_uavs: allDates.map((d) => rfDict[d]?.uavs || 0),
-    rf_ballistic: allDates.map((d) => rfDict[d]?.ballistic || 0),
-    rf_cruise: allDates.map((d) => rfDict[d]?.cruise || 0),
-    rf_missiles: allDates.map((d) => rfDict[d]?.missiles || 0),
-    ua_uavs: allDates.map((d) => uaDict[d]?.uavs || 0),
-    ua_ballistic: allDates.map((d) => uaDict[d]?.ballistic || 0),
-    ua_cruise: allDates.map((d) => uaDict[d]?.cruise || 0),
-    ua_missiles: allDates.map((d) => uaDict[d]?.missiles || 0),
+    rfUavs: allDates.map((d) => rfDict[d]?.uavs || 0),
+    rfBallistic: allDates.map((d) => rfDict[d]?.ballistic || 0),
+    rfCruise: allDates.map((d) => rfDict[d]?.cruise || 0),
+    uaUavs: allDates.map((d) => uaDict[d]?.uavs || 0),
+    uaBallistic: allDates.map((d) => uaDict[d]?.ballistic || 0),
+    uaCruise: allDates.map((d) => uaDict[d]?.cruise || 0),
   };
 }
 
@@ -121,13 +118,13 @@ export async function runWarAttacksPipeline(options: { updateTg?: boolean; updat
       logger.debug('Processing UA attacks on Russia / RU areas (Telegram MoD)...');
       const uaData = await parseUaAttacks(undefined, updateTg, threads);
 
-      const unifiedMonthly = buildUnifiedMonthly(rfData.monthly, uaData.monthly);
-      const unifiedDaily = buildUnifiedDaily(rfData.daily, uaData.daily);
+      const unifiedMonthly = buildUnifiedMonthly(rfData.monthly!, uaData.monthly!);
+      const unifiedDaily = buildUnifiedDaily(rfData.daily!, uaData.daily!);
 
-      const combinedData = {
-        rf_attacks: rfData,
-        ua_attacks: uaData,
-        unified_timeline: {
+      const combinedData: WarAttacksDataset = {
+        rfAttacks: { summary: rfData.summary },
+        uaAttacks: { summary: uaData.summary },
+        unifiedTimeline: {
           monthly: unifiedMonthly,
           daily: unifiedDaily,
         },
@@ -137,9 +134,9 @@ export async function runWarAttacksPipeline(options: { updateTg?: boolean; updat
       await writeJson(targetOutput, combinedData);
       await updateMetadata('war-rf-ua-attacks');
 
-      logger.success(
-        `Exported war-rf-ua-attacks dataset (RF: ${(rfData.summary.total_launched ?? 0).toLocaleString()} launched, UA: ${(uaData.summary.total_intercepted ?? 0).toLocaleString()} intercepted)`,
-      );
+      const totalRf = rfData.summary.uavs.total + rfData.summary.ballistic.total + rfData.summary.cruise.total;
+      const totalUa = uaData.summary.uavs.total + uaData.summary.ballistic.total + uaData.summary.cruise.total;
+      logger.success(`Exported war-rf-ua-attacks dataset (RF: ${totalRf.toLocaleString()} launched, UA: ${totalUa.toLocaleString()} intercepted)`);
       return combinedData;
     },
     verbose,

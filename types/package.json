@@ -1,0 +1,6 @@
+{
+  "name": "@graphs/types",
+  "private": true,
+  "type": "module",
+  "main": "./index.ts"
+}
