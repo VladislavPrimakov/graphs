@@ -1,16 +1,10 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import type { ProjectSlug } from '@/types';
-import { getLogger } from './logger.js';
+import type { ProjectSlug } from '@graphs/types';
+import { getLogger } from '@/utils/logger';
+import { getMetadataPath } from '@/utils/paths';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-/** Returns the absolute path to site/src/data/metadata.json. */
-export function getMetadataPath(): string {
-  return path.resolve(__dirname, '../../../site/src/data/metadata.json');
-}
+export { getMetadataPath };
 
 let writeQueue: Promise<unknown> = Promise.resolve();
 

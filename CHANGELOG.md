@@ -5,6 +5,86 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Site (@graphs/site)
+
+#### Planned
+- Lazy-render off-screen dashboard sections and defer ECharts canvas mounting using `IntersectionObserver` viewport detection, activating visualizers only as their containers approach the viewport (mirroring `LossesMap` lazy-loading architecture).
+
+---
+
+## [1.2.1] - 2026-10-05
+
+### Tooling & Types
+
+#### Added
+- Added `TRADE_CATEGORY_IDS`, `TradeCategoryId`, and `TradeCategoryTuple` types to `@graphs/types` for Ukraine commodity trade series.
+- Added `SectionBuilder` and canonical `sections` list contract to `StaticProjectMeta` in `@/types`.
+
+---
+
+### Pipelines (@graphs/pipelines)
+
+#### Added
+- Added committed minimal data snapshots (`pipelines/src/<slug>/data.json`, and `data-ua.json` / `data-rf.json` for `war-rf-ua-attacks`) across all pipelines, establishing a deterministic two-tier data architecture without disk caches.
+- Added commodity category trade dynamics extraction across 8 NBU commodity groups from `Trade_y.xlsx` in `ukraine` pipeline.
+- Added HTTP HEAD pre-flight metadata verification (`fetchHeadMeta`) across pipelines to skip redundant downloads when upstream ETags or release timestamps are unchanged.
+- Added centralized path resolvers (`paths.ts`), atomic dataset exporter (`exportDataset` in `dataset.ts`), `scaleMagnitude` and `range` in `math.ts`, and `fetchBinaryWithMeta` in `http.ts`.
+
+#### Changed
+- Changed ETL pipelines to ingest and sanitize upstream source data purely in memory, stripping unused SVG coordinates, KML XML overhead, and redundant launch metadata.
+- Migrated `war-rf-ua-attacks` from 4.7 MB full-text Telegram dump to compact pre-parsed report snapshots (`data-ua.json` and `data-rf.json`), enabling instant offline builds and incremental crawling without Kaggle API token or Telegram scraper dependencies.
+- Expanded historical ETL extraction in `world` (1990–latest) and `ukraine` (2010–latest) pipelines.
+- Standardized all pipelines on `@/*` path aliases and native `if (import.meta.main)` execution entrypoints using `isUpdate()` and `isVerbose()`.
+
+#### Removed
+- Removed legacy `cache/` directories, intermediate JSON offset dumps, and temporary KML disk cache files across all pipelines.
+- Removed obsolete `runUaEconomicPipeline` and `runWorldEconomicPipeline` legacy exports from `ukraine` and `world` pipelines.
+- Removed redundant `process.loadEnvFile` calls across pipelines in favor of native Bun environment loading.
+
+#### Fixed
+- Fixed that historical NBU USD/UAH exchange rates prior to 2021 were 100x overstated by dividing quote rates by unit scale (`rate_per_unit`).
+
+---
+
+### Site (@graphs/site)
+
+#### Added
+- Added clean path-based routing (`/:slug/:section` and localized `/:lang/:slug/:section`) for all dashboard charts, replacing hash anchors with canonical URLs.
+- Added dynamic page title synchronization (`<Project Title> — <Chart Title>`) across deep links, SSG pre-rendered HTML, and scroll-spy updates.
+- Added automated filesystem discovery of project directories and section filenames in `react-router.config.ts`, generating multi-locale static SSG pre-rendered HTML for all section URLs without manual route imports.
+- Added `Checkbox` component and `RangeSliderControl` (`'range-slider'`) for dual-handle period filtering, standardizing control header elements on a 28px (`h-7`) height.
+- Added `#trade-categories` diverging stacked bar chart to Ukraine dashboard tracking foreign trade across 8 commodity groups, with absolute/percentage modes, category legend, and `themeColors.trade.categories` palette tokens.
+- Added dynamic period range sliders across World and Ukraine dashboard charts, enabling inspection from historical baselines (1990 / 2010) through latest available years with dynamic Top-N entity rankings.
+- Added automatic 2D containment detection (`hideIfOverflowBar`) and default `hideOverlap: true` in `chart-builder.ts`, hiding bar segment labels that exceed column bounds.
+- Added dynamic chart layout engine (`adjustChartLayout`) in `SectionChart.tsx` resolving legend wrapping, Y-axis label clearance, and toolbox alignment via runtime ECharts model inspection.
+- Extracted isolated, modular section builder files (`site/src/projects/<slug>/sections/<section-id>.ts`) across all 6 project dashboards.
+- Added custom Unicode CLDR unit definitions for `energy-terawatt-hour` (TWh / ТВт·ч) and `person` denominator rate patterns in `extract-cldr-units.ts` across all 4 locales.
+
+#### Changed
+- Changed `SectionNav` and `AnchorButton` to display and link directly to canonical section paths (`/{section}`) with clipboard URL copying and smooth section scrolling.
+- Changed `useScrollSpy` to synchronize the URL path via `history.replaceState` and update `document.title` on `scrollend`.
+- Changed project specifications (`project.ts`) across all dashboards to dynamically import section builders via Vite `import.meta.glob`, eliminating manual section imports while preserving canonical order from `meta.sections`.
+- Moved `useScrollSpy` hook inside `SectionNav` to isolate scroll position state from the main dashboard, eliminating unnecessary chart re-renders.
+- Changed `computeEndLabelClearance` to dynamically compute line chart right margin from series termination coordinates and rendered grid width.
+- Changed chart data transforms across dashboards to use direct array slicing (`.slice()`) instead of manual index mapping, with automatic zero-value filtering enabled across tooltip formatters.
+- Changed site favicon (`favicon.svg`) to synchronize with the brand navbar logo icon badge.
+- Optimized localized formatting in `format.ts` by caching `Intl.NumberFormat` and `Intl.DateTimeFormat` instances, and coalesced canvas resize handling with `requestAnimationFrame`.
+
+#### Removed
+- Removed legacy `anchorId` across `BaseSectionSpec`, `AnchorButton`, and `Section` components in favor of canonical `id`.
+
+#### Fixed
+- Fixed that multi-line legends and `AnchorButton` collided with `yAxis.name` and data grid by dynamically constraining legend bounds and container top offset.
+- Fixed that Y-axis on Ukraine `budget-and-debt` chart dropped below zero on historical intervals by clamping net borrowing to non-negative values and setting `yAxis.min: 0`.
+- Fixed that chart canvas became blurry on browser zoom or display scale changes by tracking dynamic `devicePixelRatio` and re-allocating canvas backing stores.
+- Fixed that scrolling and section navigation stripped the router basename (`/graphs`) from browser URLs by distinguishing app-relative routes (`getPath`) from browser-level URLs (`getHref`).
+- Fixed that scrolling past sections replayed canvas entrance animations and caused layout jitter by isolating scroll tracking in `SectionNav` and stabilizing the `ProjectPage` route key on slug and lang.
+- Fixed that electricity Y-axis labels rendered raw unit identifiers (`energy-terawatt-hour`, `kW-hour/person`) instead of localized symbols by adding custom CLDR units and narrow unit overrides.
+
+---
+
 ## [1.2.0] - 2026-10-04
 
 ### Tooling & Types

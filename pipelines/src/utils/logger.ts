@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import type { ProjectSlug } from '@graphs/types';
 import { type ConsolaInstance, createConsola } from 'consola';
-import type { ProjectSlug } from '@/types';
 
 export type LoggerTag = ProjectSlug | 'pipelines';
 
@@ -9,6 +9,11 @@ const asyncLoggerStorage = new AsyncLocalStorage<ConsolaInstance>();
 /** Checks whether verbose mode is requested via command line arguments. */
 export function isVerbose(): boolean {
   return process.argv.includes('-v') || process.argv.includes('--verbose');
+}
+
+/** Checks whether force update mode is requested via command line arguments. */
+export function isUpdate(): boolean {
+  return process.argv.includes('-u') || process.argv.includes('--update');
 }
 
 /** Creates a tagged consola logger instance with configured verbosity level. */

@@ -10,11 +10,13 @@ import { useFormat, useTranslation } from '@/utils/locales';
 export interface SectionBreakdownProps {
   /** Specification declaring categories, comparison lists, and layout parameters. */
   spec: BreakdownGridSpec;
+  /** Unique project slug identifier for anchor links. */
+  projectSlug?: string;
 }
 
 /** Generic categorized breakdown grid presenting multi-entity item comparisons with responsive flexbox card layout and accordion expansion. */
-export const SectionBreakdown: React.FC<SectionBreakdownProps> = ({ spec }) => {
-  const { anchorId, categories, previewLimit = 5 } = spec;
+export const SectionBreakdown: React.FC<SectionBreakdownProps> = ({ spec, projectSlug }) => {
+  const { id, categories, previewLimit = 5 } = spec;
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
   const { t } = useTranslation();
   const fmt = useFormat();
@@ -42,7 +44,7 @@ export const SectionBreakdown: React.FC<SectionBreakdownProps> = ({ spec }) => {
     <>
       <div className="flex items-center justify-between gap-3 mb-4 min-h-8">
         <div>
-          <AnchorButton anchorId={anchorId} />
+          <AnchorButton sectionId={id} projectSlug={projectSlug} />
         </div>
         {expandableCategories.length > 0 && (
           <button type="button" onClick={toggleAllCategories} className="btn-subtle">

@@ -1,20 +1,8 @@
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import type { WarAttacksDataset } from '@graphs/types';
-import { writeJson } from '../utils/fs';
-import { getLogger, runWithLogger } from '../utils/logger';
-import { updateMetadata } from '../utils/metadata';
+import { exportDataset } from '@/utils/dataset';
+import { getLogger, isUpdate, isVerbose, runWithLogger } from '@/utils/logger';
 import { parseRfAttacks } from './parse-rf';
 import { parseUaAttacks } from './parse-ua';
-
-try {
-  process.loadEnvFile?.();
-} catch {
-  // ignore
-}
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 interface AttackDataSubRecord {
   uavs: number;
@@ -130,9 +118,7 @@ export async function runWarAttacksPipeline(options: { updateTg?: boolean; updat
         },
       };
 
-      const targetOutput = outputFile || path.resolve(__dirname, '../../../site/src/data/war-rf-ua-attacks.json');
-      await writeJson(targetOutput, combinedData);
-      await updateMetadata('war-rf-ua-attacks');
+      await exportDataset('war-rf-ua-attacks', combinedData, outputFile);
 
       const totalRf = rfData.summary.uavs.total + rfData.summary.ballistic.total + rfData.summary.cruise.total;
       const totalUa = uaData.summary.uavs.total + uaData.summary.ballistic.total + uaData.summary.cruise.total;
@@ -143,9 +129,8 @@ export async function runWarAttacksPipeline(options: { updateTg?: boolean; updat
   );
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  const isUpdate = process.argv.includes('-u') || process.argv.includes('--update');
-  runWarAttacksPipeline({ updateTg: isUpdate, updateRf: isUpdate }).catch((err) => {
+if (import.meta.main) {
+  runWarAttacksPipeline({ updateTg: isUpdate(), updateRf: isUpdate(), verbose: isVerbose() }).catch((err) => {
     getLogger('war-rf-ua-attacks').error('Fatal error running war-rf-ua-attacks pipeline:', err);
     process.exit(1);
   });

@@ -4,7 +4,7 @@ import RU from 'country-flag-icons/react/3x2/RU';
 import UA from 'country-flag-icons/react/3x2/UA';
 import type React from 'react';
 import { createContext, useContext } from 'react';
-import { useLocation, useNavigate } from 'react-router';
+import { useHref, useLocation, useNavigate } from 'react-router';
 import type { LocaleCommon as commonEn } from '@/locales/common-en';
 import type { ProjectMeta, ProjectTag } from '@/types';
 import { type CldrLocaleUnits, createFormat, type LocalizedFormatters } from './format';
@@ -62,8 +62,10 @@ export interface LocaleContextValue {
   fmt: LocalizedFormatters;
   /** Switches current language via client navigation. */
   setLanguage: (targetLang: Language) => void;
-  /** Prepends language prefix to a path. */
+  /** Prepends language prefix to an app-relative path (for React Router Link/Navigate). */
   getPath: (path: string) => string;
+  /** Resolves absolute browser URL path with language prefix and router basename (for history.replaceState, <a>, and clipboard). */
+  getHref: (path: string) => string;
   /** Resolves localized human-readable label for a project category tag. */
   getTagLabel: (tag: ProjectTag) => string;
 }
@@ -83,6 +85,8 @@ export interface LocaleProviderProps {
 export const LocaleProvider: React.FC<LocaleProviderProps> = ({ lang, common, cldr, projects, children }) => {
   const location = useLocation();
   const navigate = useNavigate();
+  const rootHref = useHref('/');
+  const basePrefix = rootHref === '/' ? '' : rootHref.replace(/\/+$/, '');
 
   const setLanguage = (targetLang: Language) => {
     if (targetLang === lang) return;
@@ -93,6 +97,7 @@ export const LocaleProvider: React.FC<LocaleProviderProps> = ({ lang, common, cl
   };
 
   const getPath = (path: string) => getLocalizedPath(path, lang);
+  const getHref = (path: string) => `${basePrefix}${getLocalizedPath(path, lang)}`;
 
   const getTagLabel = (tag: ProjectTag) => common.tagNames[tag] || tag;
 
@@ -107,6 +112,7 @@ export const LocaleProvider: React.FC<LocaleProviderProps> = ({ lang, common, cl
     fmt,
     setLanguage,
     getPath,
+    getHref,
     getTagLabel,
   };
 
@@ -121,12 +127,14 @@ export function useLanguage() {
       lang: DEFAULT_LANGUAGE,
       setLanguage: () => {},
       getPath: (p: string) => p,
+      getHref: (p: string) => p,
     };
   }
   return {
     lang: ctx.lang,
     setLanguage: ctx.setLanguage,
     getPath: ctx.getPath,
+    getHref: ctx.getHref,
   };
 }
 

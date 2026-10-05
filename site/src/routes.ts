@@ -9,6 +9,8 @@ export default [
   route('404', 'pages/NotFoundPage.tsx', { id: 'not-found-explicit' }),
   ...NON_DEFAULT_LANGUAGES.map((lang: Language) => route(`${lang}/404`, 'pages/NotFoundPage.tsx', { id: `not-found-${lang}` })),
   route(':slug', 'pages/ProjectPage.tsx', { id: 'project-default' }),
+  route(':slug/:section', 'pages/ProjectPage.tsx', { id: 'project-section-default' }),
   ...NON_DEFAULT_LANGUAGES.map((lang: Language) => route(`${lang}/:slug`, 'pages/ProjectPage.tsx', { id: `project-${lang}` })),
+  ...NON_DEFAULT_LANGUAGES.map((lang: Language) => route(`${lang}/:slug/:section`, 'pages/ProjectPage.tsx', { id: `project-section-${lang}` })),
   route('*', 'pages/NotFoundPage.tsx', { id: 'not-found' }),
 ] satisfies RouteConfig;

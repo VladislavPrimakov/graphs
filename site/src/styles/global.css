@@ -183,7 +183,7 @@
 
 /* Section anchor deep-link button */
 @utility anchor-btn {
-  @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-surface-base/70 hover:bg-surface-elevated border border-border-subtle/70 hover:border-border-muted text-[11px] font-mono font-medium text-content-muted hover:text-accent-primary transition-all cursor-pointer backdrop-blur-sm shadow-xs shrink-0;
+  @apply inline-flex items-center gap-1.5 px-2.5 h-7 rounded-lg bg-surface-base/70 hover:bg-surface-elevated border border-border-subtle/70 hover:border-border-muted text-[11px] font-mono font-medium text-content-muted hover:text-accent-primary transition-all cursor-pointer backdrop-blur-sm shadow-xs shrink-0;
 }
 
 /* Navigation & Outline pills */

@@ -1,27 +1,16 @@
-import fs from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import type { AttackDataGroup } from '@/types';
-import { fileExists } from '../utils/fs.js';
-import { fetchWithRetry } from '../utils/http.js';
-import { getLogger } from '../utils/logger.js';
+import type { AttackDataGroup } from '@graphs/types';
+import { fileExists, readJson, writeJson } from '@/utils/fs';
+import { fetchWithRetry } from '@/utils/http';
+import { getLogger } from '@/utils/logger';
+import { round, sum } from '@/utils/math';
+import { PIPELINES_SRC_DIR } from '@/utils/paths';
 
-try {
-  process.loadEnvFile?.();
-} catch {
-  // ignore if .env missing
-}
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const CACHE_DIR = path.resolve(__dirname, 'cache');
-const CSV_PATH = path.join(CACHE_DIR, 'missile_attacks_daily.csv');
-const DICT_PATH = path.join(CACHE_DIR, 'missiles_and_uavs.csv');
+const DATA_RF_PATH = path.resolve(PIPELINES_SRC_DIR, 'war-rf-ua-attacks/data-rf.json');
 const KAGGLE_DATASET = 'piterfm/massive-missile-attacks-on-ukraine';
 
-/** Downloads a dataset file from Kaggle API following storage redirection. */
-async function downloadKaggleFile(fileName: string, targetPath: string, token: string): Promise<boolean> {
+/** Downloads a dataset file from Kaggle API following storage redirection directly in memory. */
+async function fetchKaggleFile(fileName: string, token: string): Promise<string | null> {
   const logger = getLogger();
   try {
     const url = `https://www.kaggle.com/api/v1/datasets/download/${KAGGLE_DATASET}/${fileName}`;
@@ -35,43 +24,21 @@ async function downloadKaggleFile(fileName: string, targetPath: string, token: s
       downloadUrl = res.headers.get('location') || url;
     } else if (!res.ok) {
       logger.warn(`Failed to obtain download URL for Kaggle ${fileName} (HTTP ${res.status})`);
-      return false;
+      return null;
     }
 
     const fileRes = await fetchWithRetry(downloadUrl, { retries: 3, timeoutMs: 45000 });
     if (!fileRes.ok) {
       logger.warn(`Failed to download ${fileName} from Kaggle storage (HTTP ${fileRes.status})`);
-      return false;
+      return null;
     }
 
     const content = await fileRes.text();
-    await fs.mkdir(path.dirname(targetPath), { recursive: true });
-    await fs.writeFile(targetPath, content, 'utf-8');
     logger.debug(`Downloaded latest ${fileName} from Kaggle (${content.length.toLocaleString()} bytes)`);
-    return true;
+    return content;
   } catch (err) {
     logger.warn(`Could not refresh ${fileName} from Kaggle: ${err}`);
-    return false;
-  }
-}
-
-/** Synchronizes Kaggle dataset files if API token is present. */
-async function syncKaggleDatasets(force = false): Promise<void> {
-  const logger = getLogger();
-  const token = process.env.KAGGLE_API_TOKEN;
-  const hasCsv = await fileExists(CSV_PATH);
-  const hasDict = await fileExists(DICT_PATH);
-
-  if (!token) {
-    if (!hasCsv || !hasDict) {
-      logger.warn('KAGGLE_API_TOKEN not found and local CSV cache is missing.');
-    }
-    return;
-  }
-
-  if (force || !hasCsv || !hasDict) {
-    logger.debug('Syncing latest RF attacks data from Kaggle API...');
-    await Promise.all([downloadKaggleFile('missile_attacks_daily.csv', CSV_PATH, token), downloadKaggleFile('missiles_and_uavs.csv', DICT_PATH, token)]);
+    return null;
   }
 }
 
@@ -135,14 +102,8 @@ function parseCsv(csvText: string): Record<string, string>[] {
   return rows;
 }
 
-/** Runs the RF air attacks parser on the Kaggle daily attacks dataset. */
-export async function parseRfAttacks(forceUpdate = false): Promise<AttackDataGroup> {
-  const logger = getLogger();
-  await syncKaggleDatasets(forceUpdate);
-  logger.debug(`Loading RF attacks dataset: ${path.basename(CSV_PATH)}`);
-  const rawCsv = await fs.readFile(CSV_PATH, 'utf-8');
-  const rawDict = await fs.readFile(DICT_PATH, 'utf-8');
-
+/** Parses raw Kaggle CSV content into structured AttackDataGroup. */
+export function parseRfAttacksFromCsv(rawCsv: string, rawDict: string): AttackDataGroup {
   const dictRows = parseCsv(rawDict);
   const modelToCat = new Map<string, string>();
 
@@ -208,9 +169,7 @@ export async function parseRfAttacks(forceUpdate = false): Promise<AttackDataGro
     }
   }
 
-  // Monthly Aggregation
   const monthlyLaunched: Record<string, Record<string, number>> = {};
-
   for (const r of expandedRows) {
     if (!monthlyLaunched[r.month]) {
       monthlyLaunched[r.month] = { UAVs: 0, Ballistic: 0, Cruise: 0, Other: 0 };
@@ -226,9 +185,7 @@ export async function parseRfAttacks(forceUpdate = false): Promise<AttackDataGro
   const monthlyCruise = periods.map((p) => monthlyLaunched[p].Cruise || 0);
   const monthlyMissiles = monthlyBallistic.map((b, i) => b + monthlyCruise[i]);
 
-  // Daily Aggregation
   const dailyLaunched: Record<string, Record<string, number>> = {};
-
   for (const r of expandedRows) {
     if (!dailyLaunched[r.date]) {
       dailyLaunched[r.date] = { UAVs: 0, Ballistic: 0, Cruise: 0, Other: 0 };
@@ -247,41 +204,41 @@ export async function parseRfAttacks(forceUpdate = false): Promise<AttackDataGro
   const dailyCruise = dailyDates.map((d) => dailyLaunched[d].Cruise || 0);
   const dailyMissiles = dailyBallistic.map((b, i) => b + dailyCruise[i]);
 
-  const totalUavs = monthlyUavs.reduce((a, b) => a + b, 0);
-  const totalBallistic = monthlyBallistic.reduce((a, b) => a + b, 0);
-  const totalCruise = monthlyCruise.reduce((a, b) => a + b, 0);
+  const totalUavs = sum(monthlyUavs);
+  const totalBallistic = sum(monthlyBallistic);
+  const totalCruise = sum(monthlyCruise);
 
   const numMonths = periods.length || 1;
   const maxUavIdx = monthlyUavs.length > 0 ? monthlyUavs.indexOf(Math.max(...monthlyUavs)) : 0;
   const uavPeakCount = Math.max(0, ...monthlyUavs);
   const uavPeakPeriod = formattedMonths[maxUavIdx] || '';
-  const uavMonthlyAvg = Math.round(totalUavs / numMonths);
+  const uavMonthlyAvg = round(totalUavs / numMonths, 0);
 
   const maxBalIdx = monthlyBallistic.length > 0 ? monthlyBallistic.indexOf(Math.max(...monthlyBallistic)) : 0;
   const balPeakCount = Math.max(0, ...monthlyBallistic);
   const balPeakPeriod = formattedMonths[maxBalIdx] || '';
-  const balMonthlyAvg = Math.round(totalBallistic / numMonths);
+  const balMonthlyAvg = round(totalBallistic / numMonths, 0);
 
   const maxCruiseIdx = monthlyCruise.length > 0 ? monthlyCruise.indexOf(Math.max(...monthlyCruise)) : 0;
   const cruisePeakCount = Math.max(0, ...monthlyCruise);
   const cruisePeakPeriod = formattedMonths[maxCruiseIdx] || '';
-  const cruiseMonthlyAvg = Math.round(totalCruise / numMonths);
+  const cruiseMonthlyAvg = round(totalCruise / numMonths, 0);
 
   const numDays = dailyDates.length || 1;
   const maxUavDayIdx = dailyUavs.length > 0 ? dailyUavs.indexOf(Math.max(...dailyUavs)) : 0;
   const uavDailyPeakCount = Math.max(0, ...dailyUavs);
   const uavDailyPeakDate = dailyDates[maxUavDayIdx] ? `${dailyDates[maxUavDayIdx].split('-')[2]}.${dailyDates[maxUavDayIdx].split('-')[1]}.${dailyDates[maxUavDayIdx].slice(2, 4)}` : '';
-  const uavDailyAvg = Math.round(totalUavs / numDays);
+  const uavDailyAvg = round(totalUavs / numDays, 0);
 
   const maxBalDayIdx = dailyBallistic.length > 0 ? dailyBallistic.indexOf(Math.max(...dailyBallistic)) : 0;
   const balDailyPeakCount = Math.max(0, ...dailyBallistic);
   const balDailyPeakDate = dailyDates[maxBalDayIdx] ? `${dailyDates[maxBalDayIdx].split('-')[2]}.${dailyDates[maxBalDayIdx].split('-')[1]}.${dailyDates[maxBalDayIdx].slice(2, 4)}` : '';
-  const balDailyAvg = Math.round(totalBallistic / numDays);
+  const balDailyAvg = round(totalBallistic / numDays, 0);
 
   const maxCruiseDayIdx = dailyCruise.length > 0 ? dailyCruise.indexOf(Math.max(...dailyCruise)) : 0;
   const cruiseDailyPeakCount = Math.max(0, ...dailyCruise);
   const cruiseDailyPeakDate = dailyDates[maxCruiseDayIdx] ? `${dailyDates[maxCruiseDayIdx].split('-')[2]}.${dailyDates[maxCruiseDayIdx].split('-')[1]}.${dailyDates[maxCruiseDayIdx].slice(2, 4)}` : '';
-  const cruiseDailyAvg = Math.round(totalCruise / numDays);
+  const cruiseDailyAvg = round(totalCruise / numDays, 0);
 
   return {
     summary: {
@@ -330,4 +287,45 @@ export async function parseRfAttacks(forceUpdate = false): Promise<AttackDataGro
       totalMissiles: monthlyMissiles,
     },
   };
+}
+
+/** Runs the RF air attacks parser using local data-rf.json snapshot or syncs with Kaggle API if requested. */
+export async function parseRfAttacks(forceUpdate = false): Promise<AttackDataGroup> {
+  const logger = getLogger();
+  const hasSnapshot = await fileExists(DATA_RF_PATH);
+
+  if (!forceUpdate && hasSnapshot) {
+    try {
+      const snapshot = await readJson<AttackDataGroup>(DATA_RF_PATH);
+      logger.debug(`Loaded RF attacks snapshot from ${path.basename(DATA_RF_PATH)}`);
+      return snapshot;
+    } catch (e) {
+      logger.warn(`Failed reading ${DATA_RF_PATH}: ${e}`);
+    }
+  }
+
+  const token = process.env.KAGGLE_API_TOKEN;
+  if (!token) {
+    if (hasSnapshot) {
+      logger.debug('KAGGLE_API_TOKEN not found. Reusing committed data-rf.json snapshot.');
+      return await readJson<AttackDataGroup>(DATA_RF_PATH);
+    }
+    throw new Error('KAGGLE_API_TOKEN not found and data-rf.json snapshot is missing.');
+  }
+
+  logger.debug('Syncing latest RF attacks data from Kaggle API...');
+  const [rawCsv, rawDict] = await Promise.all([fetchKaggleFile('missile_attacks_daily.csv', token), fetchKaggleFile('missiles_and_uavs.csv', token)]);
+
+  if (!rawCsv || !rawDict) {
+    if (hasSnapshot) {
+      logger.warn('Failed to download Kaggle files. Reusing existing data-rf.json snapshot.');
+      return await readJson<AttackDataGroup>(DATA_RF_PATH);
+    }
+    throw new Error('Failed to download Kaggle datasets and data-rf.json snapshot is missing.');
+  }
+
+  const attackGroup = parseRfAttacksFromCsv(rawCsv, rawDict);
+  await writeJson(DATA_RF_PATH, attackGroup, 0);
+  logger.debug(`Updated ${path.basename(DATA_RF_PATH)} with latest Kaggle attacks data`);
+  return attackGroup;
 }

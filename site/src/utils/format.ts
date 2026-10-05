@@ -70,9 +70,37 @@ function getCldrUnits(lang: Language): CldrLocaleUnits | undefined {
 /* 2. Numeric, Monetary & Temporal Formatters                                 */
 /* -------------------------------------------------------------------------- */
 
+/** In-memory cache for Intl.NumberFormat instances to eliminate expensive ICU instance re-creation. */
+const numberFormatCache = new Map<string, Intl.NumberFormat>();
+
+/** Resolves or creates a cached Intl.NumberFormat instance for the requested language and options. */
+function getNumberFormat(lang: Language, options?: Intl.NumberFormatOptions): Intl.NumberFormat {
+  const key = options ? `${lang}:${JSON.stringify(options)}` : lang;
+  let fmt = numberFormatCache.get(key);
+  if (!fmt) {
+    fmt = new Intl.NumberFormat(lang, options);
+    numberFormatCache.set(key, fmt);
+  }
+  return fmt;
+}
+
+/** In-memory cache for Intl.DateTimeFormat instances to eliminate expensive ICU instance re-creation. */
+const dateTimeFormatCache = new Map<string, Intl.DateTimeFormat>();
+
+/** Resolves or creates a cached Intl.DateTimeFormat instance for the requested language and options. */
+function getDateTimeFormat(lang: Language, options?: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
+  const key = options ? `${lang}:${JSON.stringify(options)}` : lang;
+  let fmt = dateTimeFormatCache.get(key);
+  if (!fmt) {
+    fmt = new Intl.DateTimeFormat(lang, options);
+    dateTimeFormatCache.set(key, fmt);
+  }
+  return fmt;
+}
+
 /** Formats a numeric value with locale-specific grouping and decimal separators (default: up to 1 fraction digit, integers without trailing zeroes). */
 function formatNumber(lang: Language, value: number, options?: Intl.NumberFormatOptions): string {
-  return new Intl.NumberFormat(lang, {
+  return getNumberFormat(lang, {
     minimumFractionDigits: 0,
     maximumFractionDigits: 1,
     ...options,
@@ -81,7 +109,7 @@ function formatNumber(lang: Language, value: number, options?: Intl.NumberFormat
 
 /** Formats a monetary amount into a localized currency string. */
 function formatCurrency(lang: Language, amount: number, currency = 'USD', options?: Intl.NumberFormatOptions): string {
-  return new Intl.NumberFormat(lang, {
+  return getNumberFormat(lang, {
     style: 'currency',
     currency,
     maximumFractionDigits: 0,
@@ -91,7 +119,7 @@ function formatCurrency(lang: Language, amount: number, currency = 'USD', option
 
 /** Formats a percentage value (0..100) according to locale conventions. */
 function formatPercent(lang: Language, value: number, options?: Intl.NumberFormatOptions): string {
-  return new Intl.NumberFormat(lang, {
+  return getNumberFormat(lang, {
     style: 'percent',
     minimumFractionDigits: 1,
     maximumFractionDigits: 1,
@@ -115,7 +143,7 @@ export function formatRatio(lang: Language, a: number, b = 1, digits = 1): strin
 function formatDate(lang: Language, date: string | Date, options?: Intl.DateTimeFormatOptions): string {
   const d = typeof date === 'string' ? new Date(date) : date;
   if (Number.isNaN(d.getTime())) return String(date);
-  return new Intl.DateTimeFormat(lang, {
+  return getDateTimeFormat(lang, {
     day: 'numeric',
     month: 'short',
     year: 'numeric',
@@ -125,7 +153,7 @@ function formatDate(lang: Language, date: string | Date, options?: Intl.DateTime
 
 /** Formats a numeric value into compact localized notation (e.g., 1.5M, 1,5 млн). */
 function formatCompactNumber(lang: Language, value: number, options?: Intl.NumberFormatOptions): string {
-  return new Intl.NumberFormat(lang, {
+  return getNumberFormat(lang, {
     notation: 'compact',
     compactDisplay: 'short',
     ...options,
@@ -158,7 +186,7 @@ export interface FormatScaleOptions {
  */
 function formatScale(lang: Language, value: number, options?: FormatScaleOptions): string {
   const { style = 'short', capitalize = true } = options || {};
-  const parts = new Intl.NumberFormat(lang, { notation: 'compact', compactDisplay: style }).formatToParts(value);
+  const parts = getNumberFormat(lang, { notation: 'compact', compactDisplay: style }).formatToParts(value);
   const str = parts.find((p) => p.type === 'compact')?.value ?? '';
   return capitalize && str ? str.charAt(0).toUpperCase() + str.slice(1) : str;
 }

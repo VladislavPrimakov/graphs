@@ -18,10 +18,8 @@ export interface KpiCardSpec {
 
 /** Base section specification shared by all dashboard sections. */
 export interface BaseSectionSpec {
-  /** Optional unique section identifier. */
-  id?: string;
-  /** HTML anchor hash for deep-linking (e.g. 'uav-dynamics'). */
-  anchorId: string;
+  /** Canonical section identifier matching URL sub-path (e.g. 'budget-and-debt'). */
+  id: string;
   /** Optional primary section title. */
   title?: string;
   /** KPI cards positioned above the section content. */
@@ -68,12 +66,38 @@ export interface SliderControl extends BaseControl {
   defaultValue: number;
 }
 
+/** Dual-handle range slider input control for filtering intervals (e.g. years [2021, 2026]). */
+export interface RangeSliderControl extends BaseControl {
+  /** Discriminator for range slider control. */
+  type: 'range-slider';
+  /** Minimum slider range limit. */
+  min: number;
+  /** Maximum slider range limit. */
+  max: number;
+  /** Step increment. @default 1 */
+  step?: number;
+  /** Minimum interval between the two thumbs. @default 0 */
+  minStepsBetweenThumbs?: number;
+  /** Initial range bounds tuple [start, end]. Defaults to full [min, max] range if omitted. */
+  defaultValue?: [number, number];
+}
+
+/** Checkbox toggle control for boolean options (e.g. showLabels). */
+export interface CheckboxControl extends BaseControl {
+  /** Discriminator for checkbox control. */
+  type: 'checkbox';
+  /** Initial boolean state. */
+  defaultValue: boolean;
+}
+
 /** Discriminated union of all supported interactive chart controls. */
-export type ChartControl = ToggleControl | SliderControl;
+export type ChartControl = ToggleControl | SliderControl | RangeSliderControl | CheckboxControl;
 
 /** Type map mapping each control type to its emitted value type. */
 export type ControlTypeMap<C> = {
   slider: number;
+  'range-slider': [number, number];
+  checkbox: boolean;
   toggle: C extends { options: readonly { value: infer V }[] } ? V : string;
 };
 

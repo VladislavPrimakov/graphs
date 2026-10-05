@@ -117,16 +117,7 @@ export interface LossCategoryDetailData {
 }
 
 /** Compact representation of an individual geolocated equipment loss event. */
-export type LossMapPoint = [
-  lng: number,
-  lat: number,
-  sideIdx: number,
-  catIdx: number,
-  modelIdx: number,
-  date: string,
-  posts: number[],
-  sources?: string[],
-];
+export type LossMapPoint = [lng: number, lat: number, sideIdx: number, catIdx: number, modelIdx: number, date: string, posts: number[], sources?: string[]];
 
 /** Compact static dataset driving the interactive map. */
 export interface WarLossMapDataset {
@@ -155,4 +146,3 @@ export interface WarLossesDataset {
   /** Geolocated losses dataset driving the interactive map. */
   map: WarLossMapDataset;
 }
-

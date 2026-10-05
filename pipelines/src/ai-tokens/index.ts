@@ -1,82 +1,61 @@
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
 import { AI_COMPANY_IDS, type AiCompanyId, type AiTokensDataset, type CompanySeriesItem, type RegionSeriesItem } from '@graphs/types';
-import { fileExists, readJson, writeJson } from '../utils/fs.js';
-import { fetchWithRetry } from '../utils/http.js';
-import { getLogger, runWithLogger } from '../utils/logger.js';
-import { updateMetadata } from '../utils/metadata.js';
+import { exportDataset, getPipelineDataPath } from '@/utils/dataset';
+import { fileExists, readJson, writeJson } from '@/utils/fs';
+import { fetchHeadMeta, fetchWithRetry, isRemoteMetaEqual, type RemoteFileMeta } from '@/utils/http';
+import { getLogger, isUpdate, isVerbose, runWithLogger } from '@/utils/logger';
+import { percentage, round } from '@/utils/math';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const SCRIPT_DIR = __dirname;
-const CACHE_DIR = path.resolve(SCRIPT_DIR, 'cache');
-const CACHE_VIEWS_FILE = path.join(CACHE_DIR, 'tokensperday_views.json');
-const OUTPUT_FILE = path.resolve(__dirname, '../../../site/src/data/ai-tokens.json');
+const DATA_FILE = getPipelineDataPath('ai-tokens');
 
 const URL_HOME = 'https://tokensperday.com';
 
 interface RawPoint {
   t: number;
   v: number;
-  real?: boolean;
 }
 
 interface RawSeries {
   name: string;
-  color?: string;
-  estimated?: boolean;
   pts: RawPoint[];
 }
 
 interface RawViews {
-  total: RawSeries[];
   country: RawSeries[];
   company: RawSeries[];
 }
 
-/** Extracts embedded time-series views JSON from the tokensperday homepage HTML. */
-function extractViews(html: string): RawViews {
+interface AiTokensPipelineCache {
+  meta?: {
+    lastUpdated?: string;
+    viewsSha256?: string;
+    remoteMeta?: RemoteFileMeta | null;
+  };
+  views: RawViews;
+  dataset: AiTokensDataset;
+}
+
+/** Extracts embedded time-series views JSON string and parsed object from the tokensperday homepage HTML, keeping only used fields. */
+function extractViewsWithRaw(html: string): { views: RawViews; rawJson: string } {
   const match = html.match(/const views = (\{[\s\S]*?\});\s*(?:const|let|var|function)/);
   if (!match) {
     throw new Error('Failed to find const views JSON object in tokensperday.com');
   }
-  return JSON.parse(match[1]) as RawViews;
-}
+  const rawJson = match[1];
+  const parsed = JSON.parse(rawJson) as { country?: RawSeries[]; company?: RawSeries[] };
+  const sanitize = (list: RawSeries[] = []): RawSeries[] =>
+    list.map((s) => ({
+      name: s.name,
+      pts: (s.pts || []).map((p) => ({ t: p.t, v: p.v })),
+    }));
 
-/**
- * Loads time-series views from tokensperday.com.
- * Always attempts to fetch live upstream data first on every run.
- * Uses local disk cache strictly as a fallback if the network request fails or when offline.
- */
-async function loadViews(): Promise<RawViews> {
-  const logger = getLogger('ai-tokens');
-
-  try {
-    logger.info(`Fetching latest data from ${URL_HOME}`);
-    const res = await fetchWithRetry(URL_HOME, { retries: 3, timeoutMs: 25000 });
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status}`);
-    }
-
-    const html = await res.text();
-    const views = extractViews(html);
-    await writeJson(CACHE_VIEWS_FILE, views, 2);
-    logger.debug(`Cached ${path.basename(CACHE_VIEWS_FILE)}`);
-    return views;
-  } catch (err) {
-    if (await fileExists(CACHE_VIEWS_FILE)) {
-      logger.warn(`Network fetch failed (${err instanceof Error ? err.message : String(err)}), falling back to disk cache`);
-      return readJson<RawViews>(CACHE_VIEWS_FILE);
-    }
-    throw new Error(`Failed to fetch ${URL_HOME} and no disk cache available: ${err}`);
-  }
-}
-
-/** Rounds a numeric value to a specified fraction of decimal places. */
-function roundNum(val: number, decimals = 1): number {
-  const factor = 10 ** decimals;
-  return Math.round(val * factor) / factor;
+  return {
+    views: {
+      country: sanitize(parsed.country),
+      company: sanitize(parsed.company),
+    },
+    rawJson,
+  };
 }
 
 /** Resolves the latest known throughput value for a given series up to the specified date. */
@@ -91,19 +70,97 @@ function getLatestValue(pts: RawPoint[], targetTs: number): number {
 }
 
 /** Runs the AI Tokens ETL Pipeline. Scrapes tokensperday.com, reconciles regional & company metrics, and exports site/src/data/ai-tokens.json. */
-export async function runAiTokensPipeline(_forceUpdate = false, verbose?: boolean): Promise<AiTokensDataset> {
+export async function runAiTokensPipeline(forceUpdate = false, verbose?: boolean): Promise<AiTokensDataset> {
   return runWithLogger(
     'ai-tokens',
     async () => {
       const logger = getLogger();
       logger.start('Starting AI Tokens ETL pipeline');
 
-      const views = await loadViews();
+      let cache: AiTokensPipelineCache | null = null;
+      if (await fileExists(DATA_FILE)) {
+        try {
+          cache = await readJson<AiTokensPipelineCache>(DATA_FILE);
+        } catch {
+          logger.warn('Could not read existing data.json file');
+        }
+      }
 
-      // Generate 30 monthly steps from 2024-01 to 2026-06
+      const hasValidDataset = Boolean(cache?.dataset?.regions?.months?.length) && Boolean(cache?.dataset?.summary?.peakDailyTokens);
+
+      let remoteMeta: RemoteFileMeta | null = null;
+      let rawJson = '';
+      let views: RawViews | null = null;
+      let viewsSha256 = '';
+
+      // 1. Fast metadata check via HTTP HEAD if server provides ETag / Last-Modified
+      if (!forceUpdate && hasValidDataset && cache?.meta?.remoteMeta) {
+        logger.debug('Checking tokensperday.com HTTP metadata via HEAD...');
+        remoteMeta = await fetchHeadMeta(URL_HOME);
+        if (remoteMeta && isRemoteMetaEqual(cache.meta.remoteMeta, remoteMeta) && remoteMeta.etag) {
+          logger.info('TokensPerDay remote metadata matches (ETag unchanged). Using cached dataset.');
+          await exportDataset('ai-tokens', cache.dataset);
+          return cache.dataset;
+        }
+      }
+
+      // 2. Fetch homepage and compare SHA-256 hash of embedded views payload
+      try {
+        logger.debug(`Fetching homepage from ${URL_HOME}...`);
+        const res = await fetchWithRetry(URL_HOME, { retries: 2, timeoutMs: 25000 });
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+        if (!remoteMeta) {
+          remoteMeta = {
+            etag: res.headers.get('etag'),
+            lastModified: res.headers.get('last-modified'),
+            contentLength: res.headers.get('content-length'),
+          };
+        }
+
+        const html = await res.text();
+        const extracted = extractViewsWithRaw(html);
+        rawJson = extracted.rawJson;
+        views = extracted.views;
+        viewsSha256 = createHash('sha256').update(rawJson).digest('hex');
+
+        if (!forceUpdate && hasValidDataset && cache?.meta?.viewsSha256 === viewsSha256) {
+          logger.info('TokensPerDay time-series views unchanged (SHA-256 match). Using cached dataset.');
+          await exportDataset('ai-tokens', cache.dataset);
+          return cache.dataset;
+        }
+
+        logger.info('New tokensperday views data detected. Processing updated series...');
+      } catch (err) {
+        if (hasValidDataset && cache) {
+          logger.warn(`Network query failed (${err instanceof Error ? err.message : String(err)}). Using cached dataset.`);
+          await exportDataset('ai-tokens', cache.dataset);
+          return cache.dataset;
+        }
+        throw new Error(`Failed to fetch ${URL_HOME} and no valid cache available: ${err}`);
+      }
+
+      if (!views) {
+        if (!cache?.views) throw new Error('No views available to process');
+        views = cache.views;
+      }
+
+      // Dynamically determine month range from data up to latest available point
+      let maxTs = 0;
+      for (const list of [views.country, views.company]) {
+        for (const s of list || []) {
+          for (const p of s.pts || []) {
+            if (p.t > maxTs) maxTs = p.t;
+          }
+        }
+      }
+
       const months: string[] = [];
       const current = new Date('2024-01-15T00:00:00Z');
-      const maxDate = new Date('2026-06-15T00:00:00Z');
+      const maxDate = maxTs > 0 ? new Date(maxTs) : new Date();
+      maxDate.setUTCDate(15);
+
       while (current <= maxDate) {
         months.push(current.toISOString().slice(0, 7));
         current.setUTCMonth(current.getUTCMonth() + 1);
@@ -133,17 +190,17 @@ export async function runAiTokensPipeline(_forceUpdate = false, verbose?: boolea
         let monthTotal = 0;
 
         for (const r of regionRaw) {
-          const val = roundNum(getLatestValue(r.pts, targetTs), 2);
+          const val = round(getLatestValue(r.pts, targetTs), 2);
           r.values.push(val);
           monthTotal += val;
         }
 
-        monthTotal = roundNum(monthTotal, 2);
+        monthTotal = round(monthTotal, 2);
         totalValues.push(monthTotal);
 
         for (const r of regionRaw) {
           const currentVal = r.values[r.values.length - 1];
-          const share = monthTotal > 0 ? roundNum((currentVal / monthTotal) * 100, 1) : 0;
+          const share = percentage(currentVal, monthTotal, 1);
           r.shares.push(share);
         }
       }
@@ -182,17 +239,17 @@ export async function runAiTokensPipeline(_forceUpdate = false, verbose?: boolea
         for (const id of AI_COMPANY_IDS) {
           const pattern = COMPANY_MAP[id];
           const pts = views.company.find((s) => pattern.test(s.name))?.pts ?? [];
-          const val = roundNum(getLatestValue(pts, targetTs), 1);
+          const val = round(getLatestValue(pts, targetTs), 1);
           companyValues[id].push(val);
           monthCompanyTotal += val;
         }
 
-        monthCompanyTotal = roundNum(monthCompanyTotal, 1);
+        monthCompanyTotal = round(monthCompanyTotal, 1);
         companyTotals.push(monthCompanyTotal);
 
         for (const id of AI_COMPANY_IDS) {
           const val = companyValues[id][companyValues[id].length - 1];
-          const share = monthCompanyTotal > 0 ? roundNum((val / monthCompanyTotal) * 100, 1) : 0;
+          const share = percentage(val, monthCompanyTotal, 1);
           companyShares[id].push(share);
         }
       }
@@ -248,8 +305,20 @@ export async function runAiTokensPipeline(_forceUpdate = false, verbose?: boolea
         },
       };
 
-      await writeJson(OUTPUT_FILE, dataset, 0);
-      await updateMetadata('ai-tokens');
+      await writeJson(
+        DATA_FILE,
+        {
+          meta: {
+            lastUpdated: new Date().toISOString(),
+            viewsSha256: viewsSha256 || cache?.meta?.viewsSha256,
+            remoteMeta: remoteMeta || cache?.meta?.remoteMeta,
+          },
+          views,
+          dataset,
+        },
+        0,
+      );
+      await exportDataset('ai-tokens', dataset);
       logger.success(`Exported ai-tokens dataset (${months.length} months, ${companySeries.length} companies)`);
 
       return dataset;
@@ -258,9 +327,8 @@ export async function runAiTokensPipeline(_forceUpdate = false, verbose?: boolea
   );
 }
 
-// Direct execution support
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  runAiTokensPipeline().catch((err) => {
+if (import.meta.main) {
+  runAiTokensPipeline(isUpdate(), isVerbose()).catch((err) => {
     getLogger('ai-tokens').error('Fatal error running AI Tokens pipeline:', err);
     process.exit(1);
   });

@@ -21,4 +21,15 @@ export const dict: typeof enDict = {
   tradePartners: {
     title: 'Ключевые страны-партнеры по товарообороту',
   },
+  tradeCategories: {
+    title: 'Товарная структура внешней торговли',
+    agriculture: 'Агро',
+    minerals: 'Минералы',
+    chemicals: 'Химия',
+    timber: 'Древесина',
+    manufactured: 'Промтовары',
+    metals: 'Металлы',
+    machinery: 'Машины',
+    other: 'Прочее',
+  },
 };

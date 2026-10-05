@@ -19,4 +19,15 @@ export const dict = {
   tradePartners: {
     title: 'Leading Partner Nations by Goods Trade',
   },
+  tradeCategories: {
+    title: 'Merchandise Trade by Commodity Category',
+    agriculture: 'Agro',
+    minerals: 'Minerals',
+    chemicals: 'Chemicals',
+    timber: 'Wood',
+    manufactured: 'Industry',
+    metals: 'Metals',
+    machinery: 'Machinery',
+    other: 'Other',
+  },
 };

@@ -2,8 +2,8 @@ name: Deploy Site to GitHub Pages
 
 on:
   schedule:
-    # Run automatically every Monday at 03:00 UTC
-    - cron: '0 3 * * 1'
+    # Run automatically every 3 days at 03:00 UTC
+    - cron: '0 3 */3 * *'
   push:
     branches: [main]
   workflow_dispatch:
@@ -32,17 +32,15 @@ jobs:
       - name: Install workspace dependencies
         run: bun install --frozen-lockfile
 
-      - name: Cache datasets and build caches
+      - name: Cache pipeline data snapshots
         uses: actions/cache@v6
         with:
           path: |
-            pipelines/**/cache
-            site/.cache
-            pipelines/.cache
-          key: pipeline-cache-${{ runner.os }}-${{ github.run_id }}
+            pipelines/src/**/data*.json
+          key: pipeline-snapshots-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
-            pipeline-cache-${{ runner.os }}-
-            pipeline-cache-
+            pipeline-snapshots-${{ runner.os }}-
+            pipeline-snapshots-
 
       - name: Run ETL data pipelines
         run: bun run build:pipeline

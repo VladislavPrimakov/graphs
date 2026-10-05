@@ -47,6 +47,14 @@ export interface UaBudgetDebtData {
 /** Compact tuple representing partner trade volume: [regionCode, valueInBillions, sharePercent]. */
 export type TradePartnerTuple = [code: string, value: number, share: number];
 
+/** 8 standardized commodity groups defined by NBU and BPM6 foreign trade classification. */
+export const TRADE_CATEGORY_IDS = ['agriculture', 'minerals', 'chemicals', 'timber', 'manufactured', 'metals', 'machinery', 'other'] as const;
+
+export type TradeCategoryId = (typeof TRADE_CATEGORY_IDS)[number];
+
+/** Compact tuple representing commodity category trade volume: [categoryId, valueInBillions, sharePercent]. */
+export type TradeCategoryTuple = [id: TradeCategoryId, value: number, share: number];
+
 /** Annual trade balance and foreign trade partner breakdown for Ukraine. */
 export interface UaTradeData {
   /** 4-digit calendar years. */
@@ -61,6 +69,10 @@ export interface UaTradeData {
   exports: TradePartnerTuple[][];
   /** Annual merchandise imports by partner per year [yearIndex]: [code, value, share] sorted descending by value. */
   imports: TradePartnerTuple[][];
+  /** Annual merchandise exports by commodity category per year [yearIndex]: [categoryId, value, share] sorted descending by value. */
+  categoryExports: TradeCategoryTuple[][];
+  /** Annual merchandise imports by commodity category per year [yearIndex]: [categoryId, value, share] sorted descending by value. */
+  categoryImports: TradeCategoryTuple[][];
 }
 
 /** Static root JSON dataset structure for Ukraine indicators. */
