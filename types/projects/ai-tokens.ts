@@ -19,16 +19,7 @@ export interface RegionalTokensData {
 }
 
 /** Canonical machine identifiers for tracked AI model and inference providers. */
-export const AI_COMPANY_IDS = [
-  'doubao',
-  'google',
-  'openai',
-  'anthropic',
-  'fireworks',
-  'microsoft',
-  'deepseek',
-  'together',
-] as const;
+export const AI_COMPANY_IDS = ['doubao', 'google', 'openai', 'anthropic', 'fireworks', 'microsoft', 'deepseek', 'together'] as const;
 
 /** Canonical AI model and inference provider identifier. */
 export type AiCompanyId = (typeof AI_COMPANY_IDS)[number];

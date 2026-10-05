@@ -3,6 +3,8 @@ import type {
   DefaultLabelFormatterCallbackParams as CallbackDataParams,
   EChartsOption,
   GridComponentOption,
+  LabelLayoutOptionCallback,
+  LabelLayoutOptionCallbackParams,
   LegendComponentOption,
   LineSeriesOption,
   SeriesOption,
@@ -269,6 +271,47 @@ function enhanceSingleSeries(series: SeriesOption): SeriesOption {
     enhanced.data = enhanced.data.map((item) => (item && typeof item === 'object' && 'label' in item && item.label ? { ...item, label: smartMerge(DEFAULT_LABEL_STYLE, item.label) } : item));
   }
 
+  // Handle labelLayout collision resolution & optional bar overflow auto-hiding
+  const isBar = enhanced.type === 'bar';
+  const rawHideIfOverflow = (enhanced as { hideIfOverflowBar?: boolean }).hideIfOverflowBar;
+  // Opt-out via explicit false; defaults to true for bar series
+  const hideIfOverflow = isBar ? rawHideIfOverflow !== false : false;
+
+  const labelObj = 'label' in enhanced && enhanced.label ? (enhanced.label as { position?: unknown }) : undefined;
+  const labelPos = typeof labelObj?.position === 'string' ? labelObj.position : undefined;
+  const isInsideLabel = !labelPos || labelPos.startsWith('inside');
+
+  const userFn = typeof enhanced.labelLayout === 'function' ? (enhanced.labelLayout as LabelLayoutOptionCallback) : undefined;
+  const userLayoutObj = typeof enhanced.labelLayout === 'object' && enhanced.labelLayout !== null ? (enhanced.labelLayout as ReturnType<LabelLayoutOptionCallback>) : undefined;
+
+  enhanced.labelLayout = (params: LabelLayoutOptionCallbackParams) => {
+    const userRes = userFn ? userFn(params) : userLayoutObj;
+
+    if (hideIfOverflow && isInsideLabel && params.rect && params.labelRect) {
+      const barWidth = Math.abs(params.rect.width);
+      const barHeight = Math.abs(params.rect.height);
+      const labelWidth = Math.abs(params.labelRect.width);
+      const labelHeight = Math.abs(params.labelRect.height);
+
+      if (labelHeight > 0 && labelWidth > 0) {
+        const isOverflow = barWidth + 1 < labelWidth || barHeight + 1 < labelHeight;
+
+        if (isOverflow) {
+          return {
+            hideOverlap: true,
+            ...userRes,
+            fontSize: 0,
+          };
+        }
+      }
+    }
+
+    return {
+      hideOverlap: true,
+      ...userRes,
+    };
+  };
+
   return enhanced;
 }
 
@@ -482,20 +525,27 @@ export type BarSeriesOptions<T = unknown> = Omit<BarSeriesOption, 'data'> & {
   data?: readonly T[];
   /** Formats the label text for each non-zero bar segment. Return empty string or undefined to hide label. */
   formatLabel?: (ctx: BarLabelContext<T>) => string | undefined;
+  /** Automatically hides inside labels that overflow the bar geometry. @default true */
+  hideIfOverflowBar?: boolean;
 };
 
 /**
  * Creates a configured ECharts bar series for standalone, clustered, or stacked columns.
  * Supports automated item label formatting while preserving arbitrary point object metadata.
  */
-export function createBarSeries<T = unknown>({ formatLabel, label, ...series }: BarSeriesOptions<T>): BarSeriesOption & { data?: readonly T[] } {
+export function createBarSeries<T = unknown>({ formatLabel, label, hideIfOverflowBar, ...series }: BarSeriesOptions<T>): BarSeriesOption & { data?: readonly T[] } {
+  const base = {
+    type: 'bar' as const,
+    ...(hideIfOverflowBar !== undefined ? { hideIfOverflowBar } : {}),
+    ...series,
+  };
+
   if (!formatLabel) {
-    return { type: 'bar', ...series, ...(label ? { label } : {}) } as BarSeriesOption & { data?: readonly T[] };
+    return { ...base, ...(label ? { label } : {}) } as BarSeriesOption & { data?: readonly T[] };
   }
 
   return {
-    type: 'bar',
-    ...series,
+    ...base,
     data: series.data as BarSeriesOption['data'],
     label: {
       show: true,

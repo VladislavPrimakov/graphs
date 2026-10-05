@@ -19,12 +19,7 @@ dist/
 .DS_Store
 Thumbs.db
 
-# Datasets cache & generated raw outputs
-**/cache/*
-!pipelines/src/space-launches/cache/launches_base.json
-!pipelines/src/world-economic/cache/*.json
-!pipelines/src/ua-economic/cache/*.json
-!pipelines/src/war-rf-ua-attacks/cache/*.json
+# Temporary and log files
 *.tmp
 *.log
 *.png

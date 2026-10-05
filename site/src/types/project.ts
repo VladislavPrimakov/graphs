@@ -12,14 +12,16 @@ export interface ProjectSource {
   url: string;
 }
 
-/** Static project metadata (identity, tags, and sources) independent of locale and chart builders. */
-export interface StaticProjectMeta<K extends ProjectSlug = ProjectSlug> {
+/** Static project metadata (identity, tags, sources, and section paths) independent of locale and chart builders. */
+export interface StaticProjectMeta<K extends ProjectSlug = ProjectSlug, S extends string = string> {
   /** Unique project slug identifier. */
   id: K;
   /** Categorization and discovery tags for catalog filtering. */
   tags: ProjectTag[];
   /** List of primary sources and statistical agencies cited. */
   sources: ProjectSource[];
+  /** Ordered list of canonical section IDs matching URL sub-paths (e.g. ['budget-and-debt', ...]). */
+  sections: readonly S[];
 }
 
 /** Localized text metadata declaration for a project (title and description). */
@@ -47,6 +49,9 @@ export interface BuildSectionsContext<K extends ProjectSlug = ProjectSlug, D = R
   t: ProjectTranslation<D>;
   fmt: LocalizedFormatters;
 }
+
+/** Function contract for building an individual isolated dashboard section. */
+export type SectionBuilder<K extends ProjectSlug = ProjectSlug, D = Record<string, unknown>> = (ctx: BuildSectionsContext<K, D>) => DashboardSection;
 
 /** Static declaration of a dashboard project in the catalog with section builders. */
 export interface Project<K extends ProjectSlug = ProjectSlug, D = Record<string, unknown>> extends StaticProjectMeta<K> {

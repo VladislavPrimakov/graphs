@@ -1,4 +1,4 @@
-import { getLogger } from './logger.js';
+import { getLogger } from '@/utils/logger';
 
 /** Fetches a URL with retry logic, custom headers, and timeout. */
 export async function fetchWithRetry(url: string, options: RequestInit & { retries?: number; backoffMs?: number; timeoutMs?: number } = {}): Promise<Response> {
@@ -48,4 +48,57 @@ export async function fetchWithRetry(url: string, options: RequestInit & { retri
   }
 
   throw lastError || new Error(`Failed to fetch ${url} after ${retries} attempts`);
+}
+
+/** HTTP remote file metadata (ETag, Last-Modified, Content-Length) for cache invalidation. */
+export interface RemoteFileMeta {
+  etag?: string | null;
+  lastModified?: string | null;
+  contentLength?: string | null;
+}
+
+/** Fetches HTTP HEAD metadata for remote URL with retry logic. */
+export async function fetchHeadMeta(url: string, options: { retries?: number; timeoutMs?: number } = {}): Promise<RemoteFileMeta | null> {
+  const { retries = 2, timeoutMs = 15000 } = options;
+  try {
+    const res = await fetchWithRetry(url, { method: 'HEAD', retries, timeoutMs });
+    if (!res.ok) return null;
+    return {
+      etag: res.headers.get('etag'),
+      lastModified: res.headers.get('last-modified'),
+      contentLength: res.headers.get('content-length'),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Checks whether cached HTTP metadata matches current remote metadata. */
+export function isRemoteMetaEqual(cached?: RemoteFileMeta | null, remote?: RemoteFileMeta | null): boolean {
+  if (!cached || !remote) return false;
+  if (cached.etag && remote.etag) {
+    return cached.etag === remote.etag;
+  }
+  if (cached.lastModified && remote.lastModified) {
+    return cached.lastModified === remote.lastModified;
+  }
+  return false;
+}
+
+/** Result of downloading a remote binary file with its HTTP caching headers. */
+export interface FetchBinaryResult {
+  buffer: Buffer;
+  meta: RemoteFileMeta;
+}
+
+/** Fetches a remote binary file and its HTTP headers (ETag, Last-Modified, Content-Length) into memory with retry logic. */
+export async function fetchBinaryWithMeta(url: string, options: RequestInit & { retries?: number; backoffMs?: number; timeoutMs?: number } = {}): Promise<FetchBinaryResult> {
+  const res = await fetchWithRetry(url, options);
+  if (!res.ok) throw new Error(`HTTP ${res.status} fetching ${url}`);
+  const meta: RemoteFileMeta = {
+    etag: res.headers.get('etag'),
+    lastModified: res.headers.get('last-modified'),
+    contentLength: res.headers.get('content-length'),
+  };
+  return { buffer: Buffer.from(await res.arrayBuffer()), meta };
 }

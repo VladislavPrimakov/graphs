@@ -7,7 +7,23 @@
   },
   "files": {
     "ignoreUnknown": true,
-    "includes": ["src/**/*", "types/**/*", "pipelines/src/**/*", "site/src/**/*", "site/scripts/**/*", "*.ts", "*.js", "*.mjs", "*.json", "!**/cache", "!site/src/data", "!dist", "!site/dist", "!**/*.svg"]
+    "includes": [
+      "src/**/*",
+      "types/**/*",
+      "pipelines/src/**/*",
+      "site/src/**/*",
+      "site/scripts/**/*",
+      "*.ts",
+      "*.js",
+      "*.mjs",
+      "*.json",
+      "!**/cache",
+      "!site/src/data",
+      "!pipelines/src/**/*.json",
+      "!dist",
+      "!site/dist",
+      "!**/*.svg"
+    ]
   },
   "formatter": {
     "enabled": true,
@@ -76,6 +92,12 @@
             "noUnusedImports": "off"
           }
         }
+      }
+    },
+    {
+      "includes": ["pipelines/src/**/*.json"],
+      "formatter": {
+        "enabled": false
       }
     }
   ]

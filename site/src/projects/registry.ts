@@ -18,6 +18,9 @@ export const STATIC_PROJECT_INFOS: StaticProjectMeta[] = PROJECT_SLUGS.map((slug
   return mod.meta;
 });
 
+/** Map of static project metadata indexed by project slug for instant synchronous validation. */
+export const STATIC_PROJECT_MAP: Record<ProjectSlug, StaticProjectMeta> = Object.fromEntries(STATIC_PROJECT_INFOS.map((p) => [p.id, p])) as Record<ProjectSlug, StaticProjectMeta>;
+
 /** Alphabetically sorted list of all unique category tags across registered projects. */
 export const ALL_UNIQUE_TAGS: ProjectTag[] = Array.from(new Set(STATIC_PROJECT_INFOS.flatMap((p) => p.tags))).sort();
 

@@ -1,24 +1,26 @@
-import fs from 'node:fs/promises';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import type { SpaceLaunchesDataset, SpaceLaunchesSummary } from '@graphs/types';
-import { ensureDir, fileExists, readJson, writeJson } from '../utils/fs.js';
-import { fetchWithRetry } from '../utils/http.js';
-import { getLogger, runWithLogger } from '../utils/logger.js';
-import { updateMetadata } from '../utils/metadata.js';
-import { resolveRegionCode } from '../utils/region.js';
+import { exportDataset, getPipelineDataPath } from '@/utils/dataset';
+import { fileExists, readJson, writeJson } from '@/utils/fs';
+import { fetchWithRetry } from '@/utils/http';
+import { getLogger, isUpdate, isVerbose, runWithLogger } from '@/utils/logger';
+import { percentage, percentageNullable, range, ratio, round, sum } from '@/utils/math';
+import { resolveRegionCode } from '@/utils/region';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const SCRIPT_DIR = __dirname;
-const CACHE_DIR = path.resolve(SCRIPT_DIR, 'cache');
-const BASE_FILE = path.join(CACHE_DIR, 'launches_base.json');
-const LATEST_CACHE_FILE = path.join(CACHE_DIR, 'latest_100.json');
-const OUTPUT_FILE = path.resolve(__dirname, '../../../site/src/data/space-launches.json');
+const DATA_FILE = getPipelineDataPath('space-launches');
 
 const API_HOST = 'll.thespacedevs.com';
 const API_VERSION = '2.3.0';
+const CURRENT_YEAR = new Date().getFullYear();
+
+interface SpaceLaunchesPipelineCache {
+  meta?: {
+    lastLaunchId?: string;
+    lastLaunchNet?: string;
+    remoteCount?: number;
+  };
+  launches: StoredLaunch[];
+  dataset: SpaceLaunchesDataset;
+}
 
 interface StoredLaunch {
   id: string;
@@ -26,9 +28,16 @@ interface StoredLaunch {
   net: string;
   leo_kg: number;
   cost: number | null;
-  country: string;
+  region: string;
   status: number;
+  country?: string;
   rocket?: string;
+}
+
+interface LaunchRegionInput {
+  country?: string;
+  rocket?: string;
+  leo_kg?: number;
 }
 
 interface ApiRocketConfiguration {
@@ -245,7 +254,7 @@ function extractPayloadKg(conf?: ApiRocketConfiguration): number {
 }
 
 /** Maps raw ISO country codes, air/sea drops, or launch pad codes to standardized space power codes. */
-function resolveLaunchRegion(launch: StoredLaunch): string {
+function resolveLaunchRegion(launch: LaunchRegionInput): string {
   const clean = (launch.country || '').toUpperCase().trim();
   const r = (launch.rocket || '').toLowerCase();
 
@@ -310,96 +319,103 @@ export async function runSpaceLaunchesPipeline(forceUpdate = false, verbose?: bo
       const logger = getLogger();
       logger.start('Starting Space Launches ETL pipeline');
 
-      await ensureDir(BASE_FILE);
+      let cache: SpaceLaunchesPipelineCache | null = null;
+      if (await fileExists(DATA_FILE)) {
+        try {
+          cache = await readJson<SpaceLaunchesPipelineCache>(DATA_FILE);
+        } catch {
+          logger.warn('Could not read existing data.json file');
+        }
+      }
 
       const launchesById = new Map<string, StoredLaunch>();
+      if (cache?.launches) {
+        for (const l of cache.launches) {
+          if (l?.id && (l.status === 3 || l.status === 4 || l.status === 7)) {
+            const region = l.region || resolveLaunchRegion(l);
+            launchesById.set(l.id, {
+              id: l.id,
+              year: l.year,
+              net: l.net,
+              leo_kg: l.leo_kg,
+              cost: l.cost,
+              region,
+              status: l.status,
+            });
+          }
+        }
+        logger.debug(`Loaded existing database (${launchesById.size} launches)`);
+      }
 
-      // Ingest from complete raw cache files if base is small or missing
-      if (await fileExists(CACHE_DIR)) {
+      const hasValidDataset = Boolean(cache?.launches?.length) && Boolean(cache?.dataset?.summary?.totalAttempts);
+      let preflightCount: number | null = null;
+      let latestRemoteLaunch: ApiLaunchResult | null = null;
+
+      // Smart pre-flight check: verify latest launch from Space Devs API via lightweight limit=1 call
+      if (!forceUpdate && hasValidDataset && cache?.meta?.lastLaunchId) {
+        logger.debug('Checking Space Devs API for recent launches via lightweight pre-flight...');
         try {
-          const files = (await fs.readdir(CACHE_DIR)).filter((f) => f.startsWith('launches_all_offset_') && f.endsWith('.json'));
-          if (files.length > 0) {
-            for (const f of files) {
-              const content = await readJson<{ results?: ApiLaunchResult[] }>(path.join(CACHE_DIR, f));
-              for (const l of content.results || []) {
-                if (!l?.id || !l.net) continue;
-                const isSuborbital = l.mission?.orbit?.name === 'Suborbital' || l.mission?.orbit?.abbrev === 'Sub';
-                if (isSuborbital) continue;
+          const preflightUrl = `https://${API_HOST}/${API_VERSION}/launches/previous/?limit=1`;
+          const res = await fetchWithRetry(preflightUrl, { retries: 2, timeoutMs: 15000 });
+          if (res.ok) {
+            const data = (await res.json()) as { count?: number; results?: ApiLaunchResult[] };
+            preflightCount = data.count ?? null;
+            latestRemoteLaunch = data.results?.[0] ?? null;
 
-                const status = l.status?.id || 0;
-                if (status !== 3 && status !== 4 && status !== 7) continue;
-
-                const year = parseInt(l.net.slice(0, 4), 10);
-                if (Number.isNaN(year) || year > 2026) continue;
-
-                const payloadKg = extractPayloadKg(l.rocket?.configuration);
-                const costVal = l.rocket?.configuration?.launch_cost != null ? parseFloat(String(l.rocket.configuration.launch_cost)) : null;
-                const cost = costVal != null && !Number.isNaN(costVal) && costVal > 0 ? costVal : null;
-                const countryCode = l.pad?.location?.country?.alpha_3_code || l.pad?.country?.alpha_3_code || l.launch_service_provider?.country_code || '';
-                const rName = l.rocket?.configuration?.full_name || l.rocket?.configuration?.name || '';
-
-                launchesById.set(l.id, {
-                  id: l.id,
-                  year,
-                  net: l.net.slice(0, 10),
-                  leo_kg: payloadKg,
-                  cost,
-                  country: countryCode,
-                  status,
-                  rocket: rName,
-                });
-              }
+            if (latestRemoteLaunch?.id === cache.meta.lastLaunchId && preflightCount === cache.meta.remoteCount) {
+              logger.info(`All space launches are up-to-date (${cache.launches.length} launches, latest: ${latestRemoteLaunch?.net?.slice(0, 10)}). Using cached dataset.`);
+              await exportDataset('space-launches', cache.dataset);
+              return cache.dataset;
             }
-            logger.debug(`Ingested ${launchesById.size} orbital launches from local cache archives`);
+            logger.info('New space launches detected upstream. Fetching recent launches...');
+          } else {
+            logger.warn(`Space Devs API preflight returned HTTP ${res.status}. Using cached dataset.`);
+            await exportDataset('space-launches', cache.dataset);
+            return cache.dataset;
           }
         } catch (err) {
-          logger.warn('Could not read raw cache offsets:', err);
+          logger.warn(`Space Devs API unreachable (${err}). Using cached dataset.`);
+          await exportDataset('space-launches', cache.dataset);
+          return cache.dataset;
         }
       }
 
-      if (await fileExists(BASE_FILE)) {
+      logger.debug('Fetching recent orbital launches from Space Devs API...');
+      const newLaunchesFetched: ApiLaunchResult[] = [];
+      let nextUrl: string | null = `https://${API_HOST}/${API_VERSION}/launches/previous/?limit=100&mode=detailed`;
+      let pagesFetched = 0;
+      const MAX_PAGES = 5;
+
+      while (nextUrl && pagesFetched < MAX_PAGES) {
         try {
-          const baseList = await readJson<StoredLaunch[]>(BASE_FILE);
-          for (const item of baseList) {
-            if (item?.id && item.year <= 2026 && (item.status === 3 || item.status === 4 || item.status === 7) && !launchesById.has(item.id)) {
-              launchesById.set(item.id, item);
-            }
+          const res = await fetchWithRetry(nextUrl, { retries: 2, timeoutMs: 25000 });
+          if (!res.ok) {
+            logger.warn(`Space Devs API returned HTTP ${res.status}`);
+            break;
           }
-          logger.debug(`Loaded base archive (${launchesById.size} total launches)`);
+          const data = (await res.json()) as { count?: number; next?: string | null; results?: ApiLaunchResult[] };
+          if (preflightCount == null && data.count != null) {
+            preflightCount = data.count;
+          }
+          const results = data.results || [];
+          if (results.length === 0) break;
+
+          let hitKnown = false;
+          for (const l of results) {
+            if (launchesById.has(l.id)) {
+              hitKnown = true;
+            }
+            newLaunchesFetched.push(l);
+          }
+
+          pagesFetched++;
+          if (hitKnown || !data.next) {
+            break;
+          }
+          nextUrl = data.next;
         } catch (err) {
-          logger.error(`Error loading ${BASE_FILE}:`, err);
-        }
-      }
-
-      if (forceUpdate) {
-        logger.debug('Force update (-u): clearing temporary cache files...');
-        if (await fileExists(LATEST_CACHE_FILE)) {
-          await fs.unlink(LATEST_CACHE_FILE).catch(() => {});
-        }
-      }
-
-      logger.debug('Fetching latest 100 launches from Space Devs API...');
-      let newLaunchesFetched: ApiLaunchResult[] = [];
-      try {
-        const url = `https://${API_HOST}/${API_VERSION}/launches/previous/?limit=100&mode=detailed`;
-        const res = await fetchWithRetry(url, { retries: 2, timeoutMs: 25000 });
-        if (res.ok) {
-          const data = (await res.json()) as { results?: ApiLaunchResult[] };
-          newLaunchesFetched = data.results || [];
-          await writeJson(LATEST_CACHE_FILE, data);
-        } else {
-          logger.warn(`Space Devs API returned HTTP ${res.status}. Falling back to cache.`);
-        }
-      } catch (err) {
-        logger.warn(`Network error querying Space Devs API: ${err}. Falling back to cache.`);
-      }
-
-      if (newLaunchesFetched.length === 0 && (await fileExists(LATEST_CACHE_FILE))) {
-        try {
-          const cached = await readJson<{ results?: ApiLaunchResult[] }>(LATEST_CACHE_FILE);
-          newLaunchesFetched = cached.results || [];
-        } catch {
-          // ignore
+          logger.warn(`Error querying Space Devs API page ${pagesFetched + 1}: ${err}`);
+          break;
         }
       }
 
@@ -413,7 +429,7 @@ export async function runSpaceLaunchesPipeline(forceUpdate = false, verbose?: bo
         if (status !== 3 && status !== 4 && status !== 7) continue;
 
         const launchYear = parseInt(launch.net.slice(0, 4), 10);
-        if (Number.isNaN(launchYear) || launchYear > 2026) continue;
+        if (Number.isNaN(launchYear) || launchYear > CURRENT_YEAR) continue;
 
         const payloadKg = extractPayloadKg(launch.rocket?.configuration);
         const costVal = launch.rocket?.configuration?.launch_cost != null ? parseFloat(String(launch.rocket.configuration.launch_cost)) : null;
@@ -425,32 +441,38 @@ export async function runSpaceLaunchesPipeline(forceUpdate = false, verbose?: bo
           addedCount++;
         }
 
+        const region = resolveLaunchRegion({ country: countryCode, rocket: rName, leo_kg: payloadKg });
+
         launchesById.set(launch.id, {
           id: launch.id,
           year: launchYear,
           net: launch.net.slice(0, 10),
           leo_kg: payloadKg,
           cost: launchCost,
-          country: countryCode,
+          region,
           status,
-          rocket: rName,
         });
       }
 
-      logger.debug(`Merged recent launches: ${addedCount} new additions (total ${launchesById.size})`);
+      if (addedCount > 0) {
+        logger.info(`Merged ${addedCount} new launches into database (total ${launchesById.size})`);
+      }
 
       const allLaunches = Array.from(launchesById.values());
       const allSorted = [...allLaunches].sort((a, b) => {
         if (a.year !== b.year) return a.year - b.year;
         return a.net.localeCompare(b.net);
       });
-      await writeJson(BASE_FILE, allSorted, 0);
+
+      if (allSorted.length === 0) {
+        throw new Error('No launch data available to process');
+      }
 
       // Determine chronological bounds
       let minYear = Infinity;
       let maxYear = -Infinity;
 
-      for (const item of allLaunches) {
+      for (const item of allSorted) {
         if (item.year < minYear) minYear = item.year;
         if (item.year > maxYear) maxYear = item.year;
       }
@@ -459,16 +481,13 @@ export async function runSpaceLaunchesPipeline(forceUpdate = false, verbose?: bo
         throw new Error('No launch data available to process');
       }
 
-      const allYears: number[] = [];
-      for (let y = minYear; y <= maxYear; y++) {
-        allYears.push(y);
-      }
+      const allYears = range(minYear, maxYear);
 
       // Compute total delivered mass per entity across all successful launches to sort them
       const entityTotalMass = new Map<string, number>();
       for (const item of allLaunches) {
         if (item.status === 3) {
-          const r = resolveLaunchRegion(item);
+          const r = item.region;
           if (r && r !== 'Others') {
             entityTotalMass.set(r, (entityTotalMass.get(r) || 0) + item.leo_kg / 1000.0);
           }
@@ -508,7 +527,7 @@ export async function runSpaceLaunchesPipeline(forceUpdate = false, verbose?: bo
       const decadesSet = new Set<number>();
 
       for (const item of allLaunches) {
-        const r = resolveLaunchRegion(item);
+        const r = item.region;
         const decade = Math.floor(item.year / 10) * 10;
         decadesSet.add(decade);
 
@@ -557,7 +576,7 @@ export async function runSpaceLaunchesPipeline(forceUpdate = false, verbose?: bo
           decadeSeries[r] = sortedDecades.map((d) => {
             const stat = decadeCostSums[r][d];
             if (stat && stat.count > 0) {
-              return Math.round(stat.sum / stat.count);
+              return round(stat.sum / stat.count, 0);
             }
             return null;
           });
@@ -583,7 +602,7 @@ export async function runSpaceLaunchesPipeline(forceUpdate = false, verbose?: bo
             count += stat.count;
           }
         }
-        return count > 0 ? Math.round(sum / count) : null;
+        return count > 0 ? round(sum / count, 0) : null;
       });
 
       // 2. Annual Capacity
@@ -591,7 +610,7 @@ export async function runSpaceLaunchesPipeline(forceUpdate = false, verbose?: bo
       const annualLaunchSeries: Record<string, number[]> = {};
 
       for (const r of sortedRegions) {
-        capacitySeries[r] = allYears.map((y) => Math.round(capacityMatrix[r][y] * 10) / 10);
+        capacitySeries[r] = allYears.map((y) => round(capacityMatrix[r][y], 1));
         annualLaunchSeries[r] = allYears.map((y) => launchMatrix[r][y]);
       }
 
@@ -604,7 +623,7 @@ export async function runSpaceLaunchesPipeline(forceUpdate = false, verbose?: bo
           const count = decadeLaunchMatrix[r]?.[d] || 0;
           if (count > 0) {
             const totalKg = decadeMassMatrix[r]?.[d] || 0;
-            return Math.round(totalKg / count);
+            return round(totalKg / count, 0);
           }
           return null;
         });
@@ -626,7 +645,7 @@ export async function runSpaceLaunchesPipeline(forceUpdate = false, verbose?: bo
           mass += decadeMassMatrix[r]?.[d] || 0;
           count += decadeLaunchMatrix[r]?.[d] || 0;
         }
-        return count > 0 ? Math.round(mass / count) : null;
+        return count > 0 ? round(mass / count, 0) : null;
       });
 
       // 4. Failure Rates per Decade
@@ -639,7 +658,7 @@ export async function runSpaceLaunchesPipeline(forceUpdate = false, verbose?: bo
           const attempts = decadeAttemptsMatrix[r]?.[d] || 0;
           if (attempts > 0) {
             const fails = decadeFailuresMatrix[r]?.[d] || 0;
-            return Math.round((fails / attempts) * 1000) / 10;
+            return percentage(fails, attempts, 1);
           }
           return null;
         });
@@ -670,7 +689,7 @@ export async function runSpaceLaunchesPipeline(forceUpdate = false, verbose?: bo
           attempts += decadeAttemptsMatrix[r]?.[d] || 0;
           fails += decadeFailuresMatrix[r]?.[d] || 0;
         }
-        return attempts > 0 ? Math.round((fails / attempts) * 1000) / 10 : null;
+        return percentageNullable(fails, attempts, 1);
       });
 
       // Precomputed Macro Summary KPIs
@@ -680,19 +699,19 @@ export async function runSpaceLaunchesPipeline(forceUpdate = false, verbose?: bo
           totalPayloadTons += val;
         }
       }
-      totalPayloadTons = Math.round(totalPayloadTons);
+      totalPayloadTons = round(totalPayloadTons, 0);
 
       let maxRegionAllTimeMass = 0;
       let leaderAllTimeRegion = '';
       for (const [r, series] of Object.entries(capacitySeries)) {
-        const sum = series.reduce((a, b) => a + b, 0);
-        if (sum > maxRegionAllTimeMass) {
-          maxRegionAllTimeMass = sum;
+        const seriesSum = sum(series);
+        if (seriesSum > maxRegionAllTimeMass) {
+          maxRegionAllTimeMass = seriesSum;
           leaderAllTimeRegion = r;
         }
       }
-      const leaderAllTimeMassTons = Math.round(maxRegionAllTimeMass);
-      const leaderAllTimeShare = totalPayloadTons > 0 ? Math.round((leaderAllTimeMassTons / totalPayloadTons) * 1000) / 10 : 0;
+      const leaderAllTimeMassTons = round(maxRegionAllTimeMass, 0);
+      const leaderAllTimeShare = percentage(leaderAllTimeMassTons, totalPayloadTons, 1);
 
       let lowestCostPerKg = Number.POSITIVE_INFINITY;
       let lowestCostRegion = '';
@@ -724,7 +743,7 @@ export async function runSpaceLaunchesPipeline(forceUpdate = false, verbose?: bo
           }
         }
         if (launchSum > 0) {
-          const avgCost = Math.round(weightedCostSum / launchSum);
+          const avgCost = round(weightedCostSum / launchSum, 0);
           if (avgCost < minDecadeAvgCost) {
             minDecadeAvgCost = avgCost;
             bestDecadeAvgCostDecade = d;
@@ -738,7 +757,7 @@ export async function runSpaceLaunchesPipeline(forceUpdate = false, verbose?: bo
 
       const baselineCost = maxDecadeAvgCost > 0 ? maxDecadeAvgCost : 0;
       const bestDecadeAvgCost = minDecadeAvgCost < Number.POSITIVE_INFINITY ? minDecadeAvgCost : 0;
-      const costReductionFactor = bestDecadeAvgCost > 0 ? Math.round((baselineCost / bestDecadeAvgCost) * 10) / 10 : 0;
+      const costReductionFactor = ratio(baselineCost, bestDecadeAvgCost, 1, 0) ?? 0;
 
       let bestDecadeCountryAvgPayloadKg = 0;
       let bestDecadeCountryAvgPayloadRegion = '';
@@ -783,9 +802,9 @@ export async function runSpaceLaunchesPipeline(forceUpdate = false, verbose?: bo
         }
       });
 
-      const baselineAvgPayloadKg = minDecadeAvgPayload < Number.POSITIVE_INFINITY ? Math.round(minDecadeAvgPayload) : 0;
-      const currentDecadeAvgPayloadKg = maxDecadeAvgPayload > 0 ? Math.round(maxDecadeAvgPayload) : 0;
-      const payloadGrowthFactor = baselineAvgPayloadKg > 0 ? Math.round((currentDecadeAvgPayloadKg / baselineAvgPayloadKg) * 10) / 10 : 0;
+      const baselineAvgPayloadKg = minDecadeAvgPayload < Number.POSITIVE_INFINITY ? round(minDecadeAvgPayload, 0) : 0;
+      const currentDecadeAvgPayloadKg = maxDecadeAvgPayload > 0 ? round(maxDecadeAvgPayload, 0) : 0;
+      const payloadGrowthFactor = ratio(currentDecadeAvgPayloadKg, baselineAvgPayloadKg, 1, 0) ?? 0;
 
       let totalAttempts = 0;
       let totalFailures = 0;
@@ -793,11 +812,11 @@ export async function runSpaceLaunchesPipeline(forceUpdate = false, verbose?: bo
       for (const r of sortedRegions) {
         const atts = failureAttemptsSeries[r] || [];
         const fails = failureCountsSeries[r] || [];
-        totalAttempts += atts.reduce((a, b) => a + b, 0);
-        totalFailures += fails.reduce((a, b) => a + b, 0);
+        totalAttempts += sum(atts);
+        totalFailures += sum(fails);
       }
 
-      const globalSuccessRate = totalAttempts > 0 ? Math.round(((totalAttempts - totalFailures) / totalAttempts) * 1000) / 10 : 0;
+      const globalSuccessRate = percentage(totalAttempts - totalFailures, totalAttempts, 1);
 
       // Decade-level global reliability and growth from worst to best decade
       let minDecadeSuccessRate = Number.POSITIVE_INFINITY;
@@ -824,9 +843,9 @@ export async function runSpaceLaunchesPipeline(forceUpdate = false, verbose?: bo
           }
         }
       });
-      const reliabilityGrowthFactor = minDecadeSuccessRate > 0 && minDecadeSuccessRate < Number.POSITIVE_INFINITY ? Math.round((maxDecadeSuccessRate / minDecadeSuccessRate) * 10) / 10 : 1;
-      const worstDecadeReliabilityRate = minDecadeSuccessRate < Number.POSITIVE_INFINITY ? Math.round(minDecadeSuccessRate * 10) / 10 : 0;
-      const bestDecadeGlobalReliabilityRate = maxDecadeSuccessRate > Number.NEGATIVE_INFINITY ? Math.round(maxDecadeSuccessRate * 10) / 10 : 0;
+      const reliabilityGrowthFactor = minDecadeSuccessRate > 0 && minDecadeSuccessRate < Number.POSITIVE_INFINITY ? (ratio(maxDecadeSuccessRate, minDecadeSuccessRate, 1) ?? 1) : 1;
+      const worstDecadeReliabilityRate = minDecadeSuccessRate < Number.POSITIVE_INFINITY ? round(minDecadeSuccessRate, 1) : 0;
+      const bestDecadeGlobalReliabilityRate = maxDecadeSuccessRate > Number.NEGATIVE_INFINITY ? round(maxDecadeSuccessRate, 1) : 0;
 
       // Best nation reliability in a single decade with > 50 attempts
       let bestDecadeReliabilityRegion = '';
@@ -838,7 +857,7 @@ export async function runSpaceLaunchesPipeline(forceUpdate = false, verbose?: bo
           const atts = failureAttemptsSeries[r]?.[idx] || 0;
           const fails = failureCountsSeries[r]?.[idx] || 0;
           if (atts > 50) {
-            const sRate = Math.round(((atts - fails) / atts) * 1000) / 10;
+            const sRate = percentage(atts - fails, atts, 1);
             if (sRate > bestDecadeReliabilityRate) {
               bestDecadeReliabilityRate = sRate;
               bestDecadeReliabilityRegion = r;
@@ -915,8 +934,23 @@ export async function runSpaceLaunchesPipeline(forceUpdate = false, verbose?: bo
         },
       };
 
-      await writeJson(OUTPUT_FILE, dataset, 0);
-      await updateMetadata('space-launches');
+      const latestLaunch = allSorted[allSorted.length - 1];
+      const newMeta = {
+        lastLaunchId: latestRemoteLaunch?.id || latestLaunch?.id || cache?.meta?.lastLaunchId,
+        lastLaunchNet: latestRemoteLaunch?.net || latestLaunch?.net || cache?.meta?.lastLaunchNet,
+        remoteCount: preflightCount ?? cache?.meta?.remoteCount ?? allSorted.length,
+      };
+
+      await writeJson(
+        DATA_FILE,
+        {
+          meta: newMeta,
+          launches: allSorted,
+          dataset,
+        },
+        0,
+      );
+      await exportDataset('space-launches', dataset);
       logger.success(`Exported space-launches dataset (${allLaunches.length.toLocaleString()} orbital launches, ${allYears[0]}–${allYears[allYears.length - 1]})`);
       return dataset;
     },
@@ -925,11 +959,8 @@ export async function runSpaceLaunchesPipeline(forceUpdate = false, verbose?: bo
 }
 
 if (import.meta.main) {
-  const args = process.argv.slice(2);
-  const force = args.includes('-u') || args.includes('--update');
-  const verbose = args.includes('-v') || args.includes('--verbose');
-  runSpaceLaunchesPipeline(force, verbose).catch((err) => {
-    console.error(err);
+  runSpaceLaunchesPipeline(isUpdate(), isVerbose()).catch((err) => {
+    getLogger('space-launches').error('Fatal error running Space Launches pipeline:', err);
     process.exit(1);
   });
 }

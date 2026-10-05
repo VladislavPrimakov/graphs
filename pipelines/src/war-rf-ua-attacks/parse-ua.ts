@@ -1,14 +1,10 @@
-import fs from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import type { AttackDataGroup } from '@graphs/types';
 import * as cheerio from 'cheerio';
-import type { AttackDataGroup } from '@/types';
-import { fileExists, readJson, writeJson } from '../utils/fs';
-import { fetchWithRetry } from '../utils/http';
-import { getLogger } from '../utils/logger';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import { fileExists, readJson, writeJson } from '@/utils/fs';
+import { fetchWithRetry } from '@/utils/http';
+import { getLogger } from '@/utils/logger';
+import { PIPELINES_SRC_DIR } from '@/utils/paths';
 
 const logger = getLogger();
 
@@ -266,25 +262,21 @@ export function parseShotDownParagraph(text: string): ParsedShotDown {
   return results;
 }
 
-interface TelegramReport {
-  post_id: string;
-  datetime: string;
+export interface UaInterceptionReport {
+  id: number;
   date: string;
-  header: string;
-  full_text: string;
-}
-
-interface DailyInterceptionEntry {
-  date: string;
-  post_id?: string | number;
-  header: string;
-  paragraph: string;
   uavs: number;
   ballistic: number;
   cruise: number;
-  totalMissiles: number;
-  total: number;
-  posts?: (string | number)[];
+}
+
+export interface UaAttacksSnapshot {
+  meta: {
+    lastPostId: number;
+    lastCrawledAt: string;
+    count: number;
+  };
+  reports: UaInterceptionReport[];
 }
 
 async function getLatestPostId(): Promise<number> {
@@ -334,9 +326,9 @@ function generateChunks(startId: number, endId: number, numChunks: number): Arra
   return chunks;
 }
 
-async function crawlChunk(chunkIdx: number, chunkStart: number, chunkEnd: number, logFn: (msg: string) => void): Promise<Record<string, TelegramReport>> {
+async function crawlChunk(chunkIdx: number, chunkStart: number, chunkEnd: number, logFn: (msg: string) => void): Promise<UaInterceptionReport[]> {
   let url = `https://t.me/s/mod_russia_en?before=${chunkStart + 1}`;
-  const chunkReports: Record<string, TelegramReport> = {};
+  const chunkReports: UaInterceptionReport[] = [];
 
   while (url) {
     let html = '';
@@ -396,19 +388,18 @@ async function crawlChunk(chunkIdx: number, chunkStart: number, chunkEnd: number
         return;
       }
 
-      const header = fullText.split('\n')[0].trim();
       const reportDt = extractReportDate(fullText, dt);
       if (reportDt && reportDt < WAR_START_DATE) {
         return;
       }
 
-      chunkReports[postLink] = {
-        post_id: postLink,
-        datetime: dt,
+      chunkReports.push({
+        id: postIdNum,
         date: reportDt,
-        header,
-        full_text: fullText,
-      };
+        uavs: parsed.uavs,
+        ballistic: parsed.ballistic,
+        cruise: parsed.cruise,
+      });
     });
 
     if (reachedLimit) {
@@ -434,138 +425,107 @@ async function crawlChunk(chunkIdx: number, chunkStart: number, chunkEnd: number
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
 
-  logFn(`Chunk ${chunkIdx + 1} (${chunkStart}-${chunkEnd}) finished: found ${Object.keys(chunkReports).length} reports`);
+  logFn(`Chunk ${chunkIdx + 1} (${chunkStart}-${chunkEnd}) finished: found ${chunkReports.length} reports`);
   return chunkReports;
 }
 
-export async function crawlTelegram(cacheFile: string, fullUpdate: boolean = false, threads: number = 16): Promise<Record<string, TelegramReport>> {
-  const cachedReports: Record<string, TelegramReport> = {};
+export async function crawlTelegram(dataFile: string, fullUpdate: boolean = false, threads: number = 16): Promise<UaInterceptionReport[]> {
+  let snapshot: UaAttacksSnapshot = {
+    meta: { lastPostId: 0, lastCrawledAt: '', count: 0 },
+    reports: [],
+  };
 
-  if (fullUpdate) {
-    const cacheDir = path.dirname(cacheFile);
+  if (!fullUpdate && (await fileExists(dataFile))) {
     try {
-      const files = await fs.readdir(cacheDir);
-      for (const f of files) {
-        await fs.unlink(path.join(cacheDir, f)).catch(() => {});
-      }
-      logger.debug(`Force update (-u): cleared cache in ${cacheDir}`);
+      snapshot = await readJson<UaAttacksSnapshot>(dataFile);
+      logger.debug(`Loaded ${snapshot.reports?.length || 0} reports from ${path.basename(dataFile)}`);
     } catch (e) {
-      void e;
+      logger.warn(`Warning loading snapshot: ${e}`);
     }
   }
 
-  if (!fullUpdate && (await fileExists(cacheFile))) {
-    try {
-      const data = await readJson<Record<string, TelegramReport>>(cacheFile);
-      for (const [k, v] of Object.entries(data)) {
-        if (!isWeeklyReport(v.full_text || '')) {
-          cachedReports[k] = v;
-        }
-      }
-      logger.debug(`Loaded ${Object.keys(cachedReports).length} cached daily reports from ${cacheFile}`);
-    } catch (e) {
-      logger.warn(`Warning loading cache: ${e}`);
-    }
-  }
-
+  const existingReports = snapshot.reports || [];
   const latestId = await getLatestPostId();
 
   let startId = 1;
-  const cachedKeys = Object.keys(cachedReports);
-  if (cachedKeys.length > 0) {
-    const postNumbers = cachedKeys.map((k) => {
-      const num = parseInt(k.split('/')[1] || '0', 10);
-      return Number.isNaN(num) ? 0 : num;
-    });
-    const maxId = Math.max(...postNumbers);
-    if (maxId >= latestId) {
-      logger.debug(`Cache is up to date (latest post ID: ${latestId})`);
-      return cachedReports;
+  if (!fullUpdate && snapshot.meta.lastPostId > 0) {
+    if (snapshot.meta.lastPostId >= latestId) {
+      logger.debug(`Telegram reports up to date (latest post ID: ${latestId})`);
+      return existingReports;
     }
-    startId = maxId;
+    startId = snapshot.meta.lastPostId + 1;
     logger.debug(`Incremental mode: crawling from post ${startId} to ${latestId}...`);
   } else {
-    logger.debug(`No cache found: crawling from post 1 to ${latestId}...`);
+    logger.debug(`Crawling from post 1 to ${latestId}...`);
   }
 
   const chunks = generateChunks(startId, latestId, threads);
   const totalPosts = latestId - startId + 1;
   logger.debug(`Splitting ${totalPosts} posts into ${chunks.length} chunks...`);
 
+  const reportMap = new Map<number, UaInterceptionReport>();
+  for (const r of existingReports) {
+    reportMap.set(r.id, r);
+  }
+
   let newFound = 0;
   for (const chunk of chunks) {
     const chunkReports = await crawlChunk(chunk[0], chunk[1], chunk[2], (msg) => logger.debug(msg));
-    for (const [k, v] of Object.entries(chunkReports)) {
-      if (!cachedReports[k]) {
+    for (const r of chunkReports) {
+      if (!reportMap.has(r.id)) {
         newFound++;
       }
-      cachedReports[k] = v;
+      reportMap.set(r.id, r);
     }
-    await writeJson(cacheFile, cachedReports);
   }
 
-  await writeJson(cacheFile, cachedReports);
-  logger.debug(`Cache updated: total ${Object.keys(cachedReports).length} daily air defence reports (+${newFound} new)`);
-  return cachedReports;
+  const updatedReports = Array.from(reportMap.values()).sort((a, b) => a.id - b.id);
+  const updatedSnapshot: UaAttacksSnapshot = {
+    meta: {
+      lastPostId: Math.max(latestId, snapshot.meta.lastPostId),
+      lastCrawledAt: new Date().toISOString(),
+      count: updatedReports.length,
+    },
+    reports: updatedReports,
+  };
+
+  await writeJson(dataFile, updatedSnapshot, 0);
+  logger.debug(`Snapshot updated: total ${updatedReports.length} reports (+${newFound} new)`);
+  return updatedReports;
 }
 
-export function processAndAuditData(cachedReports: Record<string, TelegramReport>): AttackDataGroup {
-  const dailyByDate: Record<string, DailyInterceptionEntry> = {};
+export function processAndAuditData(reports: UaInterceptionReport[]): AttackDataGroup {
+  const dailyByDate: Record<string, { uavs: number; ballistic: number; cruise: number; totalMissiles: number }> = {};
 
-  const sortedRecords = Object.values(cachedReports).sort((a, b) => {
-    const dateA = a.date || extractReportDate(a.full_text || a.header || '', a.datetime || '');
-    const dateB = b.date || extractReportDate(b.full_text || b.header || '', b.datetime || '');
-    if (dateA !== dateB) return dateA.localeCompare(dateB);
-    return (a.datetime || '').localeCompare(b.datetime || '');
+  const sortedReports = [...reports].sort((a, b) => {
+    if (a.date !== b.date) return a.date.localeCompare(b.date);
+    return a.id - b.id;
   });
 
-  for (const item of sortedRecords) {
-    const fullText = item.full_text || '';
-    if (!fullText || isWeeklyReport(fullText)) {
-      continue;
-    }
-
-    const dtStr = item.datetime || '';
-    const postId = item.post_id || '';
-    const header = item.header || '';
-
-    const dateKey = item.date || extractReportDate(fullText || header, dtStr);
+  for (const item of sortedReports) {
+    const dateKey = item.date;
     if (!dateKey || dateKey < WAR_START_DATE) {
       continue;
     }
 
-    const parsed = parseShotDownParagraph(fullText);
-    if (!parsed) {
-      continue;
-    }
-
-    const totalWeaponsFound = parsed.uavs + parsed.ballistic + parsed.cruise;
+    const totalWeaponsFound = item.uavs + item.ballistic + item.cruise;
     if (totalWeaponsFound === 0) {
       continue;
     }
 
-    const entry = {
-      date: dateKey,
-      post_id: postId,
-      header,
-      paragraph: fullText.slice(0, 400),
-      total: totalWeaponsFound,
-      ...parsed,
-    };
-
     if (dailyByDate[dateKey]) {
       const existing = dailyByDate[dateKey];
-      for (const k of ['uavs', 'ballistic', 'cruise', 'totalMissiles', 'total'] as const) {
-        existing[k] = Math.max(existing[k], entry[k]);
-      }
-      if (!existing.posts) {
-        existing.posts = existing.post_id ? [existing.post_id] : [];
-      }
-      if (postId) {
-        existing.posts.push(postId);
-      }
+      existing.uavs = Math.max(existing.uavs, item.uavs);
+      existing.ballistic = Math.max(existing.ballistic, item.ballistic);
+      existing.cruise = Math.max(existing.cruise, item.cruise);
+      existing.totalMissiles = existing.ballistic + existing.cruise;
     } else {
-      dailyByDate[dateKey] = { ...entry, posts: postId ? [postId] : [] };
+      dailyByDate[dateKey] = {
+        uavs: item.uavs,
+        ballistic: item.ballistic,
+        cruise: item.cruise,
+        totalMissiles: item.ballistic + item.cruise,
+      };
     }
   }
 
@@ -682,9 +642,24 @@ export function processAndAuditData(cachedReports: Record<string, TelegramReport
   };
 }
 
-export async function parseUaAttacks(cacheFile?: string, fullUpdate: boolean = false, threads: number = 16): Promise<AttackDataGroup> {
-  const defaultCache = path.resolve(__dirname, 'cache/ua_attacks_mod_cache.json');
-  const targetCache = cacheFile || defaultCache;
-  const cachedReports = await crawlTelegram(targetCache, fullUpdate, threads);
-  return processAndAuditData(cachedReports);
+export async function parseUaAttacks(dataPath?: string, forceUpdate: boolean = false, threads: number = 16): Promise<AttackDataGroup> {
+  const defaultFile = path.resolve(PIPELINES_SRC_DIR, 'war-rf-ua-attacks/data-ua.json');
+  const targetFile = dataPath || defaultFile;
+
+  let reports: UaInterceptionReport[] = [];
+  if (!forceUpdate && (await fileExists(targetFile))) {
+    try {
+      const snapshot = await readJson<UaAttacksSnapshot>(targetFile);
+      reports = snapshot.reports || [];
+      logger.debug(`Loaded ${reports.length} reports from ${path.basename(targetFile)}`);
+    } catch (e) {
+      logger.warn(`Failed reading ${targetFile}: ${e}`);
+    }
+  }
+
+  if (reports.length === 0 || forceUpdate) {
+    reports = await crawlTelegram(targetFile, forceUpdate, threads);
+  }
+
+  return processAndAuditData(reports);
 }

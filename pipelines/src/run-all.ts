@@ -1,23 +1,13 @@
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import type { ProjectSlug } from '@/types';
+import type { ProjectSlug } from '@graphs/types';
+import { fileExists, readJson } from '@/utils/fs';
+import { getLogger, isUpdate, isVerbose } from '@/utils/logger';
+import { getMetadataPath } from '@/utils/paths';
 import { runAiTokensPipeline } from './ai-tokens/index';
 import { runSpaceLaunchesPipeline } from './space-launches/index';
 import { runUkrainePipeline } from './ukraine/index';
-import { fileExists, readJson } from './utils/fs';
-import { getLogger, isVerbose } from './utils/logger';
 import { runWarAttacksPipeline } from './war-rf-ua-attacks/index';
 import { runWarLossesPipeline } from './war-rf-ua-losses/index';
 import { runWorldPipeline } from './world/index';
-
-try {
-  process.loadEnvFile?.();
-} catch {
-  // ignore
-}
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 interface PipelineTask {
   name: ProjectSlug;
@@ -47,18 +37,17 @@ const PIPELINES: PipelineTask[] = [
   },
   {
     name: 'war-rf-ua-losses',
-    run: ({ verbose }) => runWarLossesPipeline(verbose),
+    run: ({ update, verbose }) => runWarLossesPipeline(update, verbose),
   },
 ];
 
 /** Executes all ETL data pipelines concurrently and verifies metadata integrity. */
 export async function runAllPipelines(options: { update?: boolean; verbose?: boolean } = {}): Promise<void> {
   const verbose = options.verbose ?? isVerbose();
-  const isUpdate = options.update ?? (process.argv.includes('-u') || process.argv.includes('--update'));
+  const forceUpdate = options.update ?? isUpdate();
   const logger = getLogger('pipelines', verbose);
-  const rootDir = path.resolve(__dirname, '../..');
 
-  logger.info(`Starting Parallel Data Pipelines Refresh [${isUpdate ? 'Force Cache Refresh (-u)' : 'Cache-First / Incremental'}]`);
+  logger.info(`Starting Parallel Data Pipelines Refresh [${forceUpdate ? 'Force Cache Refresh (-u)' : 'Cache-First / Incremental'}]`);
 
   const totalStart = Date.now();
 
@@ -66,7 +55,7 @@ export async function runAllPipelines(options: { update?: boolean; verbose?: boo
     PIPELINES.map(async (p) => {
       const t0 = Date.now();
       try {
-        await p.run({ update: isUpdate, verbose });
+        await p.run({ update: forceUpdate, verbose });
         const elapsed = ((Date.now() - t0) / 1000).toFixed(2);
         logger.debug(`Pipeline [${p.name}] finished in ${elapsed}s`);
         return { name: p.name, elapsed };
@@ -82,7 +71,7 @@ export async function runAllPipelines(options: { update?: boolean; verbose?: boo
   const successCount = results.filter((r) => r.status === 'fulfilled').length;
   const failedCount = results.length - successCount;
 
-  const metaPath = path.resolve(rootDir, 'site/src/data/metadata.json');
+  const metaPath = getMetadataPath();
   if (await fileExists(metaPath)) {
     try {
       const metadata = await readJson<Record<string, string>>(metaPath);
@@ -100,7 +89,7 @@ export async function runAllPipelines(options: { update?: boolean; verbose?: boo
   }
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+if (import.meta.main) {
   runAllPipelines().catch((err) => {
     getLogger('pipelines').error('Fatal execution error:', err);
     process.exit(1);

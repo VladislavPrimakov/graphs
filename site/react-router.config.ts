@@ -1,9 +1,30 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import type { Config } from '@react-router/dev/config';
-import { PROJECT_SLUGS } from './src/types';
 import { NON_DEFAULT_LANGUAGES } from './src/utils/locales';
 
 const rawBase = process.env.BASE_URL ?? '/graphs';
 const basename = rawBase.endsWith('/') ? rawBase : `${rawBase}/`;
+
+/** Discovers project slugs and their canonical section paths dynamically from the filesystem tree. */
+function getProjectRoutes(): { slug: string; sections: string[] }[] {
+  const projectsDir = path.resolve(import.meta.dirname, 'src/projects');
+  const slugs = fs
+    .readdirSync(projectsDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name);
+
+  return slugs.map((slug) => {
+    const sectionsDir = path.join(projectsDir, slug, 'sections');
+    const sections = fs.existsSync(sectionsDir)
+      ? fs
+          .readdirSync(sectionsDir)
+          .filter((file) => file.endsWith('.ts') && !file.endsWith('.d.ts'))
+          .map((file) => file.replace(/\.ts$/, ''))
+      : [];
+    return { slug, sections };
+  });
+}
 
 export default {
   appDirectory: 'src',
@@ -18,13 +39,16 @@ export default {
     v8_trailingSlashAwareDataRequests: true,
   },
   async prerender() {
-    const defaultProjectPaths = PROJECT_SLUGS.map((slug) => `/${slug}`);
+    const projects = getProjectRoutes();
+    const defaultProjectPaths = projects.map((p) => `/${p.slug}`);
+    const defaultSectionPaths = projects.flatMap((p) => p.sections.map((sec) => `/${p.slug}/${sec}`));
     const changelogPaths = ['/changelog', ...NON_DEFAULT_LANGUAGES.map((lang) => `/${lang}/changelog`)];
     const notFoundPaths = ['/404', ...NON_DEFAULT_LANGUAGES.map((lang) => `/${lang}/404`)];
     const localizedPaths = NON_DEFAULT_LANGUAGES.flatMap((lang) => [
       `/${lang}`,
-      ...PROJECT_SLUGS.map((slug) => `/${lang}/${slug}`),
+      ...projects.map((p) => `/${lang}/${p.slug}`),
+      ...projects.flatMap((p) => p.sections.map((sec) => `/${lang}/${p.slug}/${sec}`)),
     ]);
-    return ['/', ...defaultProjectPaths, ...changelogPaths, ...notFoundPaths, ...localizedPaths];
+    return ['/', ...defaultProjectPaths, ...defaultSectionPaths, ...changelogPaths, ...notFoundPaths, ...localizedPaths];
   },
 } satisfies Config;

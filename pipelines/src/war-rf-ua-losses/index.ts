@@ -1,6 +1,4 @@
-import fs from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import {
   type LossCategoryDetailData,
   type LossCategoryItem,
@@ -13,23 +11,38 @@ import {
   type WarLossMapDataset,
 } from '@graphs/types';
 import { XMLParser } from 'fast-xml-parser';
-import { ensureDir, fileExists, readJson, writeJson } from '../utils/fs.js';
-import { fetchWithRetry } from '../utils/http.js';
-import { getLogger, runWithLogger } from '../utils/logger.js';
-import { updateMetadata } from '../utils/metadata.js';
+import { exportDataset, getPipelineDataPath } from '@/utils/dataset';
+import { fileExists, readJson, writeJson } from '@/utils/fs';
+import { fetchWithRetry } from '@/utils/http';
+import { getLogger, isUpdate, isVerbose, runWithLogger } from '@/utils/logger';
+import { ratio } from '@/utils/math';
+import { PIPELINES_SRC_DIR } from '@/utils/paths';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const SCRIPT_DIR = __dirname;
-const CACHE_DIR = path.resolve(SCRIPT_DIR, 'cache');
-const KML_FILE = path.join(CACHE_DIR, 'map_data.kml');
-const CLASSIFICATION_FILE = path.resolve(SCRIPT_DIR, 'classification.json');
-const OUTPUT_FILE = path.resolve(__dirname, '../../../site/src/data/war-rf-ua-losses.json');
+const DATA_FILE = getPipelineDataPath('war-rf-ua-losses');
+const CLASSIFICATION_FILE = path.resolve(PIPELINES_SRC_DIR, 'war-rf-ua-losses/classification.json');
 
 const GOOGLE_MAPS_KML_URL = 'https://www.google.com/maps/d/kml?mid=1dRn8TRMDLRkaaIBJad0YZvTt3dmiuxo&forcekml=1';
 
 type ClassificationRules = Record<string, Record<string, string[]>>;
+
+interface RawPlacemark {
+  name: string;
+  side: 'RF' | 'UA' | 'UNK';
+  date?: string;
+  nazva?: string;
+  lng?: number;
+  lat?: number;
+  posts?: number[];
+  sources?: string[];
+}
+
+interface WarLossesPipelineCache {
+  meta?: {
+    lastUpdated?: string;
+    totalPlacemarks?: number;
+  };
+  placemarks: RawPlacemark[];
+}
 
 interface ParsedRecord {
   name: string;
@@ -44,26 +57,15 @@ interface ParsedRecord {
   sources: string[];
 }
 
-/** Downloads latest KML map data from Google My Maps into cache. */
-async function downloadKml(filePath: string): Promise<void> {
+/** Fetches latest KML map XML text from Google My Maps directly in memory without disk writes. */
+async function fetchKmlText(): Promise<string> {
   const logger = getLogger();
-  await ensureDir(filePath);
-  logger.debug(`Downloading KML from Google My Maps to ${filePath}...`);
-  try {
-    const res = await fetchWithRetry(GOOGLE_MAPS_KML_URL, { retries: 2, timeoutMs: 40000 });
-    if (res.ok) {
-      const buffer = Buffer.from(await res.arrayBuffer());
-      await fs.writeFile(filePath, buffer);
-      logger.debug(`Successfully downloaded: ${filePath}`);
-    }
-  } catch (err) {
-    logger.warn(`Could not download fresh KML (${err}).`);
-    if (await fileExists(filePath)) {
-      logger.debug('Using existing cached KML file.');
-    } else {
-      throw err;
-    }
+  logger.debug('Downloading fresh KML from Google My Maps into memory...');
+  const res = await fetchWithRetry(GOOGLE_MAPS_KML_URL, { retries: 2, timeoutMs: 45000 });
+  if (!res.ok) {
+    throw new Error(`Google Maps KML fetch returned HTTP ${res.status}`);
   }
+  return await res.text();
 }
 
 /** Normalizes raw placemark title string. */
@@ -235,7 +237,7 @@ function parseDate(dateStr?: string): { period: string | null; formatted: string
   return { period: null, formatted: '' };
 }
 
-interface ParseKmlResult {
+interface ClassifyResult {
   records: ParsedRecord[];
   totalPlacemarks: number;
   unclassifiedSideUnk: number;
@@ -251,12 +253,8 @@ function extractXmlValue(val: unknown): string {
   return String(val);
 }
 
-/** Parses 35MB KML map dataset using high-performance streaming fast-xml-parser. */
-async function parseKml(filePath: string, rules: ClassificationRules): Promise<ParseKmlResult> {
-  const logger = getLogger();
-  logger.debug('Parsing KML file...');
-  const xmlContent = await fs.readFile(filePath, 'utf-8');
-
+/** Extracts sanitized raw placemarks from KML XML string in memory. */
+function extractPlacemarksFromKml(xmlContent: string): { placemarks: RawPlacemark[]; totalPlacemarks: number } {
   const parser = new XMLParser({
     ignoreAttributes: false,
     attributeNamePrefix: '@_',
@@ -264,14 +262,7 @@ async function parseKml(filePath: string, rules: ClassificationRules): Promise<P
   });
 
   const parsed = parser.parse(xmlContent);
-  const lookup = buildClassificationLookup(rules);
 
-  const records: ParsedRecord[] = [];
-  let totalPlacemarks = 0;
-  let unclassifiedSideUnk = 0;
-  const unclassifiedNames = new Map<string, number>();
-
-  // Traverse KML Folder hierarchy
   function collectFolders(node: unknown): Record<string, unknown>[] {
     const folders: Record<string, unknown>[] = [];
     if (!node || typeof node !== 'object') return folders;
@@ -297,6 +288,8 @@ async function parseKml(filePath: string, rules: ClassificationRules): Promise<P
   }
 
   const allFolders = collectFolders(parsed);
+  const placemarks: RawPlacemark[] = [];
+  let totalPlacemarks = 0;
 
   for (const folder of allFolders) {
     const folderName = String(folder.name || '').toLowerCase();
@@ -307,55 +300,29 @@ async function parseKml(filePath: string, rules: ClassificationRules): Promise<P
       side = 'UNK';
     }
 
-    const placemarks = folder.Placemark ? (Array.isArray(folder.Placemark) ? folder.Placemark : [folder.Placemark]) : [];
+    const pms = folder.Placemark ? (Array.isArray(folder.Placemark) ? folder.Placemark : [folder.Placemark]) : [];
 
-    for (const pm of placemarks) {
+    for (const pm of pms) {
       totalPlacemarks++;
-      const pmNameRaw = String(pm.name || 'Без названия');
-      let pmClean = cleanName(pmNameRaw);
-      let match = lookup.get(pmClean);
-
-      // Check Назва for UNK placemarks without explicit model name in title
-      if (!match && side === 'UNK' && pm.ExtendedData?.Data) {
-        const dataList = (Array.isArray(pm.ExtendedData.Data) ? pm.ExtendedData.Data : [pm.ExtendedData.Data]) as Record<string, unknown>[];
-        const nazvaItem = dataList.find((d) => d['@_name'] === 'Назва');
-        if (nazvaItem) {
-          const v = extractXmlValue(nazvaItem.value);
-          if (v && !v.startsWith('http')) {
-            const nazvaClean = cleanName(v);
-            const nazvaMatch = lookup.get(nazvaClean);
-            if (nazvaMatch) {
-              pmClean = nazvaClean;
-              match = nazvaMatch;
-            }
-          }
-        }
-      }
-
-      if (!match) {
-        if (side === 'UNK') {
-          unclassifiedSideUnk++;
-        } else {
-          unclassifiedNames.set(pmClean, (unclassifiedNames.get(pmClean) || 0) + 1);
-        }
-        continue;
-      }
+      const name = String(pm.name || 'Без названия').trim();
 
       let dateVal: string | undefined;
+      let nazvaVal: string | undefined;
       const allTexts: string[] = [String(pm.description || '')];
       const extData = pm.ExtendedData;
       if (extData?.Data) {
         const dataList = (Array.isArray(extData.Data) ? extData.Data : [extData.Data]) as Record<string, unknown>[];
         for (const d of dataList) {
-          if (d['@_name'] === 'дата') {
+          const attrName = d['@_name'];
+          if (attrName === 'дата') {
             dateVal = extractXmlValue(d.value);
+          } else if (attrName === 'Назва') {
+            nazvaVal = extractXmlValue(d.value);
           }
           const v = extractXmlValue(d.value);
           if (v) allTexts.push(v);
         }
       }
-
-      const { period, formatted: rawDate } = parseDate(dateVal);
 
       // Extract all external HTTP(S) links across description, Назва, опис, описание
       const extUrls = new Set<string>();
@@ -396,22 +363,78 @@ async function parseKml(filePath: string, rules: ClassificationRules): Promise<P
         }
       }
 
-      records.push({
-        name: match.modelEn,
-        category: match.category,
+      const rawItem: RawPlacemark = {
+        name,
         side,
-        period,
-        hasDate: period != null,
-        rawDate,
-        lng,
-        lat,
-        posts,
-        sources,
-      });
+      };
+      if (dateVal) rawItem.date = dateVal;
+      if (nazvaVal) rawItem.nazva = nazvaVal;
+      if (lng !== undefined) rawItem.lng = lng;
+      if (lat !== undefined) rawItem.lat = lat;
+      if (posts.length > 0) rawItem.posts = posts;
+      if (sources.length > 0) rawItem.sources = sources;
+
+      placemarks.push(rawItem);
     }
   }
 
-  return { records, totalPlacemarks, unclassifiedSideUnk, unclassifiedNames };
+  return { placemarks, totalPlacemarks };
+}
+
+/** Classifies raw placemarks against classification rules into ParsedRecord[]. */
+function classifyPlacemarks(placemarks: RawPlacemark[], rules: ClassificationRules): ClassifyResult {
+  const lookup = buildClassificationLookup(rules);
+  const records: ParsedRecord[] = [];
+  let unclassifiedSideUnk = 0;
+  const unclassifiedNames = new Map<string, number>();
+
+  for (const pm of placemarks) {
+    let pmClean = cleanName(pm.name);
+    let match = lookup.get(pmClean);
+
+    // Check Назва for UNK placemarks without explicit model name in title
+    if (!match && pm.side === 'UNK' && pm.nazva) {
+      if (!pm.nazva.startsWith('http')) {
+        const nazvaClean = cleanName(pm.nazva);
+        const nazvaMatch = lookup.get(nazvaClean);
+        if (nazvaMatch) {
+          pmClean = nazvaClean;
+          match = nazvaMatch;
+        }
+      }
+    }
+
+    if (!match) {
+      if (pm.side === 'UNK') {
+        unclassifiedSideUnk++;
+      } else {
+        unclassifiedNames.set(pmClean, (unclassifiedNames.get(pmClean) || 0) + 1);
+      }
+      continue;
+    }
+
+    const { period, formatted: rawDate } = parseDate(pm.date);
+
+    records.push({
+      name: match.modelEn,
+      category: match.category,
+      side: pm.side,
+      period,
+      hasDate: period != null,
+      rawDate,
+      lng: pm.lng,
+      lat: pm.lat,
+      posts: pm.posts || [],
+      sources: pm.sources || [],
+    });
+  }
+
+  return {
+    records,
+    totalPlacemarks: placemarks.length,
+    unclassifiedSideUnk,
+    unclassifiedNames,
+  };
 }
 
 /** Aggregates statistics, timeline pivots, and model breakdowns into WarLossesDataset. */
@@ -452,7 +475,7 @@ function aggregateLossesData(records: ParsedRecord[], totalPlacemarks: number): 
       id: catId,
       rf: catRf,
       ua: catUa,
-      ratio: catUa > 0 ? Math.round((catRf / catUa) * 100) / 100 : undefined,
+      ratio: ratio(catRf, catUa, 2),
     });
 
     // Monthly timelines
@@ -553,7 +576,7 @@ function aggregateLossesData(records: ParsedRecord[], totalPlacemarks: number): 
       unclassifiedRecords: Math.max(0, totalPlacemarks - records.length),
       totalRf,
       totalUa,
-      overallRatio: totalUa > 0 ? Math.round((totalRf / totalUa) * 100) / 100 : 0,
+      overallRatio: ratio(totalRf, totalUa, 2, 0) ?? 0,
       categories: categorySummary,
     },
     categoryChart: {
@@ -575,23 +598,48 @@ function aggregateLossesData(records: ParsedRecord[], totalPlacemarks: number): 
   return dataset;
 }
 
-/** Runs the War Losses ETL Pipeline. Parses KML and classification rules, builds aggregated dataset, and exports to war-rf-ua-losses.json. */
-export async function runWarLossesPipeline(verbose?: boolean): Promise<WarLossesDataset> {
+/** Runs the War Losses ETL Pipeline. Parses KML / cached placemarks and classification rules, builds aggregated dataset, and exports to war-rf-ua-losses.json. */
+export async function runWarLossesPipeline(forceUpdate = false, verbose?: boolean): Promise<WarLossesDataset> {
   return runWithLogger(
     'war-rf-ua-losses',
     async () => {
       const logger = getLogger();
       logger.start('Starting War Losses ETL pipeline');
 
-      await downloadKml(KML_FILE);
+      let placemarks: RawPlacemark[] = [];
+      let totalPlacemarks = 0;
+
+      const hasDataFile = await fileExists(DATA_FILE);
+      if (!forceUpdate && hasDataFile) {
+        logger.debug('Loading cached placemarks from local data.json...');
+        const cache = await readJson<WarLossesPipelineCache>(DATA_FILE);
+        placemarks = cache.placemarks;
+        totalPlacemarks = cache.meta?.totalPlacemarks ?? placemarks.length;
+      } else {
+        const kmlText = await fetchKmlText();
+        const extracted = extractPlacemarksFromKml(kmlText);
+        placemarks = extracted.placemarks;
+        totalPlacemarks = extracted.totalPlacemarks;
+
+        await writeJson(
+          DATA_FILE,
+          {
+            meta: {
+              lastUpdated: new Date().toISOString(),
+              totalPlacemarks,
+            },
+            placemarks,
+          },
+          0,
+        );
+        logger.info(`Saved ${placemarks.length.toLocaleString()} minimal placemarks to data.json`);
+      }
+
       const rules = await readJson<ClassificationRules>(CLASSIFICATION_FILE);
-      const { records, totalPlacemarks, unclassifiedSideUnk, unclassifiedNames } = await parseKml(KML_FILE, rules);
+      const { records, unclassifiedSideUnk, unclassifiedNames } = classifyPlacemarks(placemarks, rules);
       const dataset = aggregateLossesData(records, totalPlacemarks);
 
-      await ensureDir(OUTPUT_FILE);
-      await writeJson(OUTPUT_FILE, dataset, 0);
-
-      await updateMetadata('war-rf-ua-losses');
+      await exportDataset('war-rf-ua-losses', dataset);
 
       const classifiedCount = records.length;
       const unclassifiedCount = totalPlacemarks - classifiedCount;
@@ -618,9 +666,8 @@ export async function runWarLossesPipeline(verbose?: boolean): Promise<WarLosses
   );
 }
 
-// Direct execution support
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  runWarLossesPipeline().catch((err) => {
+if (import.meta.main) {
+  runWarLossesPipeline(isUpdate(), isVerbose()).catch((err) => {
     getLogger('war-rf-ua-losses').error('Fatal error running War Losses pipeline:', err);
     process.exit(1);
   });

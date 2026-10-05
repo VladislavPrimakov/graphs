@@ -1,95 +1,47 @@
-import fs from 'node:fs/promises';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import type { TradeCategoryId, TradeCategoryTuple, TradePartnerTuple, UkraineDataset } from '@graphs/types';
 import XLSX, { type WorkSheet } from 'xlsx';
+import { exportDataset, getPipelineDataPath } from '@/utils/dataset';
+import { fileExists, readJson, writeJson } from '@/utils/fs';
+import { fetchBinaryWithMeta, fetchHeadMeta, fetchWithRetry, isRemoteMetaEqual, type RemoteFileMeta } from '@/utils/http';
+import { getLogger, isUpdate, isVerbose, runWithLogger } from '@/utils/logger';
+import { percentage, percentageNullable, round, scaleMagnitude } from '@/utils/math';
+import { resolveRegionCode } from '@/utils/region';
 
-import type { TradePartnerTuple, UkraineDataset } from '@/types';
-import { ensureDir, fileExists, readJson, writeJson } from '../utils/fs.js';
-import { fetchWithRetry } from '../utils/http.js';
-import { getLogger, runWithLogger } from '../utils/logger.js';
-import { updateMetadata } from '../utils/metadata.js';
-import { resolveRegionCode } from '../utils/region.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const START_YEAR = 2022;
-const SCRIPT_DIR = __dirname;
-const CACHE_DIR = path.resolve(SCRIPT_DIR, 'cache');
-const BUDGET_FILE = path.join(CACHE_DIR, 'C_budget_m.xlsx');
-const TRADE_FILE = path.join(CACHE_DIR, 'Trade_y.xlsx');
-const DEBT_FILE = path.join(CACHE_DIR, 'ZB_q_UAH.xlsx');
-const GDP_FILE = path.join(CACHE_DIR, 'GDP_y.xlsx');
-const RATES_CACHE_FILE = path.join(CACHE_DIR, 'usd_rates.json');
-const OUTPUT_FILE = path.resolve(__dirname, '../../../site/src/data/ukraine.json');
+const DATA_FILE = getPipelineDataPath('ukraine');
 
 const URL_BUDGET = 'https://bank.gov.ua/files/macro/C_budget_m.xlsx';
 const URL_TRADE = 'https://bank.gov.ua/files/ES/Trade_y.xlsx';
-const URL_DEBT = 'https://bank.gov.ua/files/ES/ZB_q_UAH.xlsx';
+const URL_DEBT_Q = 'https://bank.gov.ua/files/ES/ZB_q_UAH.xlsx';
+const URL_DEBT_Y = 'https://bank.gov.ua/files/ES/ZB_y_UAH.xlsx';
 const URL_GDP = 'https://bank.gov.ua/files/macro/GDP_y.xlsx';
 
-/** Downloads a binary file from NBU to disk if missing or during forced update. */
-async function downloadFile(url: string, filePath: string): Promise<void> {
-  const logger = getLogger();
-  await ensureDir(filePath);
-  try {
-    const res = await fetchWithRetry(url, { retries: 2, timeoutMs: 30000 });
-    if (res.ok) {
-      const buffer = Buffer.from(await res.arrayBuffer());
-      await fs.writeFile(filePath, buffer);
-      logger.debug(`Downloaded latest ${path.basename(filePath)}`);
-    }
-  } catch (err) {
-    logger.warn(`Warning downloading ${url}: ${err}`);
-    if (await fileExists(filePath)) {
-      logger.debug(`Using existing cached file ${filePath}`);
-    } else {
-      throw err;
-    }
-  }
+interface UkrainePipelineCache {
+  meta?: Record<string, RemoteFileMeta>;
+  rates: Record<string, Record<string, number>>;
+  dataset: UkraineDataset;
 }
 
-/** Ensures all required NBU Excel files exist in cache. */
-async function ensureDataFiles(forceUpdate = false): Promise<void> {
-  const files: [string, string][] = [
-    [URL_BUDGET, BUDGET_FILE],
-    [URL_TRADE, TRADE_FILE],
-    [URL_DEBT, DEBT_FILE],
-    [URL_GDP, GDP_FILE],
-  ];
-  for (const [url, filePath] of files) {
-    if (forceUpdate || !(await fileExists(filePath))) {
-      await downloadFile(url, filePath);
-    }
-  }
-}
-
-/** Fetches monthly average USD/UAH exchange rates from NBU API. */
-async function getMonthlyExchangeRates(yearsMonths: Record<number, number[]>, forceUpdate = false): Promise<Record<string, number>> {
+/** Fetches monthly average USD/UAH exchange rates from NBU API, reusing cached historical rates. */
+async function getMonthlyExchangeRates(
+  yearsMonths: Record<number, number[]>,
+  cachedRates: Record<string, Record<string, number>> = {},
+  forceUpdate = false,
+): Promise<{ ratesByMonth: Record<string, number>; updatedCache: Record<string, Record<string, number>> }> {
   const logger = getLogger();
-  let cache: Record<string, Record<string, number>> = {};
-  if (await fileExists(RATES_CACHE_FILE)) {
-    try {
-      cache = await readJson<Record<string, Record<string, number>>>(RATES_CACHE_FILE);
-    } catch (err) {
-      logger.warn('Could not read exchange rates cache:', err);
-    }
-  }
-
   const currentYear = new Date().getFullYear();
-  let cacheModified = false;
   const ratesByMonth: Record<string, number> = {};
+  const updatedCache: Record<string, Record<string, number>> = { ...cachedRates };
 
   for (const year of Object.keys(yearsMonths)
     .map(Number)
     .sort((a, b) => a - b)) {
     const yearStr = String(year);
     const requiredMonths = yearsMonths[year];
-    const hasAllMonths = yearStr in cache && requiredMonths.every((m) => String(m) in cache[yearStr]);
+    const hasAllMonths = yearStr in updatedCache && requiredMonths.every((m) => String(m) in updatedCache[yearStr]);
 
     if (!forceUpdate && year < currentYear && hasAllMonths) {
       for (const m of requiredMonths) {
-        ratesByMonth[`${year}-${m}`] = cache[yearStr][String(m)];
+        ratesByMonth[`${year}-${m}`] = updatedCache[yearStr][String(m)];
       }
     } else {
       logger.debug(`Fetching USD/UAH rates for ${year} from NBU API...`);
@@ -97,33 +49,33 @@ async function getMonthlyExchangeRates(yearsMonths: Record<number, number[]>, fo
         const url = `https://bank.gov.ua/NBU_Exchange/exchange_site?start=${year}0101&end=${year}1231&valcode=usd&sort=exchangedate&order=asc&json`;
         const res = await fetchWithRetry(url, { retries: 2, timeoutMs: 20000 });
         if (res.ok) {
-          const data = (await res.json()) as Array<{ exchangedate?: string; rate?: number }>;
+          const data = (await res.json()) as Array<{ exchangedate?: string; rate?: number; rate_per_unit?: number; units?: number }>;
           const monthVals: Record<number, number[]> = {};
           for (const item of data) {
-            if (item.exchangedate && item.rate != null) {
+            if (item.exchangedate && (item.rate != null || item.rate_per_unit != null)) {
               const parts = item.exchangedate.split('.');
               if (parts.length === 3) {
                 const m = parseInt(parts[1], 10);
                 if (!monthVals[m]) monthVals[m] = [];
-                monthVals[m].push(item.rate);
+                const rateVal = item.rate_per_unit ?? (item.units ? item.rate! / item.units : item.rate!);
+                monthVals[m].push(rateVal);
               }
             }
           }
 
-          const yearRates = cache[yearStr] || {};
+          const yearRates = updatedCache[yearStr] || {};
           for (const [m, vals] of Object.entries(monthVals)) {
             const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
             ratesByMonth[`${year}-${m}`] = avg;
             yearRates[m] = avg;
-            cacheModified = true;
           }
-          cache[yearStr] = yearRates;
+          updatedCache[yearStr] = yearRates;
         }
       } catch (err) {
         logger.warn(`Could not fetch rates for ${year}: ${err}`);
-        if (yearStr in cache) {
+        if (yearStr in updatedCache) {
           for (const m of requiredMonths) {
-            ratesByMonth[`${year}-${m}`] = cache[yearStr][String(m)] ?? 40.0;
+            ratesByMonth[`${year}-${m}`] = updatedCache[yearStr][String(m)] ?? 40.0;
           }
         } else {
           throw err;
@@ -132,11 +84,7 @@ async function getMonthlyExchangeRates(yearsMonths: Record<number, number[]>, fo
     }
   }
 
-  if (cacheModified) {
-    await writeJson(RATES_CACHE_FILE, cache, 0);
-  }
-
-  return ratesByMonth;
+  return { ratesByMonth, updatedCache };
 }
 
 /** Builds (year, month) -> column index map by scanning row 1 of budget sheet. */
@@ -147,7 +95,6 @@ function buildDateToColumnMap(rows: unknown[][]): Map<string, number> {
     const val = headerRow[col];
     if (val != null) {
       if (typeof val === 'number') {
-        // Excel serial date format
         const dateObj = XLSX.SSF.parse_date_code(val);
         if (dateObj?.y && dateObj.m) {
           map.set(`${dateObj.y}-${dateObj.m}`, col);
@@ -185,52 +132,86 @@ function extractMonthlyDifferences(rows: unknown[][], rowIdx: number, year: numb
   return deltas;
 }
 
-/** Parses sheet '1.1' of ZB_q_UAH.xlsx to extract Total Gross External Debt in billion UAH. */
-function loadDebtData(filePath: string, targetYears: number[]): Record<number, number> {
-  const wb = XLSX.readFile(filePath);
-  const sheet = wb.Sheets['1.1'];
-  if (!sheet) return {};
+/** Parses sheet '1.1' from in-memory debt workbooks to extract Total Gross External Debt in billion UAH. */
+function loadDebtData(quarterlyWb: XLSX.WorkBook, targetYears: number[], annualWb?: XLSX.WorkBook | null): Record<number, number> {
+  const result: Record<number, number> = {};
+
+  if (annualWb) {
+    try {
+      const sheetY = annualWb.Sheets['1.1'];
+      if (sheetY) {
+        const rowsY = XLSX.utils.sheet_to_json(sheetY, { header: 1, raw: true, blankrows: true, defval: null }) as unknown[][];
+        let debtRowY = 79;
+        for (let r = 0; r < rowsY.length; r++) {
+          const txt = String(rowsY[r]?.[0] || '').toLowerCase();
+          if (txt.includes('валовий') && txt.includes('зовнішній борг')) {
+            debtRowY = r;
+            break;
+          }
+        }
+        const row5 = rowsY[5] || [];
+        for (let c = 1; c < row5.length; c++) {
+          const val = row5[c];
+          if (typeof val === 'number') {
+            const dateObj = XLSX.SSF.parse_date_code(val);
+            if (dateObj?.y && rowsY[debtRowY]?.[c] != null) {
+              const valM = parseFloat(String(rowsY[debtRowY][c])) || 0;
+              result[dateObj.y] = valM / 1000.0;
+            }
+          }
+        }
+      }
+    } catch {
+      // Optional historical annual file fallback
+    }
+  }
+
+  const sheet = quarterlyWb.Sheets['1.1'];
+  if (!sheet) return result;
   const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, blankrows: true, defval: null }) as unknown[][];
 
   let debtRow = 95;
   for (let r = 0; r < rows.length; r++) {
     const txt = String(rows[r]?.[0] || '').toLowerCase();
-    if (txt.includes('разом') && txt.includes('всього')) {
+    if (txt.includes('валовий') && txt.includes('зовнішній борг')) {
       debtRow = r;
       break;
     }
   }
 
+  let currentYear: number | null = null;
   const yearLatestCol = new Map<number, number>();
   const yearRow = rows[4] || [];
-  for (let c = 2; c < yearRow.length; c++) {
-    const val = yearRow[c];
-    if (val != null) {
-      const parsedYear = parseInt(String(val), 10);
+  const quartersRow = rows[5] || [];
+
+  for (let c = 1; c < quartersRow.length; c++) {
+    if (yearRow[c] != null) {
+      const parsedYear = parseInt(String(yearRow[c]), 10);
       if (!Number.isNaN(parsedYear)) {
-        yearLatestCol.set(parsedYear, c);
+        currentYear = parsedYear;
       }
+    }
+    if (currentYear != null && rows[debtRow]?.[c] != null) {
+      yearLatestCol.set(currentYear, c);
     }
   }
 
-  const result: Record<number, number> = {};
   for (const y of targetYears) {
     const col = yearLatestCol.get(y);
     if (col != null && rows[debtRow]?.[col] != null) {
       const valM = parseFloat(String(rows[debtRow][col])) || 0;
       result[y] = valM / 1000.0;
-    } else {
+    } else if (result[y] == null) {
       result[y] = 0;
     }
   }
   return result;
 }
 
-/** Parses sheet 'GDP_1996-2025' from GDP_y.xlsx to extract Nominal GDP in billion UAH. */
-function loadGdpData(filePath: string, targetYears: number[]): Record<number, number> {
-  const wb = XLSX.readFile(filePath);
-  const sheetName = wb.SheetNames.find((s: string) => s.includes('GDP_')) || wb.SheetNames[0];
-  const sheet = wb.Sheets[sheetName];
+/** Parses in-memory GDP workbook to extract Nominal GDP in billion UAH. */
+function loadGdpData(gdpWb: XLSX.WorkBook, targetYears: number[]): Record<number, number> {
+  const sheetName = gdpWb.SheetNames.find((s: string) => s.includes('GDP_')) || gdpWb.SheetNames[0];
+  const sheet = gdpWb.Sheets[sheetName];
   if (!sheet) return {};
   const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, blankrows: true, defval: null }) as unknown[][];
 
@@ -248,24 +229,27 @@ function loadGdpData(filePath: string, targetYears: number[]): Record<number, nu
   return result;
 }
 
-/** Loads Foreign Trade data (exports and imports) by partner from Trade_y.xlsx. */
-function loadTradeData(budgetYears: number[]): {
+/** Loads Foreign Trade data (exports and imports) by partner from in-memory trade workbook across all available years. */
+function loadTradeData(tradeWb: XLSX.WorkBook): {
   tradeYears: number[];
   totalExports: number[];
   totalImports: number[];
   tradeBalance: number[];
   exports: TradePartnerTuple[][];
   imports: TradePartnerTuple[][];
+  categoryExports: TradeCategoryTuple[][];
+  categoryImports: TradeCategoryTuple[][];
 } {
-  const wb = XLSX.readFile(TRADE_FILE);
-  const expSheet = wb.Sheets['1.10'];
-  const impSheet = wb.Sheets['1.11'];
+  const expSheet = tradeWb.Sheets['1.10'];
+  const impSheet = tradeWb.Sheets['1.11'];
+  const expCatSheet = tradeWb.Sheets['1.1 '];
+  const impCatSheet = tradeWb.Sheets['1.2'];
 
   function processTradeSheet(sheet: WorkSheet) {
     const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, blankrows: true, defval: null }) as unknown[][];
     const yMap = new Map<number, number>();
     const headerRow = rows[5] || [];
-    for (let col = 7; col < headerRow.length; col++) {
+    for (let col = 6; col < headerRow.length; col++) {
       const val = headerRow[col];
       if (val == null || String(val).trim() === '') break;
       const num = Number(val);
@@ -276,7 +260,7 @@ function loadTradeData(budgetYears: number[]): {
       }
     }
 
-    const validYears = budgetYears.filter((y) => yMap.has(y));
+    const validYears = Array.from(yMap.keys()).sort((a, b) => a - b);
     const totals: Record<number, number> = {};
 
     for (const y of validYears) {
@@ -306,9 +290,9 @@ function loadTradeData(budgetYears: number[]): {
   const allCountryCodes = new Set<string>([...Object.keys(expData.countries), ...Object.keys(impData.countries)]);
   allCountryCodes.delete('Others');
 
-  const tExp = tradeYears.map((y) => Math.round(expData.totals[y] * 10) / 10);
-  const tImp = tradeYears.map((y) => Math.round(impData.totals[y] * 10) / 10);
-  const saldo = tradeYears.map((_, i) => Math.round((tExp[i] - tImp[i]) * 10) / 10);
+  const tExp = tradeYears.map((y) => round(expData.totals[y], 1));
+  const tImp = tradeYears.map((y) => round(impData.totals[y], 1));
+  const saldo = tradeYears.map((_, i) => round(tExp[i] - tImp[i], 1));
 
   // Per-year breakdowns sorted descending by value: [countryCode, value, share]
   const exports: TradePartnerTuple[][] = [];
@@ -322,9 +306,9 @@ function loadTradeData(budgetYears: number[]): {
     const yearExp: TradePartnerTuple[] = [];
     for (const code of allCountryCodes) {
       const val = expData.countries[code]?.[y] || 0;
-      const roundedVal = Math.round(val * 10) / 10;
+      const roundedVal = round(val, 1);
       if (roundedVal > 0) {
-        const share = totE > 0 ? Math.round((roundedVal / totE) * 1000) / 10 : 0;
+        const share = percentage(roundedVal, totE, 1);
         yearExp.push([code, roundedVal, share]);
       }
     }
@@ -334,14 +318,72 @@ function loadTradeData(budgetYears: number[]): {
     const yearImp: TradePartnerTuple[] = [];
     for (const code of allCountryCodes) {
       const val = impData.countries[code]?.[y] || 0;
-      const roundedVal = Math.round(val * 10) / 10;
+      const roundedVal = round(val, 1);
       if (roundedVal > 0) {
-        const share = totI > 0 ? Math.round((roundedVal / totI) * 1000) / 10 : 0;
+        const share = percentage(roundedVal, totI, 1);
         yearImp.push([code, roundedVal, share]);
       }
     }
     yearImp.sort((a, b) => b[1] - a[1]);
     imports.push(yearImp);
+  }
+
+  // Parse commodity category dynamics from sheets '1.1 ' (exports) and '1.2' (imports)
+  const expCatRows = XLSX.utils.sheet_to_json(expCatSheet, { header: 1, raw: true, blankrows: false, defval: null }) as unknown[][];
+  const impCatRows = XLSX.utils.sheet_to_json(impCatSheet, { header: 1, raw: true, blankrows: false, defval: null }) as unknown[][];
+
+  const catHeaderRow = expCatRows[4] || [];
+  const catYearCols = new Map<number, number>();
+  for (let c = 3; c < catHeaderRow.length; c++) {
+    const y = parseInt(String(catHeaderRow[c]), 10);
+    if (!Number.isNaN(y)) catYearCols.set(y, c);
+  }
+
+  const CATEGORY_ROWS: { id: TradeCategoryId; row: number }[] = [
+    { id: 'agriculture', row: 6 },
+    { id: 'minerals', row: 7 },
+    { id: 'chemicals', row: 8 },
+    { id: 'timber', row: 9 },
+    { id: 'manufactured', row: 10 },
+    { id: 'metals', row: 11 },
+    { id: 'machinery', row: 12 },
+    { id: 'other', row: 13 },
+  ];
+
+  // Per-year commodity category breakdowns sorted descending by value: [categoryId, value, share]
+  const categoryExports: TradeCategoryTuple[][] = [];
+  const categoryImports: TradeCategoryTuple[][] = [];
+
+  for (let i = 0; i < tradeYears.length; i++) {
+    const y = tradeYears[i];
+    const col = catYearCols.get(y);
+    const totE = tExp[i];
+    const totI = tImp[i];
+
+    const yearCatExp: TradeCategoryTuple[] = [];
+    const yearCatImp: TradeCategoryTuple[] = [];
+
+    for (const { id, row } of CATEGORY_ROWS) {
+      const expVal = col != null ? (Number(expCatRows[row]?.[col]) || 0) / 1000.0 : 0;
+      const impVal = col != null ? (Number(impCatRows[row]?.[col]) || 0) / 1000.0 : 0;
+      const roundedExp = round(expVal, 1);
+      const roundedImp = round(impVal, 1);
+
+      if (roundedExp > 0) {
+        const share = percentage(roundedExp, totE, 1);
+        yearCatExp.push([id, roundedExp, share]);
+      }
+      if (roundedImp > 0) {
+        const share = percentage(roundedImp, totI, 1);
+        yearCatImp.push([id, roundedImp, share]);
+      }
+    }
+
+    yearCatExp.sort((a, b) => b[1] - a[1]);
+    yearCatImp.sort((a, b) => b[1] - a[1]);
+
+    categoryExports.push(yearCatExp);
+    categoryImports.push(yearCatImp);
   }
 
   return {
@@ -351,10 +393,12 @@ function loadTradeData(budgetYears: number[]): {
     tradeBalance: saldo,
     exports,
     imports,
+    categoryExports,
+    categoryImports,
   };
 }
 
-/** Runs the Ukraine ETL Pipeline. Parses budget execution, sovereign debt, GDP, and trade structure, and saves the structured dataset to site/src/data/ukraine.json. */
+/** Runs the Ukraine ETL Pipeline. Parses budget execution, sovereign debt, GDP, and trade structure entirely in memory, outputting to site/src/data/ukraine.json and cache/data.json. */
 export async function runUkrainePipeline(forceUpdate = false, verbose?: boolean): Promise<UkraineDataset> {
   return runWithLogger(
     'ukraine',
@@ -362,9 +406,78 @@ export async function runUkrainePipeline(forceUpdate = false, verbose?: boolean)
       const logger = getLogger();
       logger.start('Starting Ukraine ETL pipeline');
 
-      await ensureDataFiles(forceUpdate);
+      let existingCache: UkrainePipelineCache | null = null;
+      if (await fileExists(DATA_FILE)) {
+        try {
+          existingCache = await readJson<UkrainePipelineCache>(DATA_FILE);
+        } catch {
+          logger.warn('Could not read existing data.json file');
+        }
+      }
 
-      const budgetWb = XLSX.readFile(BUDGET_FILE);
+      const hasValidDataset = Boolean(existingCache?.dataset?.budgetDebt?.years?.length) && Boolean(existingCache?.dataset?.trade?.years?.length);
+
+      const allUrls = [URL_BUDGET, URL_TRADE, URL_DEBT_Q, URL_DEBT_Y, URL_GDP];
+
+      // Fast check: verify if remote files are unchanged via HTTP HEAD
+      if (!forceUpdate && hasValidDataset && existingCache?.meta) {
+        logger.debug('Checking NBU file metadata via HTTP HEAD...');
+        const remoteMetas = await Promise.all(allUrls.map((url) => fetchHeadMeta(url)));
+        const networkFailed = remoteMetas.every((m) => m === null);
+
+        if (networkFailed) {
+          logger.warn('NBU server unreachable (offline). Using cached dataset.');
+          await exportDataset('ukraine', existingCache.dataset);
+          return existingCache.dataset;
+        }
+
+        const allUnchanged = allUrls.every((url, i) => isRemoteMetaEqual(existingCache.meta?.[url], remoteMetas[i]));
+
+        if (allUnchanged) {
+          logger.info('All NBU source files are unchanged (matching remote ETags). Using cached dataset.');
+          await exportDataset('ukraine', existingCache.dataset);
+          return existingCache.dataset;
+        }
+
+        logger.info('NBU source files updated upstream. Downloading updated workbooks...');
+      }
+
+      let budgetWb: XLSX.WorkBook;
+      let tradeWb: XLSX.WorkBook;
+      let debtWb: XLSX.WorkBook;
+      let debtAnnualWb: XLSX.WorkBook | null = null;
+      let gdpWb: XLSX.WorkBook;
+      const newMeta: Record<string, RemoteFileMeta> = { ...(existingCache?.meta || {}) };
+
+      try {
+        const [bRes, tRes, dRes, gRes] = await Promise.all([fetchBinaryWithMeta(URL_BUDGET), fetchBinaryWithMeta(URL_TRADE), fetchBinaryWithMeta(URL_DEBT_Q), fetchBinaryWithMeta(URL_GDP)]);
+
+        newMeta[URL_BUDGET] = bRes.meta;
+        newMeta[URL_TRADE] = tRes.meta;
+        newMeta[URL_DEBT_Q] = dRes.meta;
+        newMeta[URL_GDP] = gRes.meta;
+
+        budgetWb = XLSX.read(bRes.buffer, { type: 'buffer' });
+        tradeWb = XLSX.read(tRes.buffer, { type: 'buffer' });
+        debtWb = XLSX.read(dRes.buffer, { type: 'buffer' });
+        gdpWb = XLSX.read(gRes.buffer, { type: 'buffer' });
+
+        try {
+          const dyRes = await fetchBinaryWithMeta(URL_DEBT_Y);
+          debtAnnualWb = XLSX.read(dyRes.buffer, { type: 'buffer' });
+          newMeta[URL_DEBT_Y] = dyRes.meta;
+        } catch {
+          logger.debug('Optional annual debt file fetch skipped');
+        }
+      } catch (networkErr) {
+        if (hasValidDataset && existingCache?.dataset) {
+          logger.warn(`Network fetch failed (${(networkErr as Error).message}). Using cached data.`);
+          await exportDataset('ukraine', existingCache.dataset);
+          return existingCache.dataset;
+        }
+        throw new Error(`Failed to fetch Ukraine data from NBU and no local cache exists: ${(networkErr as Error).message}`);
+      }
+
       const revSheet = budgetWb.Sheets['1'];
       const expSheet = budgetWb.Sheets['4'];
       const finSheet = budgetWb.Sheets['7'];
@@ -378,21 +491,25 @@ export async function runUkrainePipeline(forceUpdate = false, verbose?: boolean)
       const yearsMonths: Record<number, number[]> = {};
       for (const [key, col] of dateToCol.entries()) {
         const [y, m] = key.split('-').map(Number);
-        if (y >= START_YEAR) {
-          const revVal = dfRev[2]?.[col];
-          if (revVal != null && Number(revVal) !== 0) {
-            if (!yearsMonths[y]) yearsMonths[y] = [];
-            yearsMonths[y].push(m);
-          }
+        const revVal = dfRev[2]?.[col];
+        if (revVal != null && Number(revVal) !== 0) {
+          if (!yearsMonths[y]) yearsMonths[y] = [];
+          yearsMonths[y].push(m);
         }
+      }
+
+      for (const y of Object.keys(yearsMonths)) {
+        yearsMonths[Number(y)].sort((a, b) => a - b);
       }
 
       const budgetYears = Object.keys(yearsMonths)
         .map(Number)
         .sort((a, b) => a - b);
-      const rates = await getMonthlyExchangeRates(yearsMonths, forceUpdate);
-      const debtUahByYear = loadDebtData(DEBT_FILE, budgetYears);
-      const gdpUahByYear = loadGdpData(GDP_FILE, budgetYears);
+
+      const { ratesByMonth: rates, updatedCache: ratesCache } = await getMonthlyExchangeRates(yearsMonths, existingCache?.rates, forceUpdate);
+
+      const debtUahByYear = loadDebtData(debtWb, budgetYears, debtAnnualWb);
+      const gdpUahByYear = loadGdpData(gdpWb, budgetYears);
 
       const defenseVals: number[] = [];
       const otherExpVals: number[] = [];
@@ -431,10 +548,10 @@ export async function runUkrainePipeline(forceUpdate = false, verbose?: boolean)
           const totExpUah = totExpM[m] || 0;
           const othersUah = totExpUah - defUah;
 
-          defUsdSum += defUah / 1000.0 / rate;
-          othersUsdSum += othersUah / 1000.0 / rate;
-          totExpUsdSum += totExpUah / 1000.0 / rate;
-          totExpUahSum += totExpUah / 1000.0;
+          defUsdSum += scaleMagnitude(defUah, 1, rate);
+          othersUsdSum += scaleMagnitude(othersUah, 1, rate);
+          totExpUsdSum += scaleMagnitude(totExpUah, 1, rate);
+          totExpUahSum += scaleMagnitude(totExpUah, 1);
 
           const totRevUah = totRevM[m] || 0;
           const grantsUah = grantsM[m] || 0;
@@ -442,13 +559,13 @@ export async function runUkrainePipeline(forceUpdate = false, verbose?: boolean)
           const intRevUah = totRevUah - grantsUah - trustUah;
           const extLoanUah = extLoanM[m] || 0;
 
-          intRevUsdSum += intRevUah / 1000.0 / rate;
-          grantsUsdSum += grantsUah / 1000.0 / rate;
-          trustUsdSum += trustUah / 1000.0 / rate;
-          loanUsdSum += extLoanUah / 1000.0 / rate;
+          intRevUsdSum += scaleMagnitude(intRevUah, 1, rate);
+          grantsUsdSum += scaleMagnitude(grantsUah, 1, rate);
+          trustUsdSum += scaleMagnitude(trustUah, 1, rate);
+          loanUsdSum += scaleMagnitude(extLoanUah, 1, rate);
         }
 
-        const weightedRate = totExpUsdSum > 0 ? Math.round((totExpUahSum / totExpUsdSum) * 100) / 100 : 0;
+        const weightedRate = totExpUsdSum > 0 ? round(totExpUahSum / totExpUsdSum, 2) : 0;
         weightedRates.push(weightedRate);
 
         const labelYear = months.length < 12 ? `${year} (${months.length} months)` : String(year);
@@ -457,45 +574,42 @@ export async function runUkrainePipeline(forceUpdate = false, verbose?: boolean)
         const lastM = months[months.length - 1];
         const rateLastM = rates[`${year}-${lastM}`] || 40.0;
         const debtUah = debtUahByYear[year] || 0;
-        const debtUsd = debtUah / rateLastM;
-        debtVals.push(Math.round(debtUsd * 10) / 10);
+        const debtUsd = debtUah > 0 ? debtUah / rateLastM : 0;
+        debtVals.push(round(debtUsd, 1));
 
         const gdpUah = gdpUahByYear[year];
-        const gdpUsd = gdpUah != null && weightedRate > 0 ? Math.round((gdpUah / weightedRate) * 10) / 10 : null;
+        const gdpUsd = gdpUah != null && weightedRate > 0 ? round(gdpUah / weightedRate, 1) : null;
         gdpList.push(gdpUsd);
 
-        const dVal = Math.round(defUsdSum * 10) / 10;
-        const oVal = Math.round(othersUsdSum * 10) / 10;
-        const expVal = Math.round(totExpUsdSum * 10) / 10;
+        const dVal = round(defUsdSum, 1);
+        const oVal = round(othersUsdSum, 1);
+        const expVal = round(totExpUsdSum, 1);
         defenseVals.push(dVal);
         otherExpVals.push(oVal);
         totalExpVals.push(expVal);
 
-        const domVal = Math.round(intRevUsdSum * 10) / 10;
-        const nonLoanUsd = Math.round((grantsUsdSum + trustUsdSum) * 10) / 10;
-        const lVal = Math.round(loanUsdSum * 10) / 10;
+        const domVal = round(intRevUsdSum, 1);
+        const nonLoanUsd = round(grantsUsdSum + trustUsdSum, 1);
+        const lVal = round(Math.max(0, loanUsdSum), 1);
         domesticRevVals.push(domVal);
         grantsVals.push(nonLoanUsd);
         loansVals.push(lVal);
-        totalRevFinVals.push(Math.round((domVal + nonLoanUsd + lVal) * 10) / 10);
+        totalRevFinVals.push(round(domVal + nonLoanUsd + lVal, 1));
 
-        balances.push(Math.round((domVal + nonLoanUsd - expVal) * 100) / 100);
+        balances.push(round(domVal + nonLoanUsd - expVal, 2));
       }
 
-      const roundPct = (num: number, denom: number): number => (denom > 0 ? Math.round((num / denom) * 1000) / 10 : 0);
-      const roundGdpPct = (num: number, gdp: number | null): number | null => (gdp != null && gdp > 0 ? Math.round((num / gdp) * 1000) / 10 : null);
+      const defensePct = defenseVals.map((d, i) => percentage(d, totalExpVals[i], 1));
+      const otherExpPct = otherExpVals.map((o, i) => percentage(o, totalExpVals[i], 1));
+      const domesticRevPct = domesticRevVals.map((r, i) => percentage(r, totalRevFinVals[i], 1));
+      const grantsPct = grantsVals.map((g, i) => percentage(g, totalRevFinVals[i], 1));
+      const loansPct = loansVals.map((l, i) => percentage(l, totalRevFinVals[i], 1));
 
-      const defensePct = defenseVals.map((d, i) => roundPct(d, totalExpVals[i]));
-      const otherExpPct = otherExpVals.map((o, i) => roundPct(o, totalExpVals[i]));
-      const domesticRevPct = domesticRevVals.map((r, i) => roundPct(r, totalRevFinVals[i]));
-      const grantsPct = grantsVals.map((g, i) => roundPct(g, totalRevFinVals[i]));
-      const loansPct = loansVals.map((l, i) => roundPct(l, totalRevFinVals[i]));
+      const expGdpPct = gdpList.map((gdp, i) => percentageNullable(totalExpVals[i], gdp, 1));
+      const revGdpPct = gdpList.map((gdp, i) => percentageNullable(totalRevFinVals[i], gdp, 1));
+      const debtGdpPct = gdpList.map((gdp, i) => percentageNullable(debtVals[i], gdp, 1));
 
-      const expGdpPct = gdpList.map((gdp, i) => roundGdpPct(totalExpVals[i], gdp));
-      const revGdpPct = gdpList.map((gdp, i) => roundGdpPct(totalRevFinVals[i], gdp));
-      const debtGdpPct = gdpList.map((gdp, i) => roundGdpPct(debtVals[i], gdp));
-
-      const trade = loadTradeData(budgetYears);
+      const trade = loadTradeData(tradeWb);
 
       const dataset: UkraineDataset = {
         budgetDebt: {
@@ -528,11 +642,13 @@ export async function runUkrainePipeline(forceUpdate = false, verbose?: boolean)
           tradeBalance: trade.tradeBalance,
           exports: trade.exports,
           imports: trade.imports,
+          categoryExports: trade.categoryExports,
+          categoryImports: trade.categoryImports,
         },
       };
 
-      await writeJson(OUTPUT_FILE, dataset, 0);
-      await updateMetadata('ukraine');
+      await writeJson(DATA_FILE, { meta: newMeta, rates: ratesCache, dataset }, 0);
+      await exportDataset('ukraine', dataset);
       logger.success(`Exported ukraine dataset (${budgetYears[0]}–${budgetYears[budgetYears.length - 1]} budget & trade series)`);
       return dataset;
     },
@@ -540,11 +656,8 @@ export async function runUkrainePipeline(forceUpdate = false, verbose?: boolean)
   );
 }
 
-export { runUkrainePipeline as runUaEconomicPipeline };
-
-// Direct execution support
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  runUkrainePipeline().catch((err) => {
+if (import.meta.main) {
+  runUkrainePipeline(isUpdate(), isVerbose()).catch((err) => {
     getLogger('ukraine').error('Fatal error running Ukraine pipeline:', err);
     process.exit(1);
   });

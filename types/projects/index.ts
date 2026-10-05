@@ -13,14 +13,7 @@ export * from './war-rf-ua-losses';
 export * from './world';
 
 /** Canonical registry of all project slug identifiers in the catalog. */
-export const PROJECT_SLUGS = [
-  'ai-tokens',
-  'ukraine',
-  'world',
-  'space-launches',
-  'war-rf-ua-attacks',
-  'war-rf-ua-losses',
-] as const;
+export const PROJECT_SLUGS = ['ai-tokens', 'ukraine', 'world', 'space-launches', 'war-rf-ua-attacks', 'war-rf-ua-losses'] as const;
 
 /** Union of all valid unique URL slugs for interactive visualization projects. */
 export type ProjectSlug = (typeof PROJECT_SLUGS)[number];

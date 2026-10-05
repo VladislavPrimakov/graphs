@@ -21,4 +21,15 @@ export const dict: typeof enDict = {
   tradePartners: {
     title: 'Wichtigste Handelspartner nach Warenumsatz',
   },
+  tradeCategories: {
+    title: 'Warenhandelsstruktur nach Gütergruppen',
+    agriculture: 'Agrar',
+    minerals: 'Mineralien',
+    chemicals: 'Chemie',
+    timber: 'Holz',
+    manufactured: 'Industriewaren',
+    metals: 'Metalle',
+    machinery: 'Maschinen',
+    other: 'Sonstiges',
+  },
 };

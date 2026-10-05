@@ -1,30 +1,18 @@
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import type { WorldChartMetricData, WorldDataset } from '@graphs/types';
-import { ensureDir, fileExists, readJson, writeJson } from '../utils/fs.js';
-import { fetchWithRetry } from '../utils/http.js';
-import { getLogger, runWithLogger } from '../utils/logger.js';
-import { updateMetadata } from '../utils/metadata.js';
-import { resolveRegionCode } from '../utils/region.js';
+import { exportDataset, getPipelineDataPath } from '@/utils/dataset';
+import { fileExists, readJson, writeJson } from '@/utils/fs';
+import { fetchHeadMeta, fetchWithRetry, isRemoteMetaEqual, type RemoteFileMeta } from '@/utils/http';
+import { getLogger, isUpdate, isVerbose, runWithLogger } from '@/utils/logger';
+import { range, round } from '@/utils/math';
+import { resolveRegionCode } from '@/utils/region';
 
-try {
-  process.loadEnvFile?.();
-} catch {
-  // .env may not exist in CI or certain environments
-}
+const DATA_FILE = getPipelineDataPath('world');
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const OWID_ENERGY_URL = 'https://raw.githubusercontent.com/owid/energy-data/master/owid-energy-data.csv';
+const WDI_SOURCE_URL = 'https://api.worldbank.org/v2/sources/2?format=json';
 
-const SCRIPT_DIR = __dirname;
-const CACHE_DIR = path.resolve(SCRIPT_DIR, 'cache');
-const MACRO_CACHE_FILE = path.join(CACHE_DIR, 'macro_data_worldbank.json');
-const PHYSICAL_CACHE_FILE = path.join(CACHE_DIR, 'physical_industrial_data.json');
-const REPORTERS_CACHE_FILE = path.join(CACHE_DIR, 'comtrade_reporters.json');
-const OUTPUT_FILE = path.resolve(__dirname, '../../../site/src/data/world.json');
-
-const START_YEAR = 2000;
-const END_YEAR = 2024;
+const START_YEAR = 1990;
+const CURRENT_YEAR = new Date().getFullYear();
 
 /** Explicitly ignored global or non-geographic aggregate entities. */
 export const EXCLUDED_ENTITIES = new Set([
@@ -72,19 +60,48 @@ interface PhysicalData {
   elec_per_capita_kwh: Record<string, Record<number | string, number>>;
 }
 
-/** Fetches global macroeconomic series from World Bank API & IMF WEO. */
-async function fetchMacroDataWorldBank(forceUpdate = false): Promise<MacroData> {
-  const logger = getLogger();
-  if (!forceUpdate && (await fileExists(MACRO_CACHE_FILE))) {
+interface WorldPipelineCache {
+  meta?: {
+    wdiLastUpdated?: string | null;
+    owid?: RemoteFileMeta | null;
+  };
+  macro: MacroData;
+  physical: PhysicalData;
+  reporters: Record<number, string>;
+  dataset: WorldDataset;
+}
+
+/** Fetches latest WDI database release date from World Bank sources API. */
+async function fetchWdiLastUpdated(): Promise<string | null> {
+  try {
+    const res = await fetchWithRetry(WDI_SOURCE_URL, { retries: 2, timeoutMs: 15000 });
+    if (!res.ok) return null;
+    const json = (await res.json()) as [unknown, Array<{ id?: string; lastupdated?: string }>];
+    return json?.[1]?.[0]?.lastupdated || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Loads consolidated data.json cache. */
+async function loadWorldCache(): Promise<WorldPipelineCache | null> {
+  if (await fileExists(DATA_FILE)) {
     try {
-      const cached = await readJson<MacroData>(MACRO_CACHE_FILE);
-      if (cached.gdp_ppp_kd && Object.keys(cached.gdp_ppp_kd).length > 0) {
-        logger.debug(`Loaded Macro data from cache: ${path.basename(MACRO_CACHE_FILE)}`);
-        return cached;
-      }
+      return await readJson<WorldPipelineCache>(DATA_FILE);
     } catch {
-      // ignore
+      // ignore corrupt cache
     }
+  }
+  return null;
+}
+
+/** Fetches global macroeconomic series from World Bank API & IMF WEO. */
+async function fetchMacroDataWorldBank(existingMacro?: MacroData, forceUpdate = false): Promise<MacroData> {
+  const logger = getLogger();
+  const hasMacroRange = Boolean(existingMacro?.gdp_ppp_kd?.USA?.[START_YEAR] && (existingMacro?.gdp_ppp_kd?.USA?.[CURRENT_YEAR] || existingMacro?.gdp_ppp_kd?.USA?.[CURRENT_YEAR - 1]));
+  if (!forceUpdate && hasMacroRange && existingMacro?.gdp_ppp_kd && Object.keys(existingMacro.gdp_ppp_kd).length > 0) {
+    logger.debug('Using cached World Bank & IMF macroeconomic data');
+    return existingMacro;
   }
 
   logger.debug('Fetching global macroeconomic series from World Bank API & IMF WEO...');
@@ -117,7 +134,7 @@ async function fetchMacroDataWorldBank(forceUpdate = false): Promise<MacroData> 
     ];
 
     for (const ind of indicators) {
-      const url = `https://api.worldbank.org/v2/country/all/indicator/${ind.code}?date=${START_YEAR}:${END_YEAR}&format=json&per_page=16000`;
+      const url = `https://api.worldbank.org/v2/country/all/indicator/${ind.code}?date=${START_YEAR}:${CURRENT_YEAR}&format=json&per_page=16000`;
       const res = await fetchWithRetry(url, { retries: 2, timeoutMs: 45000 });
       if (res.ok) {
         const json = (await res.json()) as [unknown, Array<{ countryiso3code?: string; date?: string; value?: number | null }>];
@@ -127,7 +144,7 @@ async function fetchMacroDataWorldBank(forceUpdate = false): Promise<MacroData> 
           if (code?.length !== 3 || EXCLUDED_ENTITIES.has(code)) continue;
           const year = parseInt(row.date || '', 10);
           const val = row.value;
-          if (!Number.isNaN(year) && year >= START_YEAR && year <= END_YEAR && val != null && !Number.isNaN(val)) {
+          if (!Number.isNaN(year) && year >= START_YEAR && year <= CURRENT_YEAR && val != null && !Number.isNaN(val)) {
             if (!data[ind.key][code]) data[ind.key][code] = {};
             data[ind.key][code][year] = val;
           }
@@ -164,7 +181,7 @@ async function fetchMacroDataWorldBank(forceUpdate = false): Promise<MacroData> 
           for (let i = 0; i < periods.length; i++) {
             const y = parseInt(periods[i], 10);
             const val = values[i];
-            if (y >= START_YEAR && y <= END_YEAR && val != null) {
+            if (y >= START_YEAR && y <= CURRENT_YEAR && val != null) {
               twnMap[subj][y] = val;
             }
           }
@@ -174,11 +191,11 @@ async function fetchMacroDataWorldBank(forceUpdate = false): Promise<MacroData> 
         data.gdp_pcap_ppp_kd.TWN = {};
         data.cpi.TWN = {};
 
-        for (let y = START_YEAR; y <= END_YEAR; y++) {
+        for (let y = START_YEAR; y <= CURRENT_YEAR; y++) {
           const perCapita = twnMap.NGDPRPPPPC?.[y];
           const lp = twnMap.LP?.[y];
           if (perCapita != null) {
-            data.gdp_pcap_ppp_kd.TWN[y] = Math.round(perCapita);
+            data.gdp_pcap_ppp_kd.TWN[y] = round(perCapita, 0);
             if (lp != null) {
               data.gdp_ppp_kd.TWN[y] = perCapita * lp * 1e6;
             }
@@ -193,13 +210,11 @@ async function fetchMacroDataWorldBank(forceUpdate = false): Promise<MacroData> 
       logger.warn(`IMF WEO Taiwan query warning: ${e}`);
     }
 
-    await writeJson(MACRO_CACHE_FILE, data, 0);
-    logger.debug('Global macroeconomic data cached successfully.');
     return data;
   } catch (err) {
     logger.warn(`World Bank query failed (${err}).`);
-    if (await fileExists(MACRO_CACHE_FILE)) {
-      return await readJson<MacroData>(MACRO_CACHE_FILE);
+    if (existingMacro?.gdp_ppp_kd && Object.keys(existingMacro.gdp_ppp_kd).length > 0) {
+      return existingMacro;
     }
     throw err;
   }
@@ -234,7 +249,7 @@ function parseOwidCsvGlobal(csvText: string): {
     const countryName = cols[cIdx]?.trim();
     const iso = cols[isoIdx]?.trim();
     const year = parseInt(cols[yIdx]?.trim(), 10);
-    if (Number.isNaN(year) || year < START_YEAR || year > END_YEAR) continue;
+    if (Number.isNaN(year) || year < START_YEAR || year > CURRENT_YEAR) continue;
 
     let entityCode = '';
     if (iso && iso.length === 3 && !iso.startsWith('OWID')) {
@@ -248,20 +263,20 @@ function parseOwidCsvGlobal(csvText: string): {
     const eleVal = parseFloat(cols[eleIdx]?.trim());
     if (!Number.isNaN(eleVal)) {
       if (!electricity_twh[entityCode]) electricity_twh[entityCode] = {};
-      electricity_twh[entityCode][year] = Math.round(eleVal * 10) / 10;
+      electricity_twh[entityCode][year] = round(eleVal, 1);
     }
 
     const solVal = parseFloat(cols[solIdx]?.trim()) || 0;
     const winVal = parseFloat(cols[winIdx]?.trim()) || 0;
     if (solVal > 0 || winVal > 0) {
       if (!solar_wind_twh[entityCode]) solar_wind_twh[entityCode] = {};
-      solar_wind_twh[entityCode][year] = Math.round((solVal + winVal) * 10) / 10;
+      solar_wind_twh[entityCode][year] = round(solVal + winVal, 1);
     }
 
     const capVal = parseFloat(cols[capIdx]?.trim());
     if (!Number.isNaN(capVal)) {
       if (!elec_per_capita_kwh[entityCode]) elec_per_capita_kwh[entityCode] = {};
-      elec_per_capita_kwh[entityCode][year] = Math.round(capVal * 10) / 10;
+      elec_per_capita_kwh[entityCode][year] = round(capVal, 1);
     }
   }
 
@@ -269,19 +284,12 @@ function parseOwidCsvGlobal(csvText: string): {
 }
 
 /** Fetches UN Comtrade reporter area mappings from static reference API. */
-async function fetchComtradeReporters(): Promise<Record<number, string>> {
-  const logger = getLogger();
-  if (await fileExists(REPORTERS_CACHE_FILE)) {
-    try {
-      const cached = await readJson<Record<number, string>>(REPORTERS_CACHE_FILE);
-      if (Object.keys(cached).length > 0) {
-        return cached;
-      }
-    } catch {
-      // ignore
-    }
+async function fetchComtradeReporters(existingReporters?: Record<number, string>): Promise<Record<number, string>> {
+  if (existingReporters && Object.keys(existingReporters).length > 20) {
+    return existingReporters;
   }
 
+  const logger = getLogger();
   const map: Record<number, string> = {
     97: 'EUU', // European Union
     156: 'CHN',
@@ -305,7 +313,6 @@ async function fetchComtradeReporters(): Promise<Record<number, string>> {
           map[item.id] = item.reporterCodeIsoAlpha3;
         }
       }
-      await writeJson(REPORTERS_CACHE_FILE, map, 0);
     }
   } catch (err) {
     logger.warn(`Failed to fetch Comtrade reporters reference (${err}). Using built-in mappings.`);
@@ -315,22 +322,13 @@ async function fetchComtradeReporters(): Promise<Record<number, string>> {
 }
 
 /** Fetches physical industrial scale, electricity, and machinery trade turnover. */
-async function fetchPhysicalAndMachineryData(forceUpdate = false): Promise<PhysicalData> {
+async function fetchPhysicalAndMachineryData(existingPhysical?: PhysicalData, comtradeReporters?: Record<number, string>, owidChanged = true, forceUpdate = false): Promise<PhysicalData> {
   const logger = getLogger();
-  let existingData: Partial<PhysicalData> = {};
-  if (await fileExists(PHYSICAL_CACHE_FILE)) {
-    try {
-      existingData = await readJson<PhysicalData>(PHYSICAL_CACHE_FILE);
-    } catch {
-      // ignore
-    }
-  }
-
   const data: PhysicalData = {
-    chapter84_nominal: existingData.chapter84_nominal || {},
-    electricity_twh: existingData.electricity_twh || {},
-    solar_wind_twh: existingData.solar_wind_twh || {},
-    elec_per_capita_kwh: existingData.elec_per_capita_kwh || {},
+    chapter84_nominal: existingPhysical?.chapter84_nominal || {},
+    electricity_twh: existingPhysical?.electricity_twh || {},
+    solar_wind_twh: existingPhysical?.solar_wind_twh || {},
+    elec_per_capita_kwh: existingPhysical?.elec_per_capita_kwh || {},
   };
 
   if (data.chapter84_nominal.EUR && !data.chapter84_nominal.EUU) {
@@ -342,11 +340,11 @@ async function fetchPhysicalAndMachineryData(forceUpdate = false): Promise<Physi
   delete data.elec_per_capita_kwh.EUR;
 
   // 1. OWID Energy Data
-  if (forceUpdate || !existingData.electricity_twh || Object.keys(existingData.electricity_twh).length < 20) {
+  const hasEnergyRange = Boolean(existingPhysical?.electricity_twh?.USA?.[START_YEAR]);
+  if (owidChanged || forceUpdate || !hasEnergyRange || !existingPhysical?.electricity_twh || Object.keys(existingPhysical.electricity_twh).length < 20) {
     logger.debug('Fetching OWID Energy (Electricity, Solar/Wind, Per-Capita)...');
     try {
-      const owidUrl = 'https://raw.githubusercontent.com/owid/energy-data/master/owid-energy-data.csv';
-      const res = await fetchWithRetry(owidUrl, { retries: 2, timeoutMs: 30000 });
+      const res = await fetchWithRetry(OWID_ENERGY_URL, { retries: 2, timeoutMs: 30000 });
       if (res.ok) {
         const csvText = await res.text();
         const parsed = parseOwidCsvGlobal(csvText);
@@ -360,56 +358,49 @@ async function fetchPhysicalAndMachineryData(forceUpdate = false): Promise<Physi
   }
 
   // 2. UN Comtrade Chapter 84 Machinery Trade
-  const comtradeReporters = await fetchComtradeReporters();
+  const reporters = comtradeReporters || (await fetchComtradeReporters());
   const comtradeKey = process.env.COMTRADE_API_KEY || '';
   const comtradeHeaders: Record<string, string> = comtradeKey ? { 'Ocp-Apim-Subscription-Key': comtradeKey } : {};
-  const currentYear = new Date().getFullYear();
+  const comtradeDelay = comtradeKey ? 1200 : 3500;
 
-  let neededFetch = false;
-  for (let y = START_YEAR; y <= END_YEAR; y++) {
+  for (let y = START_YEAR; y <= CURRENT_YEAR; y++) {
     // Check if this year already has diverse reporters in cache (> 10 countries)
     const hasYearData = Object.values(data.chapter84_nominal).filter((cDict) => (cDict[y] ?? cDict[String(y)]) != null).length >= 10;
-    if (!forceUpdate && y < currentYear && hasYearData) {
+    if (!forceUpdate && y < CURRENT_YEAR && hasYearData) {
       continue;
     }
 
-    neededFetch = true;
     try {
       logger.debug(`Fetching UN Comtrade Chapter 84 (${y})...`);
       const comtradeUrl = `https://comtradeapi.un.org/public/v1/preview/C/A/HS?period=${y}&cmdCode=84&flowCode=M,X&partnerCode=0&partner2Code=0&customsCode=C00&motCode=0`;
-      const res = await fetchWithRetry(comtradeUrl, { retries: 2, timeoutMs: 45000, headers: comtradeHeaders });
+      const res = await fetchWithRetry(comtradeUrl, { retries: 3, backoffMs: 4000, timeoutMs: 45000, headers: comtradeHeaders });
       if (res.ok) {
         const json = (await res.json()) as { data?: Array<{ reporterCode: number; primaryValue: number }> };
         const sums: Record<string, number> = {};
         for (const row of json.data || []) {
-          const iso3 = comtradeReporters[row.reporterCode];
+          const iso3 = reporters[row.reporterCode];
           if (iso3 && row.primaryValue > 0 && !EXCLUDED_ENTITIES.has(iso3)) {
             sums[iso3] = (sums[iso3] || 0) + row.primaryValue;
           }
         }
         for (const [c, val] of Object.entries(sums)) {
           if (!data.chapter84_nominal[c]) data.chapter84_nominal[c] = {};
-          data.chapter84_nominal[c][y] = Math.round((val / 1e9) * 100) / 100;
+          data.chapter84_nominal[c][y] = round(val / 1e9, 2);
         }
         logger.debug(`UN Comtrade Chapter 84 (${y}): fetched ${Object.keys(sums).length} reporters`);
       }
     } catch (e) {
       logger.warn(`UN Comtrade Chapter 84 (${y}) warning: ${e}`);
     }
-    await new Promise((resolve) => setTimeout(resolve, 1200));
-  }
-
-  if (neededFetch || forceUpdate) {
-    await writeJson(PHYSICAL_CACHE_FILE, data, 0);
-    logger.debug('Physical Industrial & Machinery data cached successfully.');
+    await new Promise((resolve) => setTimeout(resolve, comtradeDelay));
   }
 
   return data;
 }
 
 /** Resolves the latest available non-null value in a time series looking backwards. */
-function getLatestVal(dict: Record<number | string, number | undefined>): number {
-  for (let y = END_YEAR; y >= START_YEAR; y--) {
+function getLatestVal(dict: Record<number | string, number | undefined>, endYear: number): number {
+  for (let y = endYear; y >= START_YEAR; y--) {
     const v = dict[y] ?? dict[String(y)];
     if (v != null && !Number.isNaN(v)) return v;
   }
@@ -424,23 +415,78 @@ export async function runWorldPipeline(forceUpdate = false, verbose?: boolean): 
       const logger = getLogger();
       logger.start('Starting World ETL pipeline');
 
-      await ensureDir(MACRO_CACHE_FILE);
+      const cache = await loadWorldCache();
+      const hasValidDataset =
+        Boolean(cache?.dataset?.years?.length) &&
+        cache?.dataset?.years?.[0] === START_YEAR &&
+        (cache?.dataset?.years?.[cache.dataset.years.length - 1] ?? 0) >= CURRENT_YEAR - 1 &&
+        Boolean(cache?.dataset?.charts?.gdpPpp?.series);
 
-      const macroRaw = await fetchMacroDataWorldBank(forceUpdate);
-      const physicalData = await fetchPhysicalAndMachineryData(forceUpdate);
+      let remoteWdiDate: string | null = null;
+      let remoteOwidMeta: RemoteFileMeta | null = null;
+      let wdiChanged = true;
+      let owidChanged = true;
 
-      const years: number[] = [];
-      for (let y = START_YEAR; y <= END_YEAR; y++) {
-        years.push(y);
+      // Fast check: verify if remote files/databases are unchanged via HTTP metadata
+      if (!forceUpdate && hasValidDataset && cache?.meta) {
+        logger.debug('Checking World Bank WDI and OWID metadata...');
+        [remoteWdiDate, remoteOwidMeta] = await Promise.all([fetchWdiLastUpdated(), fetchHeadMeta(OWID_ENERGY_URL)]);
+
+        const networkFailed = remoteWdiDate === null && remoteOwidMeta === null;
+        if (networkFailed) {
+          logger.warn('Remote data sources unreachable (offline). Using cached dataset.');
+          await exportDataset('world', cache.dataset);
+          return cache.dataset;
+        }
+
+        wdiChanged = remoteWdiDate == null || remoteWdiDate !== cache.meta.wdiLastUpdated;
+        owidChanged = !isRemoteMetaEqual(cache.meta.owid, remoteOwidMeta);
+
+        if (!wdiChanged && !owidChanged) {
+          logger.info('All source metadata matches remote (WDI release & OWID ETag). Using cached dataset.');
+          await exportDataset('world', cache.dataset);
+          return cache.dataset;
+        }
+
+        logger.info('Remote sources updated upstream. Refreshing dataset...');
       }
+
+      const reporters = await fetchComtradeReporters(cache?.reporters);
+      const macroRaw = await fetchMacroDataWorldBank(cache?.macro, forceUpdate || wdiChanged);
+      const physicalData = await fetchPhysicalAndMachineryData(cache?.physical, reporters, owidChanged, forceUpdate);
+
+      // Determine latest available year across fetched sources (data-driven)
+      let maxYear = START_YEAR;
+      for (const series of Object.values(macroRaw.gdp_ppp_kd || {})) {
+        for (const yStr of Object.keys(series)) {
+          const y = parseInt(yStr, 10);
+          if (y > maxYear && y <= CURRENT_YEAR) maxYear = y;
+        }
+      }
+      for (const series of Object.values(physicalData.electricity_twh || {})) {
+        for (const yStr of Object.keys(series)) {
+          const y = parseInt(yStr, 10);
+          if (y > maxYear && y <= CURRENT_YEAR) maxYear = y;
+        }
+      }
+      for (const series of Object.values(physicalData.chapter84_nominal || {})) {
+        for (const yStr of Object.keys(series)) {
+          const y = parseInt(yStr, 10);
+          if (y > maxYear && y <= CURRENT_YEAR) maxYear = y;
+        }
+      }
+      const endYear = maxYear;
+      const years = range(START_YEAR, endYear);
 
       const nationalCpis = macroRaw.cpi || {};
       const cpiUs: Record<string | number, number> = nationalCpis.USA || {};
       const cpi2021 = Number(cpiUs[2021] ?? cpiUs['2021'] ?? 124.27);
       const usDeflator: Record<number, number> = {};
+      let lastKnownCpi = cpi2021;
       for (const y of years) {
-        const cVal = Number(cpiUs[y] ?? cpiUs[String(y)] ?? cpi2021);
-        usDeflator[y] = cpi2021 / cVal;
+        const cVal = Number(cpiUs[y] ?? cpiUs[String(y)] ?? lastKnownCpi);
+        if (cVal > 0) lastKnownCpi = cVal;
+        usDeflator[y] = cpi2021 / lastKnownCpi;
       }
 
       // Real GDP PPP (Trillions)
@@ -462,7 +508,7 @@ export async function runWorldPipeline(forceUpdate = false, verbose?: boolean): 
         for (const y of years) {
           const valNom = Number(series[y] ?? series[String(y)] ?? 0);
           if (valNom > 0) {
-            ch84Real[c][y] = Math.round(valNom * usDeflator[y] * 10) / 10;
+            ch84Real[c][y] = round(valNom * usDeflator[y], 1);
           }
         }
       }
@@ -480,7 +526,7 @@ export async function runWorldPipeline(forceUpdate = false, verbose?: boolean): 
         const entityLatest = new Map<string, number>();
         for (const [code, series] of Object.entries(rawDict)) {
           if (!isCountry(code) && code !== 'EUU') continue;
-          const lv = getLatestVal(series);
+          const lv = getLatestVal(series, endYear);
           if (lv > 0) {
             entityLatest.set(code, lv);
           }
@@ -500,8 +546,7 @@ export async function runWorldPipeline(forceUpdate = false, verbose?: boolean): 
             const val = cDict[y] ?? cDict[String(y)];
             if (val != null && !Number.isNaN(val)) {
               hasAny = true;
-              const factor = 10 ** decimals;
-              values.push(Math.round(val * scale * factor) / factor);
+              values.push(round(val * scale, decimals));
             } else {
               values.push(null);
             }
@@ -531,8 +576,21 @@ export async function runWorldPipeline(forceUpdate = false, verbose?: boolean): 
         },
       };
 
-      await writeJson(OUTPUT_FILE, dataset, 0);
-      await updateMetadata('world');
+      await writeJson(
+        DATA_FILE,
+        {
+          meta: {
+            wdiLastUpdated: remoteWdiDate || cache?.meta?.wdiLastUpdated || '2026-07-13',
+            owid: remoteOwidMeta || cache?.meta?.owid || null,
+          },
+          macro: macroRaw,
+          physical: physicalData,
+          reporters,
+          dataset,
+        },
+        0,
+      );
+      await exportDataset('world', dataset);
       logger.success(`Exported world dataset (${years.length} years, 6 macroeconomic & industrial charts)`);
       return dataset;
     },
@@ -540,11 +598,8 @@ export async function runWorldPipeline(forceUpdate = false, verbose?: boolean): 
   );
 }
 
-export { runWorldPipeline as runWorldEconomicPipeline };
-
-// Direct execution support
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  runWorldPipeline().catch((err) => {
+if (import.meta.main) {
+  runWorldPipeline(isUpdate(), isVerbose()).catch((err) => {
     getLogger('world').error('Fatal error running World pipeline:', err);
     process.exit(1);
   });

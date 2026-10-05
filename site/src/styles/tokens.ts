@@ -83,6 +83,16 @@ export const themeColors = {
     exportTotal: '#3b82f6',
     importTotal: '#f97316',
     balanceLine: '#38bdf8',
+    categories: {
+      agriculture: '#10b981',
+      metals: '#64748b',
+      machinery: '#3b82f6',
+      minerals: '#f59e0b',
+      chemicals: '#8b5cf6',
+      timber: '#8d5b38',
+      manufactured: '#f43f5e',
+      other: '#0891b2',
+    },
   },
 };
 
