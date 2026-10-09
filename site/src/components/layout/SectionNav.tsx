@@ -2,8 +2,8 @@ import type React from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { cn } from '@/utils/cn';
-import { useLanguage } from '@/utils/locales';
-import { useScrollSpy } from '@/utils/useScrollSpy';
+import { usePath } from '@/utils/provider';
+import { SECTION_DATA_ATTR, useScrollSpy } from '@/utils/useScrollSpy';
 
 /** Props for the SectionNav outline component. */
 export interface SectionNavProps {
@@ -17,20 +17,23 @@ export interface SectionNavProps {
   projectTitle?: string;
   /** Initial section identifier from route params. */
   initialSection?: string;
+  /** Optional callback fired when navigating to a target section via anchor pill. */
+  onNavigate?: (sectionId: string) => void;
 }
 
 /** Horizontal outline navigation pill bar rendered into header center slot via React Portal. */
-export const SectionNav: React.FC<SectionNavProps> = ({ sections, projectSlug, sectionTitles, projectTitle, initialSection }) => {
+export const SectionNav: React.FC<SectionNavProps> = ({ sections, projectSlug, sectionTitles, projectTitle, initialSection, onNavigate }) => {
   const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
   const containerRef = useRef<HTMLElement>(null);
-  const { getHref } = useLanguage();
+  const { getHref } = usePath();
 
   const activeId = useScrollSpy({
-    selector: '[data-section]',
-    projectSlug,
-    projectTitle,
-    sectionTitles,
-    initialSection,
+    initialId: initialSection,
+    getHref: (id) => (id ? getHref(`/${projectSlug}/${id}`) : getHref(`/${projectSlug}`)),
+    resolveTitle: (id) => {
+      if (!id || !projectTitle || !sectionTitles?.[id]) return projectTitle;
+      return `${projectTitle} — ${sectionTitles[id]}`;
+    },
   });
 
   useEffect(() => {
@@ -66,14 +69,11 @@ export const SectionNav: React.FC<SectionNavProps> = ({ sections, projectSlug, s
             href={targetHref}
             data-nav-section={sectionId}
             onClick={(e) => {
-              const target = document.querySelector<HTMLElement>(`[data-section="${sectionId}"], #${CSS.escape(sectionId)}`);
+              const target = document.querySelector<HTMLElement>(`[${SECTION_DATA_ATTR}="${sectionId}"], #${CSS.escape(sectionId)}`);
               if (target) {
                 e.preventDefault();
+                onNavigate?.(sectionId);
                 target.scrollIntoView({ behavior: 'smooth' });
-                history.replaceState(null, '', targetHref + window.location.search);
-                if (projectTitle && sectionTitles?.[sectionId]) {
-                  document.title = `${projectTitle} — ${sectionTitles[sectionId]}`;
-                }
               }
             }}
             className={cn('nav-pill shrink-0 whitespace-nowrap', isActive ? 'nav-pill-active' : 'nav-pill-idle')}

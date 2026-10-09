@@ -1,5 +1,8 @@
-import type { SpaceLaunchesDataset, SpaceLaunchesSummary } from '@graphs/types';
-import { exportDataset, getPipelineDataPath } from '@/utils/dataset';
+import type { AvgPayloadSectionData } from '@graphs/types/space-launches/avg-payload';
+import type { FailureRatesSectionData } from '@graphs/types/space-launches/failure-rates';
+import type { LaunchCostsSectionData } from '@graphs/types/space-launches/launch-costs';
+import type { PayloadCapacitySectionData } from '@graphs/types/space-launches/payload-capacity';
+import { exportProjectSections, getPipelineDataPath } from '@/utils/dataset';
 import { fileExists, readJson, writeJson } from '@/utils/fs';
 import { fetchWithRetry } from '@/utils/http';
 import { getLogger, isUpdate, isVerbose, runWithLogger } from '@/utils/logger';
@@ -19,7 +22,17 @@ interface SpaceLaunchesPipelineCache {
     remoteCount?: number;
   };
   launches: StoredLaunch[];
-  dataset: SpaceLaunchesDataset;
+  sections: {
+    'payload-capacity': PayloadCapacitySectionData;
+    'avg-payload': AvgPayloadSectionData;
+    'launch-costs': LaunchCostsSectionData;
+    'failure-rates': FailureRatesSectionData;
+  };
+}
+
+/** Exports section datasets for space-launches. */
+async function exportSpaceLaunches(sections: SpaceLaunchesPipelineCache['sections']): Promise<void> {
+  await exportProjectSections('space-launches', sections);
 }
 
 interface StoredLaunch {
@@ -312,7 +325,7 @@ function resolveLaunchRegion(launch: LaunchRegionInput): string {
 /**
  * Executes the Space Launches ETL pipeline. Fetches recent orbital launches from Space Devs API, merges with historical archives, computes payload capacity time series, decade costs, and decade failure rates.
  */
-export async function runSpaceLaunchesPipeline(forceUpdate = false, verbose?: boolean): Promise<SpaceLaunchesDataset> {
+export async function runSpaceLaunchesPipeline(forceUpdate = false, verbose?: boolean): Promise<void> {
   return runWithLogger(
     'space-launches',
     async () => {
@@ -347,7 +360,7 @@ export async function runSpaceLaunchesPipeline(forceUpdate = false, verbose?: bo
         logger.debug(`Loaded existing database (${launchesById.size} launches)`);
       }
 
-      const hasValidDataset = Boolean(cache?.launches?.length) && Boolean(cache?.dataset?.summary?.totalAttempts);
+      const hasValidDataset = Boolean(cache?.launches?.length) && Boolean(cache?.sections?.['payload-capacity']?.summary?.totalAttempts);
       let preflightCount: number | null = null;
       let latestRemoteLaunch: ApiLaunchResult | null = null;
 
@@ -364,19 +377,19 @@ export async function runSpaceLaunchesPipeline(forceUpdate = false, verbose?: bo
 
             if (latestRemoteLaunch?.id === cache.meta.lastLaunchId && preflightCount === cache.meta.remoteCount) {
               logger.info(`All space launches are up-to-date (${cache.launches.length} launches, latest: ${latestRemoteLaunch?.net?.slice(0, 10)}). Using cached dataset.`);
-              await exportDataset('space-launches', cache.dataset);
-              return cache.dataset;
+              await exportSpaceLaunches(cache.sections);
+              return;
             }
             logger.info('New space launches detected upstream. Fetching recent launches...');
           } else {
             logger.warn(`Space Devs API preflight returned HTTP ${res.status}. Using cached dataset.`);
-            await exportDataset('space-launches', cache.dataset);
-            return cache.dataset;
+            await exportSpaceLaunches(cache.sections);
+            return;
           }
         } catch (err) {
           logger.warn(`Space Devs API unreachable (${err}). Using cached dataset.`);
-          await exportDataset('space-launches', cache.dataset);
-          return cache.dataset;
+          await exportSpaceLaunches(cache.sections);
+          return;
         }
       }
 
@@ -867,46 +880,53 @@ export async function runSpaceLaunchesPipeline(forceUpdate = false, verbose?: bo
         }
       });
 
-      const summary: SpaceLaunchesSummary = {
-        totalPayloadTons,
-        totalAttempts,
-        globalSuccessRate,
-        leaderAllTimeRegion,
-        leaderAllTimeMassTons,
-        leaderAllTimeShare,
-        lowestCostPerKg,
-        lowestCostRegion,
-        lowestCostDecade,
-        bestDecadeAvgCostPerKg: bestDecadeAvgCost,
-        bestDecadeAvgCostDecade,
-        worstDecadeAvgCostPerKg: baselineCost,
-        worstDecadeAvgCostDecade,
-        costReductionFactor,
-        currentDecadeAvgPayloadKg,
-        bestDecadeCountryAvgPayloadRegion,
-        bestDecadeCountryAvgPayloadDecade,
-        bestDecadeCountryAvgPayloadKg,
-        baselineAvgPayloadKg,
-        worstDecadeAvgPayloadDecade,
-        bestDecadeAvgPayloadDecade,
-        payloadGrowthFactor,
-        reliabilityGrowthFactor,
-        worstDecadeReliabilityDecade: worstDecadeLabel,
-        worstDecadeReliabilityRate,
-        bestDecadeGlobalReliabilityDecade: bestGlobalDecadeLabel,
-        bestDecadeGlobalReliabilityRate,
-        bestDecadeReliabilityRegion,
-        bestDecadeReliabilityRate,
-        bestDecadeReliabilityDecade,
-      };
-
-      const dataset: SpaceLaunchesDataset = {
+      const payloadCapacitySectionData: PayloadCapacitySectionData = {
         regions: sortedRegions,
-        summary,
+        summary: {
+          totalPayloadTons,
+          totalAttempts: allLaunches.length,
+          leaderAllTimeRegion,
+          leaderAllTimeMassTons,
+          leaderAllTimeShare,
+        },
         payloadCapacity: {
           years: allYears,
           series: capacitySeries,
           launches: annualLaunchSeries,
+        },
+      };
+
+      const avgPayloadSectionData: AvgPayloadSectionData = {
+        regions: sortedRegions,
+        summary: {
+          bestDecadeAvgPayloadDecade,
+          currentDecadeAvgPayloadKg,
+          worstDecadeAvgPayloadDecade,
+          baselineAvgPayloadKg,
+          payloadGrowthFactor,
+          bestDecadeCountryAvgPayloadRegion,
+          bestDecadeCountryAvgPayloadDecade,
+          bestDecadeCountryAvgPayloadKg,
+        },
+        avgPayload: {
+          decades: decadeLabels,
+          series: avgPayloadSeries,
+          launches: avgPayloadLaunchSeries,
+          totalLaunches: avgPayloadTotalLaunches,
+          totalAvgPayload: avgPayloadTotalAvg,
+        },
+      };
+
+      const launchCostsSectionData: LaunchCostsSectionData = {
+        summary: {
+          bestDecadeAvgCostDecade,
+          bestDecadeAvgCostPerKg: bestDecadeAvgCost,
+          worstDecadeAvgCostDecade,
+          worstDecadeAvgCostPerKg: baselineCost,
+          costReductionFactor,
+          lowestCostRegion,
+          lowestCostDecade,
+          lowestCostPerKg,
         },
         decadeCosts: {
           regions: costRegions,
@@ -916,12 +936,20 @@ export async function runSpaceLaunchesPipeline(forceUpdate = false, verbose?: bo
           totalLaunches: decadeTotalLaunches,
           totalAvgCost: decadeTotalAvgCost,
         },
-        avgPayload: {
-          decades: decadeLabels,
-          series: avgPayloadSeries,
-          launches: avgPayloadLaunchSeries,
-          totalLaunches: avgPayloadTotalLaunches,
-          totalAvgPayload: avgPayloadTotalAvg,
+      };
+
+      const failureRatesSectionData: FailureRatesSectionData = {
+        regions: sortedRegions,
+        summary: {
+          globalSuccessRate,
+          worstDecadeReliabilityDecade: worstDecadeLabel,
+          worstDecadeReliabilityRate,
+          bestDecadeGlobalReliabilityDecade: bestGlobalDecadeLabel,
+          bestDecadeGlobalReliabilityRate,
+          reliabilityGrowthFactor,
+          bestDecadeReliabilityRegion,
+          bestDecadeReliabilityDecade,
+          bestDecadeReliabilityRate,
         },
         failureRates: {
           decades: decadeLabels,
@@ -932,6 +960,13 @@ export async function runSpaceLaunchesPipeline(forceUpdate = false, verbose?: bo
           totalFailures: failureRateTotalFailures,
           totalFailureRate: failureRateTotalRate,
         },
+      };
+
+      const sections = {
+        'payload-capacity': payloadCapacitySectionData,
+        'avg-payload': avgPayloadSectionData,
+        'launch-costs': launchCostsSectionData,
+        'failure-rates': failureRatesSectionData,
       };
 
       const latestLaunch = allSorted[allSorted.length - 1];
@@ -946,13 +981,12 @@ export async function runSpaceLaunchesPipeline(forceUpdate = false, verbose?: bo
         {
           meta: newMeta,
           launches: allSorted,
-          dataset,
+          sections,
         },
         0,
       );
-      await exportDataset('space-launches', dataset);
-      logger.success(`Exported space-launches dataset (${allLaunches.length.toLocaleString()} orbital launches, ${allYears[0]}–${allYears[allYears.length - 1]})`);
-      return dataset;
+      await exportSpaceLaunches(sections);
+      logger.success(`Exported space-launches section datasets (${allLaunches.length.toLocaleString()} orbital launches, ${allYears[0]}–${allYears[allYears.length - 1]})`);
     },
     verbose,
   );

@@ -1,8 +1,10 @@
-import { use } from 'react';
+import { use, useEffect } from 'react';
+import { useParams } from 'react-router';
+import NotFoundPage from '@/pages/NotFoundPage';
 import { cn } from '@/utils/cn';
-import { useTranslation } from '@/utils/locales';
-import { useScrollSpy } from '@/utils/useScrollSpy';
-import { SITE_VERSION } from '@/utils/version';
+import { usePath, useTranslation } from '@/utils/provider';
+import { SECTION_DATA_ATTR, useScrollSpy } from '@/utils/useScrollSpy';
+import { parseChangelogVersions, SITE_VERSION } from '@/utils/version';
 
 interface ChangelogData {
   html: string;
@@ -15,17 +17,23 @@ function loadChangelog(): Promise<ChangelogData> {
   if (!changelogPromise) {
     changelogPromise = Promise.all([import('../../../CHANGELOG.md?raw'), import('marked')]).then(async ([rawMod, markedMod]) => {
       const changelogRaw = rawMod.default;
-      const versionHeaderRegex = /^## \[(\d+\.\d+\.\d+)\]/gm;
-      const versions = [...changelogRaw.matchAll(versionHeaderRegex)].map((m) => m[1]);
+      const versions = parseChangelogVersions(changelogRaw);
 
       const marked = new markedMod.Marked({ gfm: true });
       marked.use({
         renderer: {
           heading({ text, depth }) {
             if (depth === 2) {
-              const match = text.match(/\[([^\]]+)\]/);
-              const id = match ? `v-${match[1]}` : text.toLowerCase().replace(/[^\w]+/g, '-');
-              return `<h2 id="${id}" data-anchor-section="${id}">${text}</h2>\n`;
+              const match = text.match(/\[(\d+\.\d+\.\d+)\]/);
+              if (match) {
+                const id = `v${match[1]}`;
+                return `<h2 id="${id}" ${SECTION_DATA_ATTR}="${id}">${text}</h2>\n`;
+              }
+              const slug = text
+                .toLowerCase()
+                .replace(/[^\w]+/g, '-')
+                .replace(/^-|-$/g, '');
+              return `<h2 id="${slug}">${text}</h2>\n`;
             }
             return `<h${depth}>${text}</h${depth}>\n`;
           },
@@ -39,18 +47,39 @@ function loadChangelog(): Promise<ChangelogData> {
   return changelogPromise;
 }
 
-/** Standalone Changelog page rendering continuous release notes with a sticky right outline and scroll-spy active highlights. */
-export default function ChangelogPage() {
-  const { html, versions } = use(loadChangelog());
-  const { t } = useTranslation();
+interface ChangelogContentProps {
+  html: string;
+  versions: string[];
+  normalizedVersion?: string;
+}
 
-  const spiedActiveId = useScrollSpy();
-  const activeId = spiedActiveId;
+function ChangelogContent({ html, versions, normalizedVersion }: ChangelogContentProps) {
+  const { t } = useTranslation();
+  const { getHref } = usePath();
+
+  const activeId = useScrollSpy({
+    initialId: normalizedVersion,
+    getHref: (id) => (id ? getHref(`/changelog/${id}`) : getHref('/changelog')),
+    resolveTitle: (id) => {
+      const ver = (id || normalizedVersion || `v${SITE_VERSION}`).replace(/^v/, '');
+      return `${t.common.changelog} (v${ver})`;
+    },
+  });
+
+  const activeVersion = (activeId || normalizedVersion || `v${SITE_VERSION}`).replace(/^v/, '');
+  const pageTitle = `${t.common.changelog} (v${activeVersion})`;
+
+  useEffect(() => {
+    document.title = pageTitle;
+  }, [pageTitle]);
 
   return (
     <>
-      <title>{`${t.common.changelog} (v${SITE_VERSION})`}</title>
-      <meta name="description" content={`Release history and changelog for Graphs (v${SITE_VERSION})`} />
+      <title>{pageTitle}</title>
+      <meta property="og:title" content={pageTitle} />
+      <meta name="twitter:title" content={pageTitle} />
+      <meta name="description" content={`Release history and changelog for Graphs (v${activeVersion})`} />
+      <meta property="og:description" content={`Release history and changelog for Graphs (v${activeVersion})`} />
 
       <div className="max-w-7xl mx-auto py-4 sm:py-6">
         <div className="flex gap-8 items-start justify-center">
@@ -70,13 +99,23 @@ export default function ChangelogPage() {
             <div className="text-[11px] font-bold text-content-muted uppercase tracking-wider mb-2.5 px-3">{t.common.releases}</div>
             <nav className="flex flex-col border-l border-border-subtle text-xs">
               {versions.map((ver) => {
-                const id = `v-${ver}`;
+                const id = `v${ver}`;
                 const isActive = activeId === id;
+                const targetHref = getHref(`/changelog/${id}`);
 
                 return (
                   <a
                     key={ver}
-                    href={`#${id}`}
+                    href={targetHref}
+                    onClick={(e) => {
+                      const target = document.getElementById(id);
+                      if (target) {
+                        e.preventDefault();
+                        target.scrollIntoView({ behavior: 'smooth' });
+                        history.replaceState(null, '', targetHref + window.location.search);
+                        document.title = `${t.common.changelog} (v${ver})`;
+                      }
+                    }}
                     className={cn(
                       'px-3 py-1.5 font-mono transition-all',
                       isActive
@@ -84,7 +123,7 @@ export default function ChangelogPage() {
                         : 'text-content-muted hover:text-content-primary hover:border-l hover:border-border-muted -ml-px',
                     )}
                   >
-                    v{ver}
+                    {id}
                   </a>
                 );
               })}
@@ -94,4 +133,24 @@ export default function ChangelogPage() {
       </div>
     </>
   );
+}
+
+/** Standalone Changelog page rendering continuous release notes with a sticky right outline and scroll-spy active highlights. */
+export default function ChangelogPage() {
+  const { html, versions } = use(loadChangelog());
+  const { version } = useParams<{ version?: string }>();
+
+  let normalizedVersion = version ? (version.startsWith('v') ? version : `v${version}`) : undefined;
+  if (!normalizedVersion && typeof window !== 'undefined' && window.location.hash) {
+    const hash = window.location.hash.slice(1).replace(/^v-/, 'v');
+    if (versions.some((v) => `v${v}` === hash)) {
+      normalizedVersion = hash;
+    }
+  }
+
+  if (normalizedVersion && !versions.some((v) => `v${v}` === normalizedVersion)) {
+    return <NotFoundPage />;
+  }
+
+  return <ChangelogContent html={html} versions={versions} normalizedVersion={normalizedVersion} />;
 }

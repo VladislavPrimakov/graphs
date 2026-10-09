@@ -1,6 +1,5 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import type { ProjectSlug } from '@graphs/types';
 import { getLogger } from '@/utils/logger';
 import { getMetadataPath } from '@/utils/paths';
 
@@ -9,7 +8,7 @@ export { getMetadataPath };
 let writeQueue: Promise<unknown> = Promise.resolve();
 
 /** Updates the last_updated date for project_id in site/src/data/metadata.json safely across concurrent pipelines. */
-export async function updateMetadata(projectId: ProjectSlug, dateStr?: string): Promise<string> {
+export async function updateMetadata(projectId: string, dateStr?: string): Promise<string> {
   const finalDate = dateStr || new Date().toISOString().split('T')[0];
   const metaPath = getMetadataPath();
 

@@ -1,15 +1,20 @@
 import type { EChartsOption } from 'echarts';
 import type React from 'react';
-import { useEffect, useRef, useState } from 'react';
+import { Suspense, startTransition, use, useEffect, useRef, useState } from 'react';
+import { ExternalLinkIcon } from '@/components/icons';
 import { SectionBreakdown } from '@/components/sections/SectionBreakdown';
 import { SectionChart } from '@/components/sections/SectionChart';
 import { AnchorButton } from '@/components/ui/AnchorButton';
 import { Checkbox } from '@/components/ui/Checkbox';
 import { KpiRow } from '@/components/ui/KpiCard';
+import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { Slider } from '@/components/ui/Slider';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/ToggleGroup';
-import type { ChartControl, DashboardSection as DashboardSectionType, DynamicBundleResult, DynamicViewResult, KpiCardSpec } from '@/types';
-import { useFormat } from '@/utils/locales';
+import { loadSectionData } from '@/projects/registry';
+import type { ChartControl, DashboardSection as DashboardSectionType, DynamicBundleResult, DynamicViewResult, KpiCardSpec, ProjectSource } from '@/types';
+import { useFormat, useTranslation } from '@/utils/provider';
+import { useInView } from '@/utils/useInView';
+import { SECTION_DATA_ATTR } from '@/utils/useScrollSpy';
 
 function isBundleResult(res: DynamicViewResult): res is DynamicBundleResult {
   return typeof res === 'object' && res !== null && 'option' in res;
@@ -20,27 +25,63 @@ export interface SectionProps {
   /** Polymorphic section specification (chart, dynamic chart, or breakdown grid). */
   section: DashboardSectionType;
   /** Unique project slug identifier for anchor links and export filenames. */
-  projectSlug?: string;
+  projectSlug: string;
+  /** Whether this section is the initial target for deep linking or above-the-fold display. @default false */
+  initialInView?: boolean;
+  /** Whether viewport observation is active. When false, ignores intersection events. @default true */
+  enabled?: boolean;
 }
 
-type ControlStateValue = string | number | boolean | [number, number];
+type ControlStateValue = string | number | boolean | readonly [number, number] | [number, number];
 
-/** Universal dashboard section scaffolding coordinating anchor links, generic controls, dynamic KPI rows, and inner visualizers. */
-export const Section: React.FC<SectionProps> = ({ section, projectSlug }) => {
+/** Clean card loader placeholder with normalized height preserving page geometry. */
+function SectionLoader({ id, projectSlug, title }: { id: string; projectSlug?: string; title?: string }) {
+  return (
+    <div className="card group min-h-[60vh] flex flex-col justify-between relative">
+      <div className="flex items-start justify-between gap-3 mb-3">
+        <AnchorButton sectionId={id} projectSlug={projectSlug} />
+        {title && <h3 className="text-base sm:text-lg font-bold text-content-primary tracking-tight text-center px-8 sm:px-24">{title}</h3>}
+      </div>
+      <div className="flex-1 flex items-center justify-center min-h-[300px] relative">
+        <LoadingSpinner fullscreen={false} size="sm" isVisible={true} />
+      </div>
+    </div>
+  );
+}
+
+interface SectionLoadedContentProps {
+  section: DashboardSectionType;
+  projectSlug: string;
+}
+
+/** Inner section content unwrapping lazily fetched section dataset via React 19 use(). */
+function SectionLoadedContent({ section, projectSlug }: SectionLoadedContentProps) {
+  // Lazily load typed section dataset chunk
+  const data = use(loadSectionData(projectSlug, section.id));
+
+  const sectionId = section.id;
+
+  // Resolve controls either from static array or dynamically computed from section data
+  const resolvedControls: readonly ChartControl[] | undefined = section.type === 'chart' ? (typeof section.controls === 'function' ? section.controls(data) : section.controls) : undefined;
+
   // Initialize control values dictionary from section controls
   const [controlValues, setControlValues] = useState<Record<string, ControlStateValue>>(() => {
     const initial: Record<string, ControlStateValue> = {};
-    if (section.type === 'chart') {
-      for (const ctrl of section.controls ?? []) {
-        if (ctrl.type === 'range-slider') {
-          initial[ctrl.id] = ctrl.defaultValue ?? [ctrl.min, ctrl.max];
-        } else {
-          initial[ctrl.id] = ctrl.defaultValue;
-        }
+    for (const ctrl of resolvedControls ?? []) {
+      if (ctrl.type === 'range-slider') {
+        initial[ctrl.id] = ctrl.defaultValue ?? [ctrl.min, ctrl.max];
+      } else {
+        initial[ctrl.id] = ctrl.defaultValue;
       }
     }
     return initial;
   });
+
+  const handleControlChange = (id: string, value: ControlStateValue) => {
+    startTransition(() => {
+      setControlValues((prev) => ({ ...prev, [id]: value }));
+    });
+  };
 
   const controlsRef = useRef<HTMLDivElement>(null);
   const [controlsHeight, setControlsHeight] = useState(0);
@@ -66,15 +107,26 @@ export const Section: React.FC<SectionProps> = ({ section, projectSlug }) => {
     };
   }, []);
 
-  const handleControlChange = (id: string, value: ControlStateValue) => {
-    setControlValues((prev) => ({ ...prev, [id]: value }));
-  };
+  const exportName = `${projectSlug}--${sectionId}`;
 
-  const sectionId = section.id;
-  const exportName = projectSlug ? `${projectSlug}--${sectionId}` : sectionId;
+  // Ensure effective control values are always clamped to the current min/max bounds of resolved controls
+  const effectiveValues: Record<string, ControlStateValue> = {};
+  if (resolvedControls) {
+    for (const ctrl of resolvedControls) {
+      if (ctrl.type === 'range-slider') {
+        const raw = (controlValues[ctrl.id] ?? ctrl.defaultValue ?? [ctrl.min, ctrl.max]) as [number, number];
+        effectiveValues[ctrl.id] = [Math.max(ctrl.min, Math.min(ctrl.max, raw[0])), Math.max(ctrl.min, Math.min(ctrl.max, raw[1]))];
+      } else if (ctrl.type === 'slider') {
+        const raw = Number(controlValues[ctrl.id] ?? ctrl.defaultValue);
+        effectiveValues[ctrl.id] = Math.max(ctrl.min, Math.min(ctrl.max, raw));
+      } else {
+        effectiveValues[ctrl.id] = controlValues[ctrl.id] ?? ctrl.defaultValue;
+      }
+    }
+  }
 
   // Resolve dynamic or static chart view result
-  const activeViewResult: DynamicViewResult | null = section.type === 'chart' ? section.buildView(controlValues) : null;
+  const activeViewResult: DynamicViewResult | null = section.type === 'chart' ? section.buildView(data, effectiveValues) : null;
 
   // Extract option and dynamic KPI overrides
   const activeOption: EChartsOption | null = !activeViewResult ? null : isBundleResult(activeViewResult) ? activeViewResult.option : activeViewResult;
@@ -87,16 +139,19 @@ export const Section: React.FC<SectionProps> = ({ section, projectSlug }) => {
 
   const kpisBottom: KpiCardSpec[] = activeViewResult && isBundleResult(activeViewResult) && activeViewResult.kpisBottom ? activeViewResult.kpisBottom : section.kpisBottom || [];
 
+  const sources: ProjectSource[] = activeViewResult && isBundleResult(activeViewResult) && activeViewResult.sources ? activeViewResult.sources : section.sources || [];
+
   const fmt = useFormat();
+  const { t } = useTranslation();
 
   const renderControls = () => {
-    if (section.type !== 'chart' || !section.controls?.length) return null;
+    if (section.type !== 'chart' || !resolvedControls?.length) return null;
     return (
       <div ref={controlsRef} className="flex flex-col items-end gap-2 shrink-0 ml-auto lg:absolute lg:top-4 lg:right-4 lg:z-10 lg:pointer-events-auto">
-        {section.controls.map((ctrl: ChartControl) => {
+        {resolvedControls.map((ctrl: ChartControl) => {
           switch (ctrl.type) {
             case 'slider': {
-              const val = Number(controlValues[ctrl.id] ?? ctrl.defaultValue);
+              const val = Number(effectiveValues[ctrl.id] ?? ctrl.defaultValue);
               return (
                 <div key={ctrl.id} className="control-panel inline-flex items-center gap-2.5 px-3 h-7 text-xs">
                   {ctrl.label && (
@@ -111,7 +166,7 @@ export const Section: React.FC<SectionProps> = ({ section, projectSlug }) => {
               );
             }
             case 'range-slider': {
-              const range = (controlValues[ctrl.id] ?? ctrl.defaultValue ?? [ctrl.min, ctrl.max]) as [number, number];
+              const range = (effectiveValues[ctrl.id] ?? ctrl.defaultValue ?? [ctrl.min, ctrl.max]) as [number, number];
               return (
                 <div key={ctrl.id} className="control-panel inline-flex items-center gap-2.5 px-3 h-7 text-xs">
                   {ctrl.label && (
@@ -136,7 +191,7 @@ export const Section: React.FC<SectionProps> = ({ section, projectSlug }) => {
               );
             }
             case 'toggle': {
-              const val = String(controlValues[ctrl.id] ?? ctrl.defaultValue);
+              const val = String(effectiveValues[ctrl.id] ?? ctrl.defaultValue);
               return (
                 <ToggleGroup
                   key={ctrl.id}
@@ -155,7 +210,7 @@ export const Section: React.FC<SectionProps> = ({ section, projectSlug }) => {
               );
             }
             case 'checkbox': {
-              const checked = Boolean(controlValues[ctrl.id] ?? ctrl.defaultValue);
+              const checked = Boolean(effectiveValues[ctrl.id] ?? ctrl.defaultValue);
               const controlId = `ctrl-${sectionId}-${ctrl.id}`;
               return (
                 <div key={ctrl.id} className="control-panel inline-flex items-center gap-2 px-2.5 h-7 text-xs select-none transition-colors hover:bg-surface-elevated">
@@ -179,17 +234,18 @@ export const Section: React.FC<SectionProps> = ({ section, projectSlug }) => {
   const renderContent = () => {
     switch (section.type) {
       case 'breakdown-grid':
-        return <SectionBreakdown spec={section} projectSlug={projectSlug} />;
+        return <SectionBreakdown spec={section} data={data} projectSlug={projectSlug} />;
       case 'custom':
         return (
-          <>
-            <div className="flex items-start justify-between gap-3 mb-3 lg:mb-0 lg:pointer-events-none">
-              <div className="lg:absolute lg:top-4 lg:left-4 lg:z-10 lg:pointer-events-auto">
+          <div className="flex flex-col gap-3">
+            <div className="relative flex items-center justify-center min-h-8">
+              <div className="absolute left-0 top-1/2 -translate-y-1/2">
                 <AnchorButton sectionId={sectionId} projectSlug={projectSlug} />
               </div>
+              {section.title && <h3 className="text-base sm:text-lg font-bold text-content-primary tracking-tight text-center px-8 sm:px-24">{section.title}</h3>}
             </div>
-            {section.render()}
-          </>
+            {section.render(data)}
+          </div>
         );
       case 'chart':
         return (
@@ -207,15 +263,56 @@ export const Section: React.FC<SectionProps> = ({ section, projectSlug }) => {
   };
 
   return (
-    <section id={sectionId} data-section={sectionId} className="scroll-mt-20 sm:scroll-mt-22 flex flex-col gap-4">
+    <>
       {/* Upper KPI cards */}
       {kpisTop.length > 0 && <KpiRow kpis={kpisTop} />}
 
       {/* Unified Section Card Container */}
-      <div className="card group">{renderContent()}</div>
+      <div className="card group">
+        {renderContent()}
+
+        {/* Section Sources Footer */}
+        {sources.length > 0 && (
+          <div className="mt-4 pt-3 border-t border-border-subtle/50 flex flex-wrap items-center gap-2 text-xs">
+            <span className="text-content-dim font-semibold uppercase tracking-wider text-[11px]">{sources.length > 1 ? t.common.sources : t.common.source}:</span>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {sources.map((s) => (
+                <a
+                  key={s.url || s.name}
+                  href={s.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="btn-subtle px-2 py-0.5 text-[11px] text-content-secondary hover:text-accent-primary transition-colors flex items-center gap-1"
+                >
+                  <span>{s.name}</span>
+                  <ExternalLinkIcon className="w-2.5 h-2.5 text-content-dim shrink-0" />
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Lower KPI cards */}
       {kpisBottom.length > 0 && <KpiRow kpis={kpisBottom} />}
+    </>
+  );
+}
+
+/** Universal dashboard section scaffolding coordinating anchor links, generic controls, dynamic KPI rows, and inner visualizers. */
+export const Section: React.FC<SectionProps> = ({ section, projectSlug, initialInView = false, enabled = true }) => {
+  const { ref, hasEnteredView } = useInView<HTMLElement>({ initialInView, enabled, once: true });
+  const shouldLoad = typeof window === 'undefined' || hasEnteredView;
+
+  return (
+    <section ref={ref} id={section.id} {...{ [SECTION_DATA_ATTR]: section.id }} className="scroll-mt-20 flex flex-col gap-4">
+      {shouldLoad ? (
+        <Suspense fallback={<SectionLoader id={section.id} projectSlug={projectSlug} title={section.title} />}>
+          <SectionLoadedContent section={section} projectSlug={projectSlug} />
+        </Suspense>
+      ) : (
+        <SectionLoader id={section.id} projectSlug={projectSlug} title={section.title} />
+      )}
     </section>
   );
 };

@@ -1,25 +1,18 @@
-import { PROJECT_SLUGS, type ProjectDataMap, type ProjectSlug } from '@graphs/types';
 import type { LocaleProjectMeta, Project, ProjectMeta, ProjectTag, StaticProjectMeta } from '@/types';
-import type { Language } from '@/utils/locales';
+import type { Language } from '@/utils/provider';
 
-// Dynamically discover all project metadata descriptors, specifications, and localized dictionaries
+// Dynamically discover all project metadata descriptors, specifications, localized dictionaries, and section datasets
 const metaModules = import.meta.glob<{ meta: StaticProjectMeta }>('./*/meta.ts', { eager: true });
 const projectLoaders = import.meta.glob<{ project: Project }>('./*/project.ts');
 const metaLoaders = import.meta.glob<{ meta: LocaleProjectMeta }>('./*/locales/meta-*.ts');
 const dictLoaders = import.meta.glob<{ dict: Record<string, unknown> }>('./*/locales/dict-*.ts');
-const dataLoaders = import.meta.glob<{ default: unknown }>('../data/*.json');
+const sectionDataLoaders = import.meta.glob<{ default: unknown }>('../../public/data/*/*/data.json');
 
-/** Canonical static project metadata descriptors ordered by canonical PROJECT_SLUGS SSoT. */
-export const STATIC_PROJECT_INFOS: StaticProjectMeta[] = PROJECT_SLUGS.map((slug) => {
-  const mod = metaModules[`./${slug}/meta.ts`];
-  if (!mod?.meta) {
-    throw new Error(`Static metadata descriptor missing for project slug: ${slug}`);
-  }
-  return mod.meta;
-});
+/** Canonical static project metadata descriptors discovered dynamically from project slices. */
+export const STATIC_PROJECT_INFOS: StaticProjectMeta[] = Object.values(metaModules).map((mod) => mod.meta);
 
 /** Map of static project metadata indexed by project slug for instant synchronous validation. */
-export const STATIC_PROJECT_MAP: Record<ProjectSlug, StaticProjectMeta> = Object.fromEntries(STATIC_PROJECT_INFOS.map((p) => [p.id, p])) as Record<ProjectSlug, StaticProjectMeta>;
+export const STATIC_PROJECT_MAP: Record<string, StaticProjectMeta> = Object.fromEntries(STATIC_PROJECT_INFOS.map((p) => [p.id, p]));
 
 /** Alphabetically sorted list of all unique category tags across registered projects. */
 export const ALL_UNIQUE_TAGS: ProjectTag[] = Array.from(new Set(STATIC_PROJECT_INFOS.flatMap((p) => p.tags))).sort();
@@ -27,8 +20,8 @@ export const ALL_UNIQUE_TAGS: ProjectTag[] = Array.from(new Set(STATIC_PROJECT_I
 /** In-memory cache for localized catalog descriptors. */
 const catalogCache = new Map<Language, Promise<ProjectMeta[]>>();
 
-/** Resolves localized project catalog descriptors for the active language. */
-export function getLocalizedCatalog(lang: Language): Promise<ProjectMeta[]> {
+/** Asynchronously loads localized project catalog descriptors for the active language. */
+export function loadCatalog(lang: Language): Promise<ProjectMeta[]> {
   let promise = catalogCache.get(lang);
   if (!promise) {
     promise = Promise.all(
@@ -39,6 +32,7 @@ export function getLocalizedCatalog(lang: Language): Promise<ProjectMeta[]> {
           ...info,
           title: mod?.meta.title ?? info.id,
           description: mod?.meta.description ?? '',
+          sectionTitles: mod?.meta.sections ?? {},
         };
       }),
     );
@@ -47,10 +41,9 @@ export function getLocalizedCatalog(lang: Language): Promise<ProjectMeta[]> {
   return promise;
 }
 
-/** Complete project bundle containing specification, typed dataset JSON, and localized dictionaries. */
+/** Complete project bundle containing specification and localized dictionaries. */
 export interface CompleteProjectBundle {
   project: Project;
-  data: ProjectDataMap[ProjectSlug];
   t: {
     projMeta: LocaleProjectMeta;
     proj: Record<string, unknown>;
@@ -60,18 +53,14 @@ export interface CompleteProjectBundle {
 /** In-memory cache for dynamically imported project bundles. */
 const bundleCache = new Map<string, Promise<CompleteProjectBundle>>();
 
-/** Asynchronously loads the complete project bundle (specification, dataset JSON, localized dictionary) in parallel. */
-export function loadProjectBundle(slug: ProjectSlug, lang: Language): Promise<CompleteProjectBundle> {
+/** Asynchronously loads the complete project bundle (specification and localized dictionary) in parallel. */
+export function loadProjectBundle(slug: string, lang: Language): Promise<CompleteProjectBundle> {
   const cacheKey = `${slug}:${lang}`;
   let promise = bundleCache.get(cacheKey);
   if (!promise) {
     const projectLoader = projectLoaders[`./${slug}/project.ts`];
     if (!projectLoader) {
       throw new Error(`Project specification not found: ${slug}`);
-    }
-    const dataLoader = dataLoaders[`../data/${slug}.json`];
-    if (!dataLoader) {
-      throw new Error(`Data file not found for project: ${slug}`);
     }
     const metaLoader = metaLoaders[`./${slug}/locales/meta-${lang}.ts`];
     if (!metaLoader) {
@@ -82,9 +71,8 @@ export function loadProjectBundle(slug: ProjectSlug, lang: Language): Promise<Co
       throw new Error(`Locale dict file not found for project: ${slug}, lang: ${lang}`);
     }
 
-    promise = Promise.all([projectLoader(), dataLoader(), metaLoader(), dictLoader()]).then(([projectMod, dataMod, metaMod, dictMod]) => ({
+    promise = Promise.all([projectLoader(), metaLoader(), dictLoader()]).then(([projectMod, metaMod, dictMod]) => ({
       project: projectMod.project,
-      data: ((dataMod as { default: unknown }).default ?? dataMod) as ProjectDataMap[ProjectSlug],
       t: {
         projMeta: metaMod.meta,
         proj: dictMod.dict,
@@ -93,4 +81,23 @@ export function loadProjectBundle(slug: ProjectSlug, lang: Language): Promise<Co
     bundleCache.set(cacheKey, promise);
   }
   return promise;
+}
+
+/** In-memory cache for loaded section datasets. */
+const sectionDataCache = new Map<string, Promise<unknown>>();
+
+/** Asynchronously loads a typed section dataset on demand. */
+export function loadSectionData<T = unknown>(slug: string, sectionId: string): Promise<T> {
+  const cacheKey = `${slug}:${sectionId}`;
+  let promise = sectionDataCache.get(cacheKey);
+  if (!promise) {
+    const loaderKey = `../../public/data/${slug}/${sectionId}/data.json`;
+    const dataLoader = sectionDataLoaders[loaderKey];
+    if (!dataLoader) {
+      throw new Error(`Section data file not found: ${loaderKey}`);
+    }
+    promise = dataLoader().then((mod) => (mod as { default: unknown }).default ?? mod);
+    sectionDataCache.set(cacheKey, promise);
+  }
+  return promise as Promise<T>;
 }

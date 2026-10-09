@@ -5,12 +5,59 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.2.2] - 2026-10-09
+
+### Tooling & Types
+
+#### Added
+- Added `types/war-rf-ua/` schemas covering frontline map, territorial dynamics, equipment losses, and air attack sections.
+- Added subpath wildcard exports in `types/package.json` (`./*`) mapping to modular per-project schemas.
+
+#### Removed
+- Removed monolithic barrel `index.ts` files across `@graphs/types` in favor of direct subpath imports.
+- Removed static `PROJECT_SLUGS` constant array and `ProjectSlug` type union in favor of dynamic project discovery.
+
+---
+
+### Pipelines (@graphs/pipelines)
+
+#### Added
+- Added `pipelines/src/war-rf-ua/parse-frontline.ts` calculating consensus territorial control, disputed zones, and polygon boolean clipping (`polygon-clipping`) with committed snapshot `data-frontline.json`.
+- Added standalone section dataset exporter `exportProjectSections` outputting compact per-section JSON files to `site/public/data/<slug>/<sectionId>/data.json`.
+
+#### Changed
+- Consolidated `war-rf-ua-losses` and `war-rf-ua-attacks` into a single unified `pipelines/src/war-rf-ua/` pipeline.
+- Refactored all pipelines (`ai-tokens`, `space-launches`, `ukraine`, `world`, `war-rf-ua`) to export per-section datasets directly.
+- Optimized `parse-attacks-ua.ts` to perform incremental Telegram crawling from `lastPostId + 1` instead of querying historic posts.
+
+---
 
 ### Site (@graphs/site)
 
-#### Planned
-- Lazy-render off-screen dashboard sections and defer ECharts canvas mounting using `IntersectionObserver` viewport detection, activating visualizers only as their containers approach the viewport (mirroring `LossesMap` lazy-loading architecture).
+#### Added
+- Added `FrontlineMap.tsx` component and `#frontline-map` section rendering MapLibre GL vector multi-polygons for consensus control, contested zones, and frontlines.
+- Added `#frontline-dynamics` section visualizing monthly net territorial changes, control area, and percentage share with interactive period slider.
+- Added lazy per-section dataset loading (`loadSectionData`) using React 19 `use()` and `useInView`, mounting charts and loading JSON on viewport approach (`rootMargin: '400px 0px'`).
+- Added 3-state theme mode (`system`, `light`, `dark`) with `AppProvider` context, header toggle button, pre-hydration script eliminating FOUT, and light palette tokens across Tailwind CSS v4, ECharts, and vector map tiles.
+- Added version subpaths in changelog routing (`/changelog/:version` and `/:lang/changelog/:version`) with multi-locale static SSG pre-rendering.
+- Added granular per-section data source links across all card headers and footers.
+- Extracted `site/src/utils/tooltip-builder.ts` consolidating pure HTML tooltip rendering shared across ECharts and MapLibre GL popups.
+- Extracted `site/src/utils/map-builder.ts` standardizing MapLibre GL vector tile styling, bounds presets, and layer factories.
+
+#### Changed
+- Consolidated `war-rf-ua-losses` and `war-rf-ua-attacks` into unified `war-rf-ua` dashboard.
+- Decoupled `ResizeObserver` lifecycle in `SectionChart.tsx` to pause canvas calculations when scrolled off-screen.
+- Refactored `useScrollSpy` into a domain-agnostic navigation contract standardizing on `[data-section]`.
+
+#### Removed
+- Removed monolithic project dataset preloading from `loadProjectBundle` in favor of on-demand section loading.
+- Removed obsolete single-use map wrappers and static color variables from `global.css`.
+
+#### Fixed
+- Fixed that transitioning between bar and line chart series in `SectionChart.tsx` left lingering series and ghost tooltips by setting `notMerge: true` in `chart.setOption`.
+- Fixed that language synchronization in `AppProvider` redirected direct localized deep links to the stored browser language.
+- Fixed that legend wrapping pushed the toolbox downward into the chart canvas by anchoring toolbox top to baseline grid metrics.
+- Fixed that changelog release headings emitted `data-anchor-section` instead of `data-section`, leaving outline navigation inactive.
 
 ---
 

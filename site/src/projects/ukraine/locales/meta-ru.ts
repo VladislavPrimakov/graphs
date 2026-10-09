@@ -1,7 +1,13 @@
-import type { LocaleProjectMeta } from '@/types';
+import type { meta as enMeta } from './meta-en';
 
-export const meta: LocaleProjectMeta = {
+export const meta: typeof enMeta = {
   title: 'Украина',
   description:
     'Годовая динамика исполнения госбюджета Украины (собственные доходы, военные и гражданские расходы, международные гранты и кредиты), государственный внешний долг, сальдо внешней торговли товарами и ключевые страны-партнеры.',
+  sections: {
+    'budget-and-debt': 'Бюджет и госдолг',
+    'trade-structure': 'Структура торговли',
+    'trade-partners': 'Торговые партнёры',
+    'trade-categories': 'Категории товаров',
+  },
 };

@@ -14,8 +14,7 @@
     "build:pipeline": "bun --filter @graphs/pipelines --silent build",
     "build:site": "bun --filter @graphs/site build",
     "preview": "bun --filter @graphs/site preview",
-    "test": "bun --filter @graphs/pipelines test",
-    "check:knip": "knip"
+    "test": "bun --filter @graphs/pipelines test"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",

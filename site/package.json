@@ -6,10 +6,10 @@
     "extract-cldr": "bun scripts/extract-cldr-units.ts",
     "dev": "bun run extract-cldr && react-router dev",
     "start": "react-router dev",
-    "build": "bun run --silent extract-cldr && bun run --silent check:knip && bun run --silent check && bun run --silent type-check && react-router build",
+    "build": "bun run --silent extract-cldr && bun run --silent knip && bun run --silent check && bun run --silent type-check && react-router build",
     "preview": "serve -l 3001 dist/client",
-    "check": "biome check --write src scripts",
-    "check:knip": "knip --directory .. --workspace @graphs/site",
+    "check": "biome check --write",
+    "knip": "knip --directory .. --workspace @graphs/site",
     "type-check": "tsc --noEmit"
   },
   "dependencies": {

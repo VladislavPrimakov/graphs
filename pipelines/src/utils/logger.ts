@@ -1,8 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
-import type { ProjectSlug } from '@graphs/types';
 import { type ConsolaInstance, createConsola } from 'consola';
 
-export type LoggerTag = ProjectSlug | 'pipelines';
+export type LoggerTag = string;
 
 const asyncLoggerStorage = new AsyncLocalStorage<ConsolaInstance>();
 

@@ -1,6 +1,9 @@
-import type { TradeCategoryId, TradeCategoryTuple, TradePartnerTuple, UkraineDataset } from '@graphs/types';
+import type { BudgetDebtSectionData } from '@graphs/types/ukraine/budget-and-debt';
+import type { TradeCategoriesSectionData, TradeCategoryId, TradeCategoryTuple } from '@graphs/types/ukraine/trade-categories';
+import type { TradePartnersSectionData, TradePartnerTuple } from '@graphs/types/ukraine/trade-partners';
+import type { TradeStructureSectionData } from '@graphs/types/ukraine/trade-structure';
 import XLSX, { type WorkSheet } from 'xlsx';
-import { exportDataset, getPipelineDataPath } from '@/utils/dataset';
+import { exportProjectSections, getPipelineDataPath } from '@/utils/dataset';
 import { fileExists, readJson, writeJson } from '@/utils/fs';
 import { fetchBinaryWithMeta, fetchHeadMeta, fetchWithRetry, isRemoteMetaEqual, type RemoteFileMeta } from '@/utils/http';
 import { getLogger, isUpdate, isVerbose, runWithLogger } from '@/utils/logger';
@@ -18,7 +21,17 @@ const URL_GDP = 'https://bank.gov.ua/files/macro/GDP_y.xlsx';
 interface UkrainePipelineCache {
   meta?: Record<string, RemoteFileMeta>;
   rates: Record<string, Record<string, number>>;
-  dataset: UkraineDataset;
+  sections: {
+    'budget-and-debt': BudgetDebtSectionData;
+    'trade-structure': TradeStructureSectionData;
+    'trade-partners': TradePartnersSectionData;
+    'trade-categories': TradeCategoriesSectionData;
+  };
+}
+
+/** Exports section datasets for ukraine. */
+async function exportUkraine(sections: UkrainePipelineCache['sections']): Promise<void> {
+  await exportProjectSections('ukraine', sections);
 }
 
 /** Fetches monthly average USD/UAH exchange rates from NBU API, reusing cached historical rates. */
@@ -398,8 +411,8 @@ function loadTradeData(tradeWb: XLSX.WorkBook): {
   };
 }
 
-/** Runs the Ukraine ETL Pipeline. Parses budget execution, sovereign debt, GDP, and trade structure entirely in memory, outputting to site/src/data/ukraine.json and cache/data.json. */
-export async function runUkrainePipeline(forceUpdate = false, verbose?: boolean): Promise<UkraineDataset> {
+/** Runs the Ukraine ETL Pipeline. Parses budget execution, sovereign debt, GDP, and trade structure entirely in memory, outputting to section data files. */
+export async function runUkrainePipeline(forceUpdate = false, verbose?: boolean): Promise<void> {
   return runWithLogger(
     'ukraine',
     async () => {
@@ -415,7 +428,7 @@ export async function runUkrainePipeline(forceUpdate = false, verbose?: boolean)
         }
       }
 
-      const hasValidDataset = Boolean(existingCache?.dataset?.budgetDebt?.years?.length) && Boolean(existingCache?.dataset?.trade?.years?.length);
+      const hasValidDataset = Boolean(existingCache?.sections?.['budget-and-debt']?.years?.length) && Boolean(existingCache?.sections?.['trade-structure']?.years?.length);
 
       const allUrls = [URL_BUDGET, URL_TRADE, URL_DEBT_Q, URL_DEBT_Y, URL_GDP];
 
@@ -427,16 +440,16 @@ export async function runUkrainePipeline(forceUpdate = false, verbose?: boolean)
 
         if (networkFailed) {
           logger.warn('NBU server unreachable (offline). Using cached dataset.');
-          await exportDataset('ukraine', existingCache.dataset);
-          return existingCache.dataset;
+          await exportUkraine(existingCache.sections);
+          return;
         }
 
         const allUnchanged = allUrls.every((url, i) => isRemoteMetaEqual(existingCache.meta?.[url], remoteMetas[i]));
 
         if (allUnchanged) {
           logger.info('All NBU source files are unchanged (matching remote ETags). Using cached dataset.');
-          await exportDataset('ukraine', existingCache.dataset);
-          return existingCache.dataset;
+          await exportUkraine(existingCache.sections);
+          return;
         }
 
         logger.info('NBU source files updated upstream. Downloading updated workbooks...');
@@ -470,10 +483,10 @@ export async function runUkrainePipeline(forceUpdate = false, verbose?: boolean)
           logger.debug('Optional annual debt file fetch skipped');
         }
       } catch (networkErr) {
-        if (hasValidDataset && existingCache?.dataset) {
+        if (hasValidDataset && existingCache?.sections) {
           logger.warn(`Network fetch failed (${(networkErr as Error).message}). Using cached data.`);
-          await exportDataset('ukraine', existingCache.dataset);
-          return existingCache.dataset;
+          await exportUkraine(existingCache.sections);
+          return;
         }
         throw new Error(`Failed to fetch Ukraine data from NBU and no local cache exists: ${(networkErr as Error).message}`);
       }
@@ -568,7 +581,7 @@ export async function runUkrainePipeline(forceUpdate = false, verbose?: boolean)
         const weightedRate = totExpUsdSum > 0 ? round(totExpUahSum / totExpUsdSum, 2) : 0;
         weightedRates.push(weightedRate);
 
-        const labelYear = months.length < 12 ? `${year} (${months.length} months)` : String(year);
+        const labelYear = months.length < 12 ? `${year} (${months.length}m)` : String(year);
         yearLabels.push(labelYear);
 
         const lastM = months[months.length - 1];
@@ -611,46 +624,63 @@ export async function runUkrainePipeline(forceUpdate = false, verbose?: boolean)
 
       const trade = loadTradeData(tradeWb);
 
-      const dataset: UkraineDataset = {
-        budgetDebt: {
-          years: budgetYears,
-          yearLabels,
-          rates: weightedRates,
-          balances,
-          gdp: gdpList,
-          expGdpPct,
-          revGdpPct,
-          debtGdpPct,
-          defense: defenseVals,
-          defensePct,
-          otherExp: otherExpVals,
-          otherExpPct,
-          totalExp: totalExpVals,
-          domesticRev: domesticRevVals,
-          domesticRevPct,
-          grants: grantsVals,
-          grantsPct,
-          loans: loansVals,
-          loansPct,
-          totalRevFin: totalRevFinVals,
-          debt: debtVals,
-        },
-        trade: {
-          years: trade.tradeYears,
-          totalExports: trade.totalExports,
-          totalImports: trade.totalImports,
-          tradeBalance: trade.tradeBalance,
-          exports: trade.exports,
-          imports: trade.imports,
-          categoryExports: trade.categoryExports,
-          categoryImports: trade.categoryImports,
-        },
+      const budgetDebtSectionData: BudgetDebtSectionData = {
+        years: budgetYears,
+        yearLabels,
+        rates: weightedRates,
+        balances,
+        gdp: gdpList,
+        expGdpPct,
+        revGdpPct,
+        debtGdpPct,
+        defense: defenseVals,
+        defensePct,
+        otherExp: otherExpVals,
+        otherExpPct,
+        totalExp: totalExpVals,
+        domesticRev: domesticRevVals,
+        domesticRevPct,
+        grants: grantsVals,
+        grantsPct,
+        loans: loansVals,
+        loansPct,
+        totalRevFin: totalRevFinVals,
+        debt: debtVals,
       };
 
-      await writeJson(DATA_FILE, { meta: newMeta, rates: ratesCache, dataset }, 0);
-      await exportDataset('ukraine', dataset);
-      logger.success(`Exported ukraine dataset (${budgetYears[0]}–${budgetYears[budgetYears.length - 1]} budget & trade series)`);
-      return dataset;
+      const tradeStructureSectionData: TradeStructureSectionData = {
+        years: trade.tradeYears,
+        totalExports: trade.totalExports,
+        totalImports: trade.totalImports,
+        tradeBalance: trade.tradeBalance,
+      };
+
+      const tradePartnersSectionData: TradePartnersSectionData = {
+        years: trade.tradeYears,
+        totalExports: trade.totalExports,
+        totalImports: trade.totalImports,
+        exports: trade.exports,
+        imports: trade.imports,
+      };
+
+      const tradeCategoriesSectionData: TradeCategoriesSectionData = {
+        years: trade.tradeYears,
+        totalExports: trade.totalExports,
+        totalImports: trade.totalImports,
+        categoryExports: trade.categoryExports,
+        categoryImports: trade.categoryImports,
+      };
+
+      const sections = {
+        'budget-and-debt': budgetDebtSectionData,
+        'trade-structure': tradeStructureSectionData,
+        'trade-partners': tradePartnersSectionData,
+        'trade-categories': tradeCategoriesSectionData,
+      };
+
+      await writeJson(DATA_FILE, { meta: newMeta, rates: ratesCache, sections }, 0);
+      await exportUkraine(sections);
+      logger.success(`Exported ukraine section datasets (${budgetYears[0]}–${budgetYears[budgetYears.length - 1]} budget & trade series)`);
     },
     verbose,
   );

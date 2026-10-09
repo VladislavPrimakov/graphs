@@ -1,11 +1,11 @@
 import type React from 'react';
 import { useState } from 'react';
 import { Link, useLocation } from 'react-router';
-import { ChevronDownIcon, GithubIcon, LogoIcon, MenuIcon } from '@/components/icons';
+import { ChevronDownIcon, GithubIcon, LogoIcon, MenuIcon, MonitorIcon, MoonIcon, SunIcon } from '@/components/icons';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/DropdownMenu';
 import { Sheet, SheetClose, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/Sheet';
 import { cn } from '@/utils/cn';
-import { LANGUAGE_MAP, SUPPORTED_LANGUAGE_CODES, useCatalog, useLanguage, useTranslation } from '@/utils/locales';
+import { LANGUAGE_MAP, SUPPORTED_LANGUAGE_CODES, useCatalog, useLanguage, usePath, useTheme, useTranslation } from '@/utils/provider';
 import { SITE_VERSION } from '@/utils/version';
 
 const FLAG_STYLE = 'w-4 h-3 rounded-xs shadow-xs border border-border-subtle/80 shrink-0';
@@ -14,7 +14,9 @@ const FLAG_STYLE = 'w-4 h-3 rounded-xs shadow-xs border border-border-subtle/80 
 export const SiteLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [open, setOpen] = useState(false);
   const location = useLocation();
-  const { lang, setLanguage, getPath } = useLanguage();
+  const { lang, setLanguage } = useLanguage();
+  const { theme, toggleTheme } = useTheme();
+  const { getPath } = usePath();
   const { t } = useTranslation();
   const projects = useCatalog();
 
@@ -25,13 +27,13 @@ export const SiteLayout: React.FC<{ children: React.ReactNode }> = ({ children }
   });
 
   const changelogPath = getPath('/changelog');
-  const isChangelogActive = location.pathname === changelogPath;
+  const isChangelogActive = location.pathname === changelogPath || location.pathname.startsWith(`${changelogPath}/`);
   const CurrentFlag = LANGUAGE_MAP[lang].Flag;
 
   return (
     <>
       {/* Sticky Navigation Header */}
-      <header className="sticky top-0 z-50 glass-bar px-4 sm:px-6 lg:px-8">
+      <header id="site-header" className="sticky top-0 z-50 glass-bar px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16 gap-2 sm:gap-4">
           {/* Left: Sidebar Toggle, Logo & Version Pill */}
           <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
@@ -54,8 +56,21 @@ export const SiteLayout: React.FC<{ children: React.ReactNode }> = ({ children }
           {/* Center: Dynamic Section Navigation Portal Slot */}
           <div id="header-section-nav" className="flex-1 flex items-center justify-center min-w-0 max-w-full overflow-hidden" />
 
-          {/* Right Action Controls: Language, GitHub */}
-          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+          {/* Right Action Controls: Theme, Language, GitHub */}
+          <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
+            {/* Theme Toggle Button (1 button cycling system -> light -> dark -> system) */}
+            <button
+              type="button"
+              onClick={toggleTheme}
+              className="btn-subtle p-2 text-content-secondary hover:text-content-primary"
+              aria-label={`Theme: ${theme}`}
+              title={`Theme: ${theme.charAt(0).toUpperCase() + theme.slice(1)}`}
+            >
+              {theme === 'system' && <MonitorIcon className="w-4 h-4 text-accent-primary" />}
+              {theme === 'light' && <SunIcon className="w-4 h-4 text-amber-500" />}
+              {theme === 'dark' && <MoonIcon className="w-4 h-4 text-sky-400" />}
+            </button>
+
             {/* Language Selector Dropdown (Radix DropdownMenu) */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>

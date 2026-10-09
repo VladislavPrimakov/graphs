@@ -22,9 +22,20 @@ export async function readJson<T>(filePath: string): Promise<T> {
   return JSON.parse(raw) as T;
 }
 
+/** Reads a text file safely. */
+export async function readText(filePath: string): Promise<string> {
+  return await fs.readFile(filePath, 'utf-8');
+}
+
 /** Writes data formatted as compact JSON (or pretty JSON if indent > 0) with trailing newline. */
 export async function writeJson(filePath: string, data: unknown, indent = 0): Promise<void> {
   await ensureDir(filePath);
   const jsonStr = indent > 0 ? JSON.stringify(data, null, indent) : JSON.stringify(data);
   await fs.writeFile(filePath, `${jsonStr}\n`, 'utf-8');
+}
+
+/** Writes text content to file, creating parent directories if needed. */
+export async function writeText(filePath: string, content: string): Promise<void> {
+  await ensureDir(filePath);
+  await fs.writeFile(filePath, content, 'utf-8');
 }

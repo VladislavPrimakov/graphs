@@ -1,14 +1,15 @@
 import { Command } from 'cmdk';
 import type React from 'react';
-import { useEffect, useRef, useState } from 'react';
+import { startTransition, useEffect, useEffectEvent, useRef, useState } from 'react';
 import { cn } from '@/utils/cn';
-import { useFormat } from '@/utils/locales';
+import { useFormat } from '@/utils/provider';
 
 /** Option item representation for SearchSelect dropdown. */
 export interface SearchSelectItem {
   value: string | number;
   label: string;
   count?: number;
+  icon?: React.ReactNode;
 }
 
 /** Component properties for SearchSelect autocomplete input. */
@@ -29,7 +30,7 @@ export interface SearchSelectProps {
 
 /**
  * Searchable autocomplete combobox built on cmdk with glassmorphic styling,
- * keyboard arrow navigation, and design token integration.
+ * category icons, top-10 default listing on focus, and design token integration.
  */
 export const SearchSelect: React.FC<SearchSelectProps> = ({ items, onSelect, placeholder, emptyLabel = 'No results found', selectedValues = [], className }) => {
   const fmt = useFormat();
@@ -37,27 +38,36 @@ export const SearchSelect: React.FC<SearchSelectProps> = ({ items, onSelect, pla
   const [query, setQuery] = useState('');
   const [isOpen, setIsOpen] = useState(false);
 
-  // Close dropdown on click outside
+  // Close dropdown on click outside when opened
+  const handleOutsideClick = useEffectEvent((e: MouseEvent) => {
+    if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      setIsOpen(false);
+    }
+  });
+
   useEffect(() => {
-    const handleOutsideClick = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setIsOpen(false);
-      }
-    };
+    if (!isOpen) return;
     document.addEventListener('mousedown', handleOutsideClick);
     return () => document.removeEventListener('mousedown', handleOutsideClick);
-  }, []);
+  }, [isOpen]);
 
   const handleSelect = (item: SearchSelectItem) => {
-    onSelect(item);
+    startTransition(() => {
+      onSelect(item);
+    });
     setQuery('');
     setIsOpen(false);
   };
 
+  // Sort items by count descending so most prominent models appear first
+  const sortedItems = [...items].sort((a, b) => (b.count ?? 0) - (a.count ?? 0));
+  const isDefaultTop10 = !query.trim();
+  const displayedItems = isDefaultTop10 ? sortedItems.slice(0, 10) : sortedItems;
+
   return (
     <div ref={containerRef} className={cn('relative w-full', className)}>
       <Command
-        shouldFilter={true}
+        shouldFilter={!isDefaultTop10}
         className="w-full"
         onKeyDown={(e) => {
           if (e.key === 'Escape') {
@@ -65,15 +75,15 @@ export const SearchSelect: React.FC<SearchSelectProps> = ({ items, onSelect, pla
           }
         }}
       >
-        <div className="control-panel relative flex items-center gap-2 px-3 h-9 text-xs">
+        <div className="control-panel relative flex items-center gap-2 px-2.5 h-7 text-xs">
           <Command.Input
             value={query}
             onValueChange={(val) => {
               setQuery(val);
-              setIsOpen(Boolean(val.trim()));
+              setIsOpen(true);
             }}
             onFocus={() => {
-              if (query.trim()) setIsOpen(true);
+              setIsOpen(true);
             }}
             placeholder={placeholder}
             className="bg-transparent text-content-primary placeholder:text-content-muted text-xs w-full focus:outline-hidden p-0 m-0"
@@ -83,7 +93,6 @@ export const SearchSelect: React.FC<SearchSelectProps> = ({ items, onSelect, pla
               type="button"
               onClick={() => {
                 setQuery('');
-                setIsOpen(false);
               }}
               className="text-content-muted hover:text-content-primary shrink-0 cursor-pointer text-sm leading-none"
               aria-label="Clear search"
@@ -93,10 +102,10 @@ export const SearchSelect: React.FC<SearchSelectProps> = ({ items, onSelect, pla
           )}
         </div>
 
-        {isOpen && query.trim() && (
-          <Command.List className="glass-overlay absolute top-full left-0 right-0 mt-1.5 z-30 max-h-60 overflow-y-auto p-1 shadow-2xl">
+        {isOpen && (
+          <Command.List className="glass-overlay absolute top-full left-0 right-0 mt-1 z-30 max-h-60 overflow-y-auto p-1 shadow-2xl rounded-lg">
             <Command.Empty className="px-3 py-2 text-xs text-content-muted text-center">{emptyLabel}</Command.Empty>
-            {items.map((item) => {
+            {displayedItems.map((item) => {
               const isSelected = selectedValues.includes(item.value);
               return (
                 <Command.Item
@@ -104,13 +113,16 @@ export const SearchSelect: React.FC<SearchSelectProps> = ({ items, onSelect, pla
                   value={item.label}
                   onSelect={() => handleSelect(item)}
                   className={cn(
-                    'w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-xs text-left cursor-pointer transition-colors outline-hidden select-none',
+                    'w-full flex items-center justify-between px-2.5 py-1 rounded-md text-xs text-left cursor-pointer transition-colors outline-hidden select-none',
                     'text-content-primary data-[selected=true]:bg-surface-elevated',
                     isSelected && 'bg-accent-glow text-accent-primary font-bold shadow-xs',
                   )}
                 >
-                  <span className="truncate mr-2">{item.label}</span>
-                  {item.count !== undefined && <span className="font-mono text-[10px] text-content-muted shrink-0">{fmt.number(item.count)}</span>}
+                  <div className="flex items-center gap-2 min-w-0 truncate mr-2">
+                    {item.icon && <span className="shrink-0 flex items-center opacity-70">{item.icon}</span>}
+                    <span className="truncate">{item.label}</span>
+                  </div>
+                  {item.count !== undefined && <span className="font-mono text-[10px] text-content-muted shrink-0 tabular-nums">{fmt.number(item.count)}</span>}
                 </Command.Item>
               );
             })}

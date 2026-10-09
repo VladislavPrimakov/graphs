@@ -2,7 +2,7 @@ import type React from 'react';
 import { useState } from 'react';
 import { CheckIcon, LinkIcon } from '@/components/icons';
 import { cn } from '@/utils/cn';
-import { useLanguage, useTranslation } from '@/utils/locales';
+import { usePath, useTranslation } from '@/utils/provider';
 
 /** Props for the section deep-link copy button. */
 export interface AnchorButtonProps {
@@ -18,7 +18,7 @@ export interface AnchorButtonProps {
 export const AnchorButton: React.FC<AnchorButtonProps> = ({ sectionId, projectSlug, className }) => {
   const [copied, setCopied] = useState(false);
   const { t } = useTranslation();
-  const { getHref } = useLanguage();
+  const { getHref } = usePath();
 
   const handleCopy = (e: React.MouseEvent) => {
     e.preventDefault();

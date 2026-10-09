@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
-import { AI_COMPANY_IDS, type AiCompanyId, type AiTokensDataset, type CompanySeriesItem, type RegionSeriesItem } from '@graphs/types';
-import { exportDataset, getPipelineDataPath } from '@/utils/dataset';
+import { AI_COMPANY_IDS, type AiCompanyId, type CompanySeriesItem } from '@graphs/types/ai-tokens/tokens-by-company';
+import type { RegionSeriesItem } from '@graphs/types/ai-tokens/tokens-by-region';
+import { exportProjectSections, getPipelineDataPath } from '@/utils/dataset';
 import { fileExists, readJson, writeJson } from '@/utils/fs';
 import { fetchHeadMeta, fetchWithRetry, isRemoteMetaEqual, type RemoteFileMeta } from '@/utils/http';
 import { getLogger, isUpdate, isVerbose, runWithLogger } from '@/utils/logger';
@@ -32,7 +33,25 @@ interface AiTokensPipelineCache {
     remoteMeta?: RemoteFileMeta | null;
   };
   views: RawViews;
-  dataset: AiTokensDataset;
+  dataset: {
+    summary: {
+      peakDailyTokens: number;
+      peakMonth: string;
+      topRegionCode: string;
+      topRegionValue: number;
+      topRegionShare: number;
+    };
+    regions: {
+      months: string[];
+      total: number[];
+      series: RegionSeriesItem[];
+    };
+    companies: {
+      months: string[];
+      total: number[];
+      series: CompanySeriesItem[];
+    };
+  };
 }
 
 /** Extracts embedded time-series views JSON string and parsed object from the tokensperday homepage HTML, keeping only used fields. */
@@ -69,8 +88,8 @@ function getLatestValue(pts: RawPoint[], targetTs: number): number {
   return latest;
 }
 
-/** Runs the AI Tokens ETL Pipeline. Scrapes tokensperday.com, reconciles regional & company metrics, and exports site/src/data/ai-tokens.json. */
-export async function runAiTokensPipeline(forceUpdate = false, verbose?: boolean): Promise<AiTokensDataset> {
+/** Runs the AI Tokens ETL Pipeline. Scrapes tokensperday.com, reconciles regional & company metrics, and exports section datasets. */
+export async function runAiTokensPipeline(forceUpdate = false, verbose?: boolean): Promise<void> {
   return runWithLogger(
     'ai-tokens',
     async () => {
@@ -99,8 +118,11 @@ export async function runAiTokensPipeline(forceUpdate = false, verbose?: boolean
         remoteMeta = await fetchHeadMeta(URL_HOME);
         if (remoteMeta && isRemoteMetaEqual(cache.meta.remoteMeta, remoteMeta) && remoteMeta.etag) {
           logger.info('TokensPerDay remote metadata matches (ETag unchanged). Using cached dataset.');
-          await exportDataset('ai-tokens', cache.dataset);
-          return cache.dataset;
+          await exportProjectSections('ai-tokens', {
+            'tokens-by-region': { summary: cache.dataset.summary, regions: cache.dataset.regions },
+            'tokens-by-company': { summary: cache.dataset.summary, companies: cache.dataset.companies },
+          });
+          return;
         }
       }
 
@@ -127,16 +149,22 @@ export async function runAiTokensPipeline(forceUpdate = false, verbose?: boolean
 
         if (!forceUpdate && hasValidDataset && cache?.meta?.viewsSha256 === viewsSha256) {
           logger.info('TokensPerDay time-series views unchanged (SHA-256 match). Using cached dataset.');
-          await exportDataset('ai-tokens', cache.dataset);
-          return cache.dataset;
+          await exportProjectSections('ai-tokens', {
+            'tokens-by-region': { summary: cache.dataset.summary, regions: cache.dataset.regions },
+            'tokens-by-company': { summary: cache.dataset.summary, companies: cache.dataset.companies },
+          });
+          return;
         }
 
         logger.info('New tokensperday views data detected. Processing updated series...');
       } catch (err) {
         if (hasValidDataset && cache) {
           logger.warn(`Network query failed (${err instanceof Error ? err.message : String(err)}). Using cached dataset.`);
-          await exportDataset('ai-tokens', cache.dataset);
-          return cache.dataset;
+          await exportProjectSections('ai-tokens', {
+            'tokens-by-region': { summary: cache.dataset.summary, regions: cache.dataset.regions },
+            'tokens-by-company': { summary: cache.dataset.summary, companies: cache.dataset.companies },
+          });
+          return;
         }
         throw new Error(`Failed to fetch ${URL_HOME} and no valid cache available: ${err}`);
       }
@@ -285,7 +313,7 @@ export async function runAiTokensPipeline(forceUpdate = false, verbose?: boolean
         }
       }
 
-      const dataset: AiTokensDataset = {
+      const dataset = {
         summary: {
           peakDailyTokens,
           peakMonth,
@@ -318,10 +346,11 @@ export async function runAiTokensPipeline(forceUpdate = false, verbose?: boolean
         },
         0,
       );
-      await exportDataset('ai-tokens', dataset);
-      logger.success(`Exported ai-tokens dataset (${months.length} months, ${companySeries.length} companies)`);
-
-      return dataset;
+      await exportProjectSections('ai-tokens', {
+        'tokens-by-region': { summary: dataset.summary, regions: dataset.regions },
+        'tokens-by-company': { summary: dataset.summary, companies: dataset.companies },
+      });
+      logger.success(`Exported ai-tokens section datasets (${months.length} months, ${companySeries.length} companies)`);
     },
     verbose,
   );

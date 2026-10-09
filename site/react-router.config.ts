@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Config } from '@react-router/dev/config';
-import { NON_DEFAULT_LANGUAGES } from './src/utils/locales';
+import { NON_DEFAULT_LANGUAGES } from './src/utils/provider';
+import { parseChangelogVersions } from './src/utils/version';
 
 const rawBase = process.env.BASE_URL ?? '/graphs';
 const basename = rawBase.endsWith('/') ? rawBase : `${rawBase}/`;
@@ -26,6 +27,13 @@ function getProjectRoutes(): { slug: string; sections: string[] }[] {
   });
 }
 
+/** Discovers release versions from root CHANGELOG.md dynamically for SSG pre-rendering. */
+function getChangelogVersions(): string[] {
+  const changelogPath = path.resolve(import.meta.dirname, '../CHANGELOG.md');
+  if (!fs.existsSync(changelogPath)) return [];
+  return parseChangelogVersions(fs.readFileSync(changelogPath, 'utf8'));
+}
+
 export default {
   appDirectory: 'src',
   buildDirectory: process.env.BUILD_DIR || 'dist',
@@ -40,9 +48,15 @@ export default {
   },
   async prerender() {
     const projects = getProjectRoutes();
+    const versions = getChangelogVersions();
     const defaultProjectPaths = projects.map((p) => `/${p.slug}`);
     const defaultSectionPaths = projects.flatMap((p) => p.sections.map((sec) => `/${p.slug}/${sec}`));
-    const changelogPaths = ['/changelog', ...NON_DEFAULT_LANGUAGES.map((lang) => `/${lang}/changelog`)];
+    const changelogPaths = [
+      '/changelog',
+      ...versions.map((ver) => `/changelog/v${ver}`),
+      ...NON_DEFAULT_LANGUAGES.map((lang) => `/${lang}/changelog`),
+      ...NON_DEFAULT_LANGUAGES.flatMap((lang) => versions.map((ver) => `/${lang}/changelog/v${ver}`)),
+    ];
     const notFoundPaths = ['/404', ...NON_DEFAULT_LANGUAGES.map((lang) => `/${lang}/404`)];
     const localizedPaths = NON_DEFAULT_LANGUAGES.flatMap((lang) => [
       `/${lang}`,

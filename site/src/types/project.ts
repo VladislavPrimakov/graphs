@@ -1,6 +1,6 @@
-import type { ProjectDataMap, ProjectSlug } from '@graphs/types';
+import type { ResolvedTheme, ThemeColors } from '@/styles/tokens';
 import type { LocalizedFormatters } from '@/utils/format';
-import type { Language, LocaleCommonDict } from '@/utils/locales';
+import type { Language, LocaleCommonDict } from '@/utils/provider';
 import type { DashboardSection } from './section';
 import type { ProjectTag } from './tag';
 
@@ -12,28 +12,31 @@ export interface ProjectSource {
   url: string;
 }
 
-/** Static project metadata (identity, tags, sources, and section paths) independent of locale and chart builders. */
-export interface StaticProjectMeta<K extends ProjectSlug = ProjectSlug, S extends string = string> {
+/** Static project metadata (identity, tags, and section paths) independent of locale and chart builders. */
+export interface StaticProjectMeta<K extends string = string, S extends string = string> {
   /** Unique project slug identifier. */
   id: K;
   /** Categorization and discovery tags for catalog filtering. */
   tags: ProjectTag[];
-  /** List of primary sources and statistical agencies cited. */
-  sources: ProjectSource[];
   /** Ordered list of canonical section IDs matching URL sub-paths (e.g. ['budget-and-debt', ...]). */
   sections: readonly S[];
 }
 
-/** Localized text metadata declaration for a project (title and description). */
-export interface LocaleProjectMeta {
+/** Localized text metadata declaration for a project (title, description, and section preview titles). */
+export interface LocaleProjectMeta<S extends string = string> {
   /** Localized project title. */
   title: string;
   /** Localized project description. */
   description: string;
+  /** Localized concise names for sections rendered in catalog preview cards. */
+  sections?: Record<S, string>;
 }
 
 /** Lightweight metadata declaration of a project for navigation and overview cards without chart builders. */
-export interface ProjectMeta<K extends ProjectSlug = ProjectSlug> extends StaticProjectMeta<K>, LocaleProjectMeta {}
+export interface ProjectMeta<K extends string = string, S extends string = string> extends StaticProjectMeta<K, S>, Omit<LocaleProjectMeta<S>, 'sections'> {
+  /** Localized concise names for sections rendered in catalog preview cards. */
+  sectionTitles?: Record<S, string>;
+}
 
 /** Localized translation container for a project comprising common phrases, metadata, and chart dictionary. */
 export interface ProjectTranslation<D = Record<string, unknown>> {
@@ -42,19 +45,20 @@ export interface ProjectTranslation<D = Record<string, unknown>> {
   proj: D;
 }
 
-/** Unified context passed to buildSections containing dataset, active locale, translations, and formatters. */
-export interface BuildSectionsContext<K extends ProjectSlug = ProjectSlug, D = Record<string, unknown>> {
-  data: ProjectDataMap[K];
+/** Context passed to section builder factory containing active locale, translations, formatters, and resolved theme tokens. */
+export interface BuildSectionContext<D = Record<string, unknown>> {
   lang: Language;
   t: ProjectTranslation<D>;
   fmt: LocalizedFormatters;
+  theme: ResolvedTheme;
+  tokens: ThemeColors;
 }
 
 /** Function contract for building an individual isolated dashboard section. */
-export type SectionBuilder<K extends ProjectSlug = ProjectSlug, D = Record<string, unknown>> = (ctx: BuildSectionsContext<K, D>) => DashboardSection;
+export type SectionBuilder<TData = unknown, D = Record<string, unknown>> = (ctx: BuildSectionContext<D>) => DashboardSection<TData>;
 
 /** Static declaration of a dashboard project in the catalog with section builders. */
-export interface Project<K extends ProjectSlug = ProjectSlug, D = Record<string, unknown>> extends StaticProjectMeta<K> {
+export interface Project<K extends string = string, D = Record<string, unknown>> extends StaticProjectMeta<K> {
   /** Factory function returning the complete array of configured dashboard sections for the page. */
-  buildSections: (ctx: BuildSectionsContext<K, D>) => DashboardSection[];
+  buildSections: (ctx: BuildSectionContext<D>) => DashboardSection<unknown>[];
 }

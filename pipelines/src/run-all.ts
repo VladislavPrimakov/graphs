@@ -1,16 +1,14 @@
-import type { ProjectSlug } from '@graphs/types';
 import { fileExists, readJson } from '@/utils/fs';
 import { getLogger, isUpdate, isVerbose } from '@/utils/logger';
 import { getMetadataPath } from '@/utils/paths';
 import { runAiTokensPipeline } from './ai-tokens/index';
 import { runSpaceLaunchesPipeline } from './space-launches/index';
 import { runUkrainePipeline } from './ukraine/index';
-import { runWarAttacksPipeline } from './war-rf-ua-attacks/index';
-import { runWarLossesPipeline } from './war-rf-ua-losses/index';
+import { runWarRfUaPipeline } from './war-rf-ua/index';
 import { runWorldPipeline } from './world/index';
 
 interface PipelineTask {
-  name: ProjectSlug;
+  name: string;
   run: (flags: { update: boolean; verbose: boolean }) => Promise<unknown>;
 }
 
@@ -32,12 +30,8 @@ const PIPELINES: PipelineTask[] = [
     run: ({ update, verbose }) => runSpaceLaunchesPipeline(update, verbose),
   },
   {
-    name: 'war-rf-ua-attacks',
-    run: ({ update, verbose }) => runWarAttacksPipeline({ updateTg: update, updateRf: update, verbose }),
-  },
-  {
-    name: 'war-rf-ua-losses',
-    run: ({ update, verbose }) => runWarLossesPipeline(update, verbose),
+    name: 'war-rf-ua',
+    run: ({ update, verbose }) => runWarRfUaPipeline(update, verbose),
   },
 ];
 
@@ -75,7 +69,7 @@ export async function runAllPipelines(options: { update?: boolean; verbose?: boo
   if (await fileExists(metaPath)) {
     try {
       const metadata = await readJson<Record<string, string>>(metaPath);
-      logger.debug(`Verified site/src/data/metadata.json (${Object.keys(metadata).length} projects registered)`);
+      logger.debug(`Verified site/public/data/metadata.json (${Object.keys(metadata).length} projects registered)`);
     } catch (e) {
       logger.warn(`Failed to parse metadata.json: ${e}`);
     }

@@ -24,7 +24,6 @@ Thumbs.db
 *.log
 *.png
 # Ephemeral build-time datasets
-site/src/data/*.json
-site/src/data/cldr/
+site/public/data/
 
 .env

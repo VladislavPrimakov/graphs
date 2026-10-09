@@ -2,5 +2,13 @@
   "name": "@graphs/types",
   "private": true,
   "type": "module",
-  "main": "./index.ts"
+  "exports": {
+    "./*": "./*/*.ts",
+    "./*/*": "./*/*"
+  },
+  "scripts": {
+    "check": "biome check --write",
+    "knip": "knip --directory .. --workspace @graphs/types",
+    "type-check": "tsc --noEmit"
+  }
 }

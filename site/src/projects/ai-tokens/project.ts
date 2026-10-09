@@ -2,7 +2,7 @@ import type { Project, SectionBuilder } from '@/types';
 import type { dict } from './locales/dict-en';
 import { meta } from './meta';
 
-const modules = import.meta.glob<Record<string, SectionBuilder<'ai-tokens', typeof dict>>>('./sections/*.ts', { eager: true });
+const modules = import.meta.glob<Record<string, SectionBuilder<unknown, typeof dict>>>('./sections/*.ts', { eager: true });
 
 /** Project specification for AI token inference throughput dashboard. */
 export const project: Project<'ai-tokens', typeof dict> = {

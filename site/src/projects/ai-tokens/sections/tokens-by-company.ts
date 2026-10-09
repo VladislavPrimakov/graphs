@@ -1,16 +1,20 @@
+import type { TokensByCompanySectionData } from '@graphs/types/ai-tokens/tokens-by-company';
 import { chartSection, type SectionBuilder } from '@/types';
 import { chartOption, zipRecords } from '@/utils/chart-builder';
 import { AI_COMPANIES, COMPANY_COLORS } from '../constants';
 import type { dict } from '../locales/dict-en';
 
 /** Section builder for Daily AI Inference Tokens by Model Provider chart. */
-export const tokensByCompanySection: SectionBuilder<'ai-tokens', typeof dict> = ({ data, t, fmt }) => {
-  const { companies } = data;
+export const tokensByCompanySection: SectionBuilder<TokensByCompanySectionData, typeof dict> = ({ t, fmt }) => {
   const tpdUnit = fmt.per(fmt.scale(1e12), 'duration-day');
 
   return chartSection({
     id: 'tokens-by-company',
     title: t.proj.tokensByCompany.title,
+    sources: [
+      { name: 'Tokens Per Day', url: 'https://tokensperday.com/' },
+      { name: 'OpenRouter Telemetry', url: 'https://openrouter.ai/' },
+    ],
     controls: [
       {
         id: 'mode',
@@ -23,7 +27,8 @@ export const tokensByCompanySection: SectionBuilder<'ai-tokens', typeof dict> = 
         ],
       },
     ] as const,
-    buildView: (values) => {
+    buildView: (data, values) => {
+      const { companies } = data;
       const isShare = values.mode === 'share';
       return chartOption({
         title: { text: t.proj.tokensByCompany.title },

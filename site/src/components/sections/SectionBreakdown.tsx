@@ -4,19 +4,22 @@ import { ChevronDownIcon, ExpandArrowsIcon } from '@/components/icons';
 import { AnchorButton } from '@/components/ui/AnchorButton';
 import type { BreakdownGridSpec } from '@/types';
 import { cn } from '@/utils/cn';
-import { useFormat, useTranslation } from '@/utils/locales';
+import { useFormat, useTranslation } from '@/utils/provider';
 
 /** Props for the generic categorized SectionBreakdown component. */
 export interface SectionBreakdownProps {
   /** Specification declaring categories, comparison lists, and layout parameters. */
   spec: BreakdownGridSpec;
+  /** Optional section dataset passed to dynamic category builders. */
+  data?: unknown;
   /** Unique project slug identifier for anchor links. */
   projectSlug?: string;
 }
 
 /** Generic categorized breakdown grid presenting multi-entity item comparisons with responsive flexbox card layout and accordion expansion. */
-export const SectionBreakdown: React.FC<SectionBreakdownProps> = ({ spec, projectSlug }) => {
-  const { id, categories, previewLimit = 5 } = spec;
+export const SectionBreakdown: React.FC<SectionBreakdownProps> = ({ spec, data, projectSlug }) => {
+  const { id, previewLimit = 5 } = spec;
+  const categories = typeof spec.categories === 'function' ? spec.categories(data) : spec.categories;
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
   const { t } = useTranslation();
   const fmt = useFormat();
@@ -42,15 +45,18 @@ export const SectionBreakdown: React.FC<SectionBreakdownProps> = ({ spec, projec
 
   return (
     <>
-      <div className="flex items-center justify-between gap-3 mb-4 min-h-8">
-        <div>
+      <div className="relative flex items-center justify-center gap-3 mb-4 min-h-8">
+        <div className="absolute left-0 top-1/2 -translate-y-1/2">
           <AnchorButton sectionId={id} projectSlug={projectSlug} />
         </div>
+        {spec.title && <h3 className="text-base sm:text-lg font-bold text-content-primary tracking-tight text-center px-8 sm:px-24">{spec.title}</h3>}
         {expandableCategories.length > 0 && (
-          <button type="button" onClick={toggleAllCategories} className="btn-subtle">
-            <ExpandArrowsIcon className="w-3.5 h-3.5 text-accent-primary" />
-            <span>{allExpanded ? t.common.collapseAllCategories : t.common.expandAllCategories}</span>
-          </button>
+          <div className="absolute right-0 top-1/2 -translate-y-1/2">
+            <button type="button" onClick={toggleAllCategories} className="btn-subtle">
+              <ExpandArrowsIcon className="w-3.5 h-3.5 text-accent-primary" />
+              <span>{allExpanded ? t.common.collapseAllCategories : t.common.expandAllCategories}</span>
+            </button>
+          </div>
         )}
       </div>
 
