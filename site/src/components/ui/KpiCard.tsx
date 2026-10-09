@@ -23,7 +23,7 @@ export const KpiCard: React.FC<KpiCardProps> = ({ label, value, valueColor = 'de
   return (
     <div className={cn('card-subtle', className)}>
       <div className="text-xs text-content-muted leading-tight font-medium">{label}</div>
-      <div className={cn('text-2xl sm:text-3xl font-bold mt-1 tracking-tight', colorClass)} style={colorStyle}>
+      <div className={cn('text-2xl font-bold mt-1 tracking-tight', colorClass)} style={colorStyle}>
         {typeof value === 'number' ? fmt.number(value) : value}
       </div>
     </div>
@@ -45,7 +45,7 @@ export const KpiRow: React.FC<KpiRowProps> = ({ kpis, className }) => {
   return (
     <div className={cn('flex flex-wrap gap-4', className)}>
       {kpis.map((kpi, idx) => (
-        <KpiCard key={kpi.id || `${kpi.label}-${idx}`} label={kpi.label} value={kpi.value} valueColor={kpi.valueColor} className="flex-1 min-w-40 sm:min-w-50" />
+        <KpiCard key={kpi.id || `${kpi.label}-${idx}`} label={kpi.label} value={kpi.value} valueColor={kpi.valueColor} className="flex-1 min-w-40" />
       ))}
     </div>
   );

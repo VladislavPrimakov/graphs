@@ -13,11 +13,6 @@ export const SITE_DATA_DIR = path.resolve(REPO_ROOT, 'site/public/data');
 /** Absolute path to the pipelines/src directory. */
 export const PIPELINES_SRC_DIR = path.resolve(REPO_ROOT, 'pipelines/src');
 
-/** Returns the absolute path to site/public/data/<slug>.json for a project dataset. */
-export function getSiteDataPath(slug: string): string {
-  return path.join(SITE_DATA_DIR, `${slug}.json`);
-}
-
 /** Returns the absolute path to site/public/data/<slug>/<sectionId>/<fileName> for a section dataset. */
 export function getSiteSectionDataPath(slug: string, sectionId: string, fileName = 'data.json'): string {
   return path.join(SITE_DATA_DIR, slug, sectionId, fileName);
@@ -28,7 +23,10 @@ export function getPipelineDataPath(slug: string): string {
   return path.join(PIPELINES_SRC_DIR, slug, 'data.json');
 }
 
+/** Absolute path to the site/src/data directory. */
+export const SITE_SRC_DATA_DIR = path.resolve(REPO_ROOT, 'site/src/data');
+
 /** Returns the absolute path to site/src/data/metadata.json. */
 export function getMetadataPath(): string {
-  return path.join(SITE_DATA_DIR, 'metadata.json');
+  return path.join(SITE_SRC_DATA_DIR, 'metadata.json');
 }

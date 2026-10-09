@@ -178,7 +178,7 @@ export const frontlineDynamicsSection: SectionBuilder<FrontlineDynamicsSectionDa
             name: t.proj.frontlineDynamics.netMonthlyChange,
             type: 'line',
             smooth: true,
-            color: '#f59e0b',
+            color: frontlineColors.netChange,
             lineStyle: { width: 2.5 },
             data: zipRecords({
               value: netChanges,

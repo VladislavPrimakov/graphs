@@ -2,8 +2,7 @@ import type { meta as enMeta } from './meta-en';
 
 export const meta: typeof enMeta = {
   title: 'Raumfahrtstarts',
-  description:
-    'Historische Analyse orbitaler Raumflüge über sieben Jahrzehnte: jährliche Nutzlastmasse im Orbit nach Nationen, Startökonomie ($/kg in LEO/SSO), durchschnittliche Nutzlast pro Start und Zuverlässigkeitstrends.',
+  description: 'Sieben Jahrzehnte Raumfahrt: Nutzlastmasse im Orbit nach Ländern, Startkosten ($/kg) und Zuverlässigkeitstrends.',
   sections: {
     'payload-capacity': 'Nutzlastkapazität',
     'launch-costs': 'Kosten pro kg',

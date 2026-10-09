@@ -99,10 +99,6 @@
 }
 
 @layer base {
-  html {
-    scroll-behavior: smooth;
-  }
-
   body {
     background-color: var(--color-surface-base);
     color: var(--color-content-primary);

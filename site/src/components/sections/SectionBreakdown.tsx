@@ -1,7 +1,7 @@
 import type React from 'react';
 import { useState } from 'react';
 import { ChevronDownIcon, ExpandArrowsIcon } from '@/components/icons';
-import { AnchorButton } from '@/components/ui/AnchorButton';
+import { SectionHeader } from '@/components/sections/SectionHeader';
 import type { BreakdownGridSpec } from '@/types';
 import { cn } from '@/utils/cn';
 import { useFormat, useTranslation } from '@/utils/provider';
@@ -45,20 +45,20 @@ export const SectionBreakdown: React.FC<SectionBreakdownProps> = ({ spec, data, 
 
   return (
     <>
-      <div className="relative flex items-center justify-center gap-3 mb-4 min-h-8">
-        <div className="absolute left-0 top-1/2 -translate-y-1/2">
-          <AnchorButton sectionId={id} projectSlug={projectSlug} />
-        </div>
-        {spec.title && <h3 className="text-base sm:text-lg font-bold text-content-primary tracking-tight text-center px-8 sm:px-24">{spec.title}</h3>}
-        {expandableCategories.length > 0 && (
-          <div className="absolute right-0 top-1/2 -translate-y-1/2">
+      <SectionHeader
+        sectionId={id}
+        projectSlug={projectSlug}
+        title={spec.title}
+        actions={
+          expandableCategories.length > 0 ? (
             <button type="button" onClick={toggleAllCategories} className="btn-subtle">
               <ExpandArrowsIcon className="w-3.5 h-3.5 text-accent-primary" />
-              <span>{allExpanded ? t.common.collapseAllCategories : t.common.expandAllCategories}</span>
+              <span className="hidden sm:inline">{allExpanded ? t.common.collapseAllCategories : t.common.expandAllCategories}</span>
+              <span className="sm:hidden">{allExpanded ? t.common.collapse : t.common.expandAll}</span>
             </button>
-          </div>
-        )}
-      </div>
+          ) : undefined
+        }
+      />
 
       <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,380px),1fr))] gap-4 items-start">
         {categories.map((cat) => {
@@ -81,7 +81,7 @@ export const SectionBreakdown: React.FC<SectionBreakdownProps> = ({ spec, data, 
                   {cat.lists.map((list) => {
                     const visibleItems = isExpanded ? list.items : list.items.slice(0, previewLimit);
                     const totalFormatted = typeof list.total === 'number' ? fmt.number(list.total) : list.total;
-                    const listColor = list.color || '#3b82f6';
+                    const listColor = list.color || 'var(--color-accent-primary)';
 
                     return (
                       <div key={list.label}>
@@ -94,7 +94,7 @@ export const SectionBreakdown: React.FC<SectionBreakdownProps> = ({ spec, data, 
                             {list.items.length} {t.common.models}
                           </span>
                         </div>
-                        <div className="space-y-0.5 text-content-muted pl-1.5 border-l-2" style={{ borderLeftColor: `${listColor}66` }}>
+                        <div className="space-y-0.5 text-content-muted pl-1.5 border-l-2 border-border-subtle">
                           {visibleItems.map((item) => (
                             <div key={item.name} className="flex justify-between">
                               <span className="truncate pr-2">{item.name}</span>

@@ -1,33 +1,38 @@
 # Graphs & Analytics Platform
 
-An open-source interactive data visualization and analytics platform built on public datasets. The project provides a collection of interactive, responsive charts with deep drill-downs, zoomable timelines, localized metadata, and categorized breakdown views.
+An open-source, high-performance interactive data visualization and analytics platform built on public datasets. The project delivers responsive charts with deep drill-downs, zoomable timelines, vector GIS maps, localized metadata, and categorized breakdown views — fully statically pre-rendered with zero runtime server costs.
+
+---
+
+## Dashboards
+
+- **Ukraine (`/ukraine`)** — State budget execution, sovereign debt dynamics, foreign trade balance, and commodity structure across 8 NBU categories.
+- **War RF-UA (`/war-rf-ua`)** — Interactive MapLibre GL territorial frontline map (DeepState vs LostArmour consensus), daily territorial dynamics, geolocated equipment losses (19,800+ entries), and missile/UAV air strikes.
+- **World Economic & Energy (`/world`)** — GDP (PPP), GDP per capita, electricity generation, clean power share, and machinery turnover metrics (1990–present) across sovereign nations.
+- **Space Launches (`/space-launches`)** — Worldwide orbital space launches (1957–present), payload mass to orbit, nation reliability failure rates, and launch costs per kg.
+- **AI Tokens (`/ai-tokens`)** — Global daily AI model inference throughput and market share by leading AI provider and macro-region.
 
 ---
 
 ## Tech Stack
 
 ### Frontend & Visualization
-- **React 19** — Core UI library with modern compiler support.
-- **React Router v7** — Static Site Generation (SSG) with code-split route pre-rendering across multiple locales.
-- **Apache ECharts** — Canvas visualization engine with custom themes, interactive tooltips, data zooming, and export capabilities.
-- **Tailwind CSS v4** — High-performance utility styling engine driven by design tokens.
+- **React 19** — Core UI library with automated React Compiler optimizations.
+- **React Router v7** — Static Site Generation (SSG) with code-split route pre-rendering across 4 locales (`en`, `ru`, `uk`, `de`) and section deep links.
+- **Apache ECharts** — High-performance Canvas/WebGL visualization engine with custom themes, declarative tooltips, and off-screen Retina PNG export (2400×1120).
+- **MapLibre GL** — Vector tile GIS engine for geospatial equipment clustering and multi-polygon territorial control rendering.
+- **Tailwind CSS v4** — CSS-first `@theme` design tokens and unified `@utility` shortcuts (`card`, `glass-bar`, `control-panel`).
 
 ### Architecture & Runtime
 - **TypeScript 5.9** — End-to-end type safety spanning shared schemas, ETL pipelines, and UI specifications.
 - **Bun** — Ultra-fast JavaScript/TypeScript runtime, package manager, and test runner.
 - **Vite 6** — Frontend build tool and development server.
+- **Two-Tier Data Architecture** — Committed minimal raw baseline (Tier 1) with fast-path in-memory transformations exporting compact ephemeral SSG datasets (Tier 2).
 
 ### Code Quality & Analysis
 - **Biome** — Rust-based ultra-fast code formatter and linter.
 - **Knip** — Automated dead code, unused export, and dependency auditor.
 - **TypeScript (`tsc --noEmit`)** — Compile-time validation across all packages and workspaces.
-
-### Data Pipelines (ETL)
-- **TypeScript Scrapers & Crawlers** — Cache-first pipeline jobs for fetching, auditing, and transforming open data sources.
-- **Data Parsing Engines** — `fast-xml-parser`, `cheerio`, `xlsx` for parsing upstream feeds, sheets, and markup.
-
-### CI/CD & Deployment
-- **GitHub Actions** — Scheduled and push-triggered CI/CD pipeline for fresh dataset extraction, static pre-rendering, and automated GitHub Pages deployment.
 
 ---
 
@@ -48,11 +53,20 @@ bun run dev
 
 ### Verification & Building
 ```bash
-# Verify dead code (Knip), formatting/linting (Biome), types (tsc), and build the site:
+# Build data pipelines (ETL):
+bun run build:pipeline
+
+# Run a single data pipeline (e.g. ukraine, war-rf-ua, world):
+bun --filter @graphs/pipelines run:ukraine
+
+# Build the site (Knip, Biome, tsc, and multi-locale SSG pre-rendering):
 bun run build:site
 
-# Run full CI verification (ETL pipelines + site across all locales):
+# Run full CI verification (pipelines + site across all locales):
 bun run build
+
+# Preview production SSG build locally:
+bun run preview
 ```
 
 ---

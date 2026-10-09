@@ -1,13 +1,10 @@
 {
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
-    "target": "ESNext",
     "useDefineForClassFields": true,
     "lib": ["DOM", "DOM.Iterable", "ESNext"],
-    "types": ["vite/client"],
+    "types": ["vite/client", "bun"],
     "allowJs": false,
-    "allowSyntheticDefaultImports": true,
-    "noEmit": true,
     "incremental": true,
     "tsBuildInfoFile": "./.cache/tsbuildinfo",
     "jsx": "react-jsx",
@@ -15,8 +12,8 @@
     "paths": {
       "@graphs/types/*": ["../types/*"],
       "@/*": ["./src/*"],
-      "@data/*": ["./public/data/*"]
+      "@data/*": ["./src/data/*"]
     }
   },
-  "include": ["src", "../types", "react-router.config.ts", "vite.config.ts", ".react-router/types/**/*"]
+  "include": ["src", "scripts", "tests", "knip.ts", "react-router.config.ts", "vite.config.ts", ".react-router/types/**/*"]
 }

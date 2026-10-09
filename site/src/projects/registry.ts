@@ -6,7 +6,6 @@ const metaModules = import.meta.glob<{ meta: StaticProjectMeta }>('./*/meta.ts',
 const projectLoaders = import.meta.glob<{ project: Project }>('./*/project.ts');
 const metaLoaders = import.meta.glob<{ meta: LocaleProjectMeta }>('./*/locales/meta-*.ts');
 const dictLoaders = import.meta.glob<{ dict: Record<string, unknown> }>('./*/locales/dict-*.ts');
-const sectionDataLoaders = import.meta.glob<{ default: unknown }>('../../public/data/*/*/data.json');
 
 /** Canonical static project metadata descriptors discovered dynamically from project slices. */
 export const STATIC_PROJECT_INFOS: StaticProjectMeta[] = Object.values(metaModules).map((mod) => mod.meta);
@@ -83,6 +82,20 @@ export function loadProjectBundle(slug: string, lang: Language): Promise<Complet
   return promise;
 }
 
+async function fetchSectionJson<T>(slug: string, sectionId: string): Promise<T> {
+  if (import.meta.env.SSR) {
+    const { readFile } = await import(/* @vite-ignore */ 'node:fs/promises');
+    const { resolve } = await import(/* @vite-ignore */ 'node:path');
+    const publicDir = process.cwd().endsWith('site') ? 'public/data' : 'site/public/data';
+    const filePath = resolve(process.cwd(), publicDir, slug, sectionId, 'data.json');
+    return JSON.parse(await readFile(filePath, 'utf-8')) as T;
+  }
+  const url = `${import.meta.env.BASE_URL}data/${slug}/${sectionId}/data.json`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status} fetching data for ${slug}/${sectionId}`);
+  return (await res.json()) as T;
+}
+
 /** In-memory cache for loaded section datasets. */
 const sectionDataCache = new Map<string, Promise<unknown>>();
 
@@ -91,12 +104,7 @@ export function loadSectionData<T = unknown>(slug: string, sectionId: string): P
   const cacheKey = `${slug}:${sectionId}`;
   let promise = sectionDataCache.get(cacheKey);
   if (!promise) {
-    const loaderKey = `../../public/data/${slug}/${sectionId}/data.json`;
-    const dataLoader = sectionDataLoaders[loaderKey];
-    if (!dataLoader) {
-      throw new Error(`Section data file not found: ${loaderKey}`);
-    }
-    promise = dataLoader().then((mod) => (mod as { default: unknown }).default ?? mod);
+    promise = fetchSectionJson<T>(slug, sectionId);
     sectionDataCache.set(cacheKey, promise);
   }
   return promise as Promise<T>;

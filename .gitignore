@@ -23,6 +23,8 @@ Thumbs.db
 *.tmp
 *.log
 *.png
+!site/public/og/*.png
+
 # Ephemeral build-time datasets
 site/public/data/
 

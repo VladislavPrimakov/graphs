@@ -5,7 +5,7 @@ export const LocaleCommon = {
   catalog: 'Catalog',
   dataVisualizations: 'Data Visualizations',
   heroTitle: 'Interactive Graphs & Analytics',
-  heroSubtitle: 'Deep analytical dashboards powered by open-source data (React, Vite, Apache ECharts). Featuring interactive zoom, rich tooltips, and category filters.',
+  heroSubtitle: 'Interactive analytical dashboards powered by open-source data (React, Vite, Apache ECharts): zoom, rich tooltips, and category filters.',
   projects: 'Projects',
   filterByTag: 'Filter by tag',
   all: 'All',

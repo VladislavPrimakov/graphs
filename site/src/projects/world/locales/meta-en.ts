@@ -2,8 +2,7 @@ import type { LocaleProjectMeta } from '@/types';
 
 export const meta = {
   title: 'World',
-  description:
-    'Comparative macroeconomic and energy analysis across top world economies: GDP at PPP (total and per capita), machinery and electronics trade turnover (HS 84-85), gross electricity generation, clean solar & wind power transition, and per capita power consumption.',
+  description: 'Comparative macroeconomic and energy analysis: GDP at PPP, machinery trade turnover, electricity generation, and clean power transition.',
   sections: {
     'gdp-ppp': 'GDP (PPP)',
     'gdp-per-capita-ppp': 'GDP per Capita',

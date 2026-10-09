@@ -460,12 +460,12 @@ export async function runWorldPipeline(forceUpdate = false, verbose?: boolean): 
         owidChanged = !isRemoteMetaEqual(cache.meta.owid, remoteOwidMeta);
 
         if (!wdiChanged && !owidChanged) {
-          logger.info('All source metadata matches remote (WDI release & OWID ETag). Using cached dataset.');
+          logger.info('Remote sources unchanged (WDI & OWID match). Using cached dataset.');
           await exportWorld(cache.sections);
           return;
         }
 
-        logger.info('Remote sources updated upstream. Refreshing dataset...');
+        logger.info('New upstream data detected. Refreshing dataset...');
       }
 
       const reporters = await fetchComtradeReporters(cache?.reporters);
@@ -605,7 +605,7 @@ export async function runWorldPipeline(forceUpdate = false, verbose?: boolean): 
         0,
       );
       await exportWorld(sections);
-      logger.success(`Exported world section datasets (${years.length} years, 6 macroeconomic & industrial charts)`);
+      logger.success(`Exported world datasets (${years[0]}–${years[years.length - 1]} global metrics, 20 top economies)`);
     },
     verbose,
   );

@@ -117,7 +117,7 @@ export async function runAiTokensPipeline(forceUpdate = false, verbose?: boolean
         logger.debug('Checking tokensperday.com HTTP metadata via HEAD...');
         remoteMeta = await fetchHeadMeta(URL_HOME);
         if (remoteMeta && isRemoteMetaEqual(cache.meta.remoteMeta, remoteMeta) && remoteMeta.etag) {
-          logger.info('TokensPerDay remote metadata matches (ETag unchanged). Using cached dataset.');
+          logger.info('Remote sources unchanged (ETag match). Using cached dataset.');
           await exportProjectSections('ai-tokens', {
             'tokens-by-region': { summary: cache.dataset.summary, regions: cache.dataset.regions },
             'tokens-by-company': { summary: cache.dataset.summary, companies: cache.dataset.companies },
@@ -148,7 +148,7 @@ export async function runAiTokensPipeline(forceUpdate = false, verbose?: boolean
         viewsSha256 = createHash('sha256').update(rawJson).digest('hex');
 
         if (!forceUpdate && hasValidDataset && cache?.meta?.viewsSha256 === viewsSha256) {
-          logger.info('TokensPerDay time-series views unchanged (SHA-256 match). Using cached dataset.');
+          logger.info('Remote sources unchanged (SHA-256 match). Using cached dataset.');
           await exportProjectSections('ai-tokens', {
             'tokens-by-region': { summary: cache.dataset.summary, regions: cache.dataset.regions },
             'tokens-by-company': { summary: cache.dataset.summary, companies: cache.dataset.companies },
@@ -156,7 +156,7 @@ export async function runAiTokensPipeline(forceUpdate = false, verbose?: boolean
           return;
         }
 
-        logger.info('New tokensperday views data detected. Processing updated series...');
+        logger.info('New upstream data detected. Processing updated series...');
       } catch (err) {
         if (hasValidDataset && cache) {
           logger.warn(`Network query failed (${err instanceof Error ? err.message : String(err)}). Using cached dataset.`);
@@ -350,7 +350,7 @@ export async function runAiTokensPipeline(forceUpdate = false, verbose?: boolean
         'tokens-by-region': { summary: dataset.summary, regions: dataset.regions },
         'tokens-by-company': { summary: dataset.summary, companies: dataset.companies },
       });
-      logger.success(`Exported ai-tokens section datasets (${months.length} months, ${companySeries.length} companies)`);
+      logger.success(`Exported ai-tokens datasets (${months.length} months, ${companySeries.length} companies, ${regionSeries.length} regions)`);
     },
     verbose,
   );

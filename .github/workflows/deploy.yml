@@ -32,16 +32,6 @@ jobs:
       - name: Install workspace dependencies
         run: bun install --frozen-lockfile
 
-      - name: Cache pipeline data snapshots
-        uses: actions/cache@v6
-        with:
-          path: |
-            pipelines/src/**/data*.json
-          key: pipeline-snapshots-${{ runner.os }}-${{ github.run_id }}
-          restore-keys: |
-            pipeline-snapshots-${{ runner.os }}-
-            pipeline-snapshots-
-
       - name: Run ETL data pipelines
         run: bun run build:pipeline
         env:
@@ -49,10 +39,7 @@ jobs:
           KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
 
       - name: Build site
-        run: |
-          bun run build:site
-          cp -r ./site/dist/client/graphs/* ./site/dist/client/
-          cp ./site/dist/client/404/index.html ./site/dist/client/404.html
+        run: bun run build:site
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v5

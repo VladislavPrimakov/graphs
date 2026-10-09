@@ -447,12 +447,12 @@ export async function runUkrainePipeline(forceUpdate = false, verbose?: boolean)
         const allUnchanged = allUrls.every((url, i) => isRemoteMetaEqual(existingCache.meta?.[url], remoteMetas[i]));
 
         if (allUnchanged) {
-          logger.info('All NBU source files are unchanged (matching remote ETags). Using cached dataset.');
+          logger.info('Remote sources unchanged (NBU ETags match). Using cached dataset.');
           await exportUkraine(existingCache.sections);
           return;
         }
 
-        logger.info('NBU source files updated upstream. Downloading updated workbooks...');
+        logger.info('New upstream data detected. Downloading updated workbooks...');
       }
 
       let budgetWb: XLSX.WorkBook;
@@ -680,7 +680,7 @@ export async function runUkrainePipeline(forceUpdate = false, verbose?: boolean)
 
       await writeJson(DATA_FILE, { meta: newMeta, rates: ratesCache, sections }, 0);
       await exportUkraine(sections);
-      logger.success(`Exported ukraine section datasets (${budgetYears[0]}–${budgetYears[budgetYears.length - 1]} budget & trade series)`);
+      logger.success(`Exported ukraine datasets (${budgetYears[0]}–${budgetYears[budgetYears.length - 1]} budget, debt & trade)`);
     },
     verbose,
   );
