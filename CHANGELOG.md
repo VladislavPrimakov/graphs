@@ -5,7 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.2.2] - 2026-10-09
+## [1.2.3] - 2026-10-09
+
+### Tooling & Types
+
+#### Changed
+- Relocated dataset metadata to `site/src/data/metadata.json` and configured `@data/*` path alias in `site/tsconfig.json` and `site/vite.config.ts`.
+- Updated GitHub Actions deployment workflow to build and deploy static artifacts using Bun.
+
+---
+
+### Pipelines (@graphs/pipelines)
+
+#### Changed
+- Updated pipeline path utilities to write `metadata.json` into `site/src/data/metadata.json`.
+
+---
+
+### Site (@graphs/site)
+
+#### Added
+- Added `SectionHeader.tsx` unifying responsive 3-column title centering, anchor buttons, and action control stacks across all charts, maps, breakdown grids, and loaders.
+- Added `exportChartAsPng` rendering 2400×1120 Retina PNG charts with centered titles and solid card backgrounds via offscreen canvas.
+- Added automated OpenGraph snapshot generator (`generate-og.ts`) capturing pixel-perfect 1.91:1 (2400×1260 @2x) preview images for all project dashboard sections.
+- Added localized `og:site_name` meta tags across all routes (`Graphs`, `Графики`, `Графіки`, `Graphen`).
+- Added automated social metadata test suite (`validate-meta.test.ts`) validating OpenGraph tags, title/description character limits, and image 1.91:1 aspect ratios.
+- Added automatic code-splitting with `React.lazy()` for heavy client visualizers (`SectionChart`, `FrontlineMap`, `LossesMap`).
+
+#### Changed
+- Condensed project descriptions across all four locales (`en`, `ru`, `uk`, `de`) to 108–140 characters to prevent truncation in search engines and mobile social cards.
+- Synchronized section page titles to use concise titles from `projMeta` and section descriptions to use full section titles.
+- Configured absolute canonical URL resolution (`SITE_ORIGIN`) for OpenGraph and Twitter card image tags across project dashboard routes.
+
+#### Fixed
+- Fixed that deep-linking to bottom sections triggered scroll jumping or blank upper sections when scrolling up.
+- Fixed document-level horizontal scrollbars on narrow viewports by applying layout containment (`min-w-0`, `overflow-hidden`) to chart wrappers.
+- Fixed that ECharts canvas failed to reactively update on formatter and label toggle changes in `SectionChart`.
+
+---
+
+## [1.2.2] - 2026-10-08
 
 ### Tooling & Types
 

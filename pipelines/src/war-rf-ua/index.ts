@@ -95,30 +95,10 @@ function buildUnifiedDaily(
   };
 }
 
-const CRIMEA_BASELINE_KM2 = 27560;
-
-/** Normalizes early historical frontline points where LostArmour omitted Crimea from active frontline polygon. */
-function normalizeFrontlinePoint(pt: FrontlineTimelinePoint, totalUkraineKm2: number): FrontlineTimelinePoint {
-  if (pt.laClaimedKm2 < 100000) {
-    const normRf = round(pt.consensusRfKm2 + CRIMEA_BASELINE_KM2, 1);
-    const normDisp = round(Math.max(0, pt.disputedKm2 - CRIMEA_BASELINE_KM2), 1);
-    const normUa = round(Math.max(0, totalUkraineKm2 - normRf - normDisp), 1);
-    return {
-      ...pt,
-      consensusRfKm2: normRf,
-      consensusUaKm2: normUa,
-      disputedKm2: normDisp,
-      laClaimedKm2: round(pt.laClaimedKm2 + CRIMEA_BASELINE_KM2, 1),
-    };
-  }
-  return pt;
-}
-
 /** Builds precomputed monthly and daily territorial control dynamics for the frontline-dynamics chart section. */
 function buildFrontlineDynamics(frontline: WarFrontlineDataset): FrontlineDynamicsSectionData {
   const totalUkraineKm2 = frontline.summary.totalUkraineKm2 || 603628;
-  const rawTimeline = frontline.timeline;
-  const timeline = rawTimeline.map((pt) => normalizeFrontlinePoint(pt, totalUkraineKm2));
+  const timeline = frontline.timeline.map((pt) => ({ ...pt }));
 
   // 1-day upstream anomaly smoothing (e.g. single-day corrupt/partial KML polygon download)
   for (let i = 1; i < timeline.length - 1; i++) {
@@ -270,7 +250,7 @@ export async function runWarRfUaPipeline(forceUpdate = false, verbose?: boolean)
     'war-rf-ua',
     async () => {
       const logger = getLogger();
-      logger.start('Starting War RF-UA unified ETL pipeline');
+      logger.start('Starting War RF-UA ETL pipeline');
 
       logger.debug('Processing military equipment losses...');
       const losses = await parseLosses(forceUpdate);
@@ -296,6 +276,15 @@ export async function runWarRfUaPipeline(forceUpdate = false, verbose?: boolean)
       logger.debug('Processing territorial frontline comparison (DeepState vs LostArmour)...');
       const frontline = await parseFrontline(forceUpdate);
       const frontlineDynamics = buildFrontlineDynamics(frontline);
+
+      const totalStrikes =
+        rfData.summary.uavs.total + rfData.summary.ballistic.total + rfData.summary.cruise.total + uaData.summary.uavs.total + uaData.summary.ballistic.total + uaData.summary.cruise.total;
+
+      if (!forceUpdate) {
+        logger.info(
+          `Remote sources unchanged (${losses.summary.totalRecords.toLocaleString()} losses, ${totalStrikes.toLocaleString()} strikes, ${frontline.timeline.length.toLocaleString()} days cached). Using cached dataset.`,
+        );
+      }
 
       await exportProjectSections('war-rf-ua', {
         'frontline-map': {
@@ -331,9 +320,11 @@ export async function runWarRfUaPipeline(forceUpdate = false, verbose?: boolean)
         },
       });
 
-      logger.success(
-        `Exported war-rf-ua section datasets (Losses: ${losses.summary.totalRecords.toLocaleString()} placemarks, Attacks: RF ${rfData.summary.uavs.total + rfData.summary.ballistic.total + rfData.summary.cruise.total} / UA ${uaData.summary.uavs.total + uaData.summary.ballistic.total + uaData.summary.cruise.total}, Frontline: Consensus RF ${frontline.summary.consensusRfKm2.toLocaleString()} km² / Disputed ${frontline.summary.disputedKm2.toLocaleString()} km²)`,
-      );
+      if (forceUpdate) {
+        logger.success(
+          `Exported war-rf-ua datasets (${losses.summary.totalRecords.toLocaleString()} losses, ${totalStrikes.toLocaleString()} strikes, ${frontline.timeline.length.toLocaleString()} frontline days)`,
+        );
+      }
     },
     verbose,
   );

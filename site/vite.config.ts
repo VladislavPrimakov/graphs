@@ -58,24 +58,17 @@ export default defineConfig(({ command }) => ({
     alias: {
       '@graphs/types': path.resolve(__dirname, '../types'),
       '@': path.resolve(__dirname, './src'),
-      '@data': path.resolve(__dirname, './public/data'),
+      '@data': path.resolve(__dirname, './src/data'),
     },
   },
   build: {
-    chunkSizeWarningLimit: 2500,
+    chunkSizeWarningLimit: 1200,
     rollupOptions: {
       onwarn(warning, defaultHandler) {
         if (warning.code === 'DYNAMIC_IMPORT_WILL_NOT_MOVE' || warning.message?.includes('dynamic import will not move module')) {
           return;
         }
         defaultHandler(warning);
-      },
-      output: {
-        manualChunks(id) {
-          if (id.includes('node_modules/echarts') || id.includes('node_modules/zrender')) {
-            return 'echarts';
-          }
-        },
       },
     },
   },

@@ -1,8 +1,9 @@
 import type { FrontlineMapSectionData } from '@graphs/types/war-rf-ua/frontline-map';
-import { createElement } from 'react';
+import { createElement, lazy } from 'react';
 import { customSection, type SectionBuilder } from '@/types';
-import { FrontlineMap } from '../components/FrontlineMap';
 import type { dict } from '../locales/dict-en';
+
+const FrontlineMap = lazy(() => import('../components/FrontlineMap').then((m) => ({ default: m.FrontlineMap })));
 
 /** Section builder for Territorial Control & Frontline Discrepancy Map. */
 export const frontlineMapSection: SectionBuilder<FrontlineMapSectionData, typeof dict> = ({ t }) =>

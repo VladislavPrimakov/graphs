@@ -18,8 +18,11 @@ Operational guide and rulebook for AI agents working on the `graphs` repository.
 ### 1.2 Code Documentation & Conventions
 - **JSDoc**: Use `/** ... */` for exported symbols; omit `@param` and `@returns`. Keep field descriptions single-line with `@default` and explicit units (`USD`, `TWh`, `px`, `%)`.
 - **Naming**: `PascalCase` for types/components; `camelCase` for variables, functions, and properties; `SCREAMING_SNAKE_CASE` for global constants; `kebab-case` for files, slugs, and section IDs.
-- **Conventional Single-Line Commits**: Format: `<type>(<scope>): <summary>`. On releases: `v<version>: <type>(<scope>): <summary>`. Never write multi-line commit messages.
-- **Changelog SSoT (`CHANGELOG.md`)**: Keep a Changelog format grouped by workspace (`### Tooling & Types`, `### Pipelines (@graphs/pipelines)`, `### Site (@graphs/site)`) separated by `---`. Use Factorio/Wube style: active past-tense verbs (`Added`, `Fixed that`, `Changed`, `Removed`, `Extracted`), zero fluff, exact backticked identifiers.
+- **Changelog SSoT (`CHANGELOG.md`)**: Keep a Changelog format with STRICT workspace section ordering within every release:
+  1. `### Tooling & Types`
+  2. `### Pipelines (@graphs/pipelines)`
+  3. `### Site (@graphs/site)`
+  Separated by `---`. Use Factorio/Wube style: active past-tense verbs (`Added`, `Fixed that`, `Changed`, `Removed`, `Extracted`), zero fluff, exact backticked identifiers.
 - **Package Versioning**: Workspace `package.json` files omit `"version"`. Milestones exist exclusively in `CHANGELOG.md`.
 
 ---
@@ -55,19 +58,23 @@ Operational guide and rulebook for AI agents working on the `graphs` repository.
   - **Tier 1 (Root Locale)**: `loadRootLocale(lang)` in `root.tsx` loads `common-{lang}.ts`, CLDR formats, and `loadCatalog` into `<AppProvider>`.
   - **Tier 2 (Project Bundle)**: `loadProjectBundle(slug, lang)` loads project specification and localized dictionaries (`dict-{lang}.ts`, `meta-{lang}.ts`) via React 19 `use()`.
   - **Tier 3 (Per-Section Datasets)**: `loadSectionData(slug, sectionId)` asynchronously loads typed section JSON (`public/data/<slug>/<sectionId>/data.json`) on demand when `<Section>` approaches the viewport (`useInView`).
+  - **Component Code-Splitting**: Heavy client visualizers (`SectionChart`, `FrontlineMap`, `LossesMap`) are dynamically imported via `React.lazy()` with fallback `<LoadingSpinner />`.
+- **SectionHeader Architecture**: Dynamic 3-column mathematical centering, top-aligned anchor button and first action on row 1, subsequent actions stacked below row 1, and width caching across breakpoints to prevent layout jitter.
 - **React 19 Concurrency**: Use `startTransition` for interactive control/filter state updates to keep UI smooth. Use `useEffectEvent` for non-reactive callbacks. Decouple `ResizeObserver` in `SectionChart.tsx` to pause off-screen canvas redraws.
-- **Smart Navigation Lock & Scroll-Spy**: Deep-linking (`/:slug/:section`) and outline clicks lock navigation (`navTarget`), passing `enabled: false` to off-target sections to completely suppress intermediate JSON fetching and canvas rendering during scroll animations. `useScrollSpy` clips the bottom 400px reading boundary and syncs URL/title on native `scrollend`. `<AnchorButton>` copies deep-links without mutating history.
+- **Smart Navigation & Programmatic Scroll Locking**: Deep-linking (`/:slug/:section`) and outline clicks smoothly transition between sections while `useInView` programmatic locking (`startScrollLock`) and dynamic header clipping (`-${getHeaderHeight()}px 0px 400px 0px`) completely suppress intermediate JSON fetching and canvas rendering during fast scroll flight. `useScrollSpy` clips the bottom 400px reading boundary and syncs URL/title on native `scrollend`. `<AnchorButton>` copies deep-links without mutating history.
 
 ### 3.2 Polymorphic Sections & Visualization Invariants
 - **`DashboardSection` Discriminated Union**: `ChartSectionSpec` (`type: 'chart'`, defined via `chartSection`), `BreakdownGridSpec` (`type: 'breakdown-grid'`), and `CustomSectionSpec` (`type: 'custom'`).
 - **Clean Y-Axis**: Never attach currency symbols, percent signs, or units to Y-axis tick labels via `axisLabel.formatter`. Units belong strictly in `yAxis.name`. `axisLabel.formatter` is permitted exclusively in diverging mirrored charts to strip negative signs (`Math.abs`).
 - **Declarative Tooltips (`chartOption`)**: Zero raw HTML strings in tooltip formatters. Use declarative `tooltip: { type: 'axis' | 'dual' | 'table', ... }` with automatic type inference and auto-sorting (`sort: 'desc'`).
 - **Canvas Theme Enhancement (`enhanceOption`)**: `<SectionChart>` injects fonts, dark/light grid clearance, tooltips, and toolbox controls automatically. Always update canvases with `notMerge: true` (`chart.setOption(option, true)`).
+- **PNG Chart Export (`exportChartAsPng`)**: Generates 2D canvas composite with centered section title, solid card surface background (`tokens.surface.card`), automatic `dataZoom` bottom margin cropping, and native ECharts downward-arrow icon.
 - **Localization**: Pure TypeScript SSoT (`typeof` contracts + `satisfies` validation across `en`, `ru`, `uk`, `de`). Zero trailing colons or punctuation in dictionary values. Default language (`en`) has no URL prefix (`/:slug/:section`); non-default languages use `/:lang/...`.
 
 ### 3.3 Core Utilities & Design System
-- **Utilities (`site/src/utils/`)**: `format.ts` (CLDR formatting `fmt.*`), `color.ts` (`resolveColor`), `chart-builder.ts` (`chartOption`, `zipRecords`, `createBarSeries`), `tooltip-builder.ts` (pure HTML tooltips/popups), `map-builder.ts` (MapLibre vector styles/layers), `useInView.ts` (lazy viewport observer), `useScrollSpy.ts` (telemetry/scrollend sync), `provider.tsx` (`AppProvider`, `useTheme`, `useLanguage`, `useTranslation`, `useFormat`, `useCatalog`), `version.ts` (`SITE_VERSION`).
+- **Utilities (`site/src/utils/`)**: `format.ts` (CLDR formatting `fmt.*`), `color.ts` (`resolveColor`), `cn.ts` (class merging), `chart-builder.ts` (`chartOption`, `zipRecords`, `createBarSeries`, `exportChartAsPng`), `tooltip-builder.ts` (pure HTML tooltips/popups), `map-builder.ts` (MapLibre vector styles/layers), `useInView.ts` (lazy viewport observer), `useScrollSpy.ts` (telemetry/scrollend sync), `provider.tsx` (`AppProvider`, `useTheme`, `useLanguage`, `useTranslation`, `useFormat`, `useCatalog`), `version.ts` (`SITE_VERSION`).
 - **Styles (`site/src/styles/`)**: `global.css` (Tailwind v4 `@theme`, container utilities: `glass-bar`, `glass-overlay`, `card`, `card-elevated`, `control-panel`, `btn-subtle`, `btn-accent`, `nav-pill`, `anchor-btn`), `tags.css` (`@utility tag-pill`), `changelog.css`, `map.css`, `tokens.ts`. Prefer standard utility classes over arbitrary pixel brackets.
+- **Responsive Invariant**: Avoid arbitrary responsive modifier jumping (`sm:`, `md:`) on gaps, paddings, and font sizes; keep responsive adaptations strictly confined to global navbar drawer collapsing and section header action stacks.
 - **Mandatory Imports**: Use `@/*` aliases in `site/src/`. Import types from subpaths `@graphs/types/<slug>/<section-id>`.
 
 ---

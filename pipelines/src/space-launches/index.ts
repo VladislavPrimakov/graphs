@@ -376,11 +376,11 @@ export async function runSpaceLaunchesPipeline(forceUpdate = false, verbose?: bo
             latestRemoteLaunch = data.results?.[0] ?? null;
 
             if (latestRemoteLaunch?.id === cache.meta.lastLaunchId && preflightCount === cache.meta.remoteCount) {
-              logger.info(`All space launches are up-to-date (${cache.launches.length} launches, latest: ${latestRemoteLaunch?.net?.slice(0, 10)}). Using cached dataset.`);
+              logger.info(`Remote sources unchanged (${cache.launches.length.toLocaleString()} launches up to ${latestRemoteLaunch?.net?.slice(0, 10)}). Using cached dataset.`);
               await exportSpaceLaunches(cache.sections);
               return;
             }
-            logger.info('New space launches detected upstream. Fetching recent launches...');
+            logger.info('New upstream data detected. Fetching recent launches...');
           } else {
             logger.warn(`Space Devs API preflight returned HTTP ${res.status}. Using cached dataset.`);
             await exportSpaceLaunches(cache.sections);
@@ -986,7 +986,7 @@ export async function runSpaceLaunchesPipeline(forceUpdate = false, verbose?: bo
         0,
       );
       await exportSpaceLaunches(sections);
-      logger.success(`Exported space-launches section datasets (${allLaunches.length.toLocaleString()} orbital launches, ${allYears[0]}–${allYears[allYears.length - 1]})`);
+      logger.success(`Exported space-launches datasets (${allLaunches.length.toLocaleString()} launches, ${allYears[0]}–${allYears[allYears.length - 1]})`);
     },
     verbose,
   );

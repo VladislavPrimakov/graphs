@@ -69,7 +69,7 @@ export async function runAllPipelines(options: { update?: boolean; verbose?: boo
   if (await fileExists(metaPath)) {
     try {
       const metadata = await readJson<Record<string, string>>(metaPath);
-      logger.debug(`Verified site/public/data/metadata.json (${Object.keys(metadata).length} projects registered)`);
+      logger.debug(`Verified site/src/data/metadata.json (${Object.keys(metadata).length} projects registered)`);
     } catch (e) {
       logger.warn(`Failed to parse metadata.json: ${e}`);
     }

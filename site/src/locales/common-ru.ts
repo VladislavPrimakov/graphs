@@ -5,7 +5,7 @@ export const LocaleCommon: typeof enCommon = {
   catalog: 'Каталог',
   dataVisualizations: 'Визуализации данных',
   heroTitle: 'Интерактивные графики и аналитика',
-  heroSubtitle: 'Аналитические дашборды на базе открытых данных (React, Vite, Apache ECharts). Интерактивное масштабирование, детальные подсказки и фильтры для глубокого анализа.',
+  heroSubtitle: 'Аналитические дашборды на базе открытых данных (React, Vite, Apache ECharts): масштабирование, детальные подсказки и фильтрация категорий.',
   projects: 'Проекты',
   filterByTag: 'Фильтр по тегам',
   all: 'Все',

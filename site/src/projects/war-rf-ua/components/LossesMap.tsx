@@ -6,14 +6,12 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import type { WarLossCategory } from '@graphs/types/war-rf-ua/categories';
 import type { LossesMapSectionData, LossMapPoint } from '@graphs/types/war-rf-ua/losses-map';
 import { FilterPills } from '@/components/ui/FilterPills';
-import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { SearchSelect, type SearchSelectItem } from '@/components/ui/SearchSelect';
 import { TimelineScrubber } from '@/components/ui/TimelineScrubber';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/ToggleGroup';
 import { getMapTileStyle, registerFallbackDot } from '@/utils/map-builder';
 import { useFormat, useTheme, useTranslation } from '@/utils/provider';
 import { renderTooltipTablePopup } from '@/utils/tooltip-builder';
-import { useInView } from '@/utils/useInView';
 import type { dict as enDict } from '../locales/dict-en';
 import { lossColors } from '../tokens';
 import { CategoryIcon } from './CategoryIcon';
@@ -159,10 +157,9 @@ function getMapTimelinePeriods(points: LossMapPoint[]): string[] {
 interface LossesMapProps {
   data: LossesMapSectionData;
   t: typeof enDict;
-  initialInView?: boolean;
 }
 
-export const LossesMap: React.FC<LossesMapProps> = ({ data, t, initialInView }) => {
+export const LossesMap: React.FC<LossesMapProps> = ({ data, t }) => {
   const { resolvedTheme, tokens } = useTheme();
   const {
     t: { common: tCommon },
@@ -171,11 +168,6 @@ export const LossesMap: React.FC<LossesMapProps> = ({ data, t, initialInView }) 
   const rfName = fmt.region('RU');
   const uaName = fmt.region('UA');
   const unkName = t.timeline.unrecognized.charAt(0).toUpperCase() + t.timeline.unrecognized.slice(1);
-
-  const { ref: containerRef, hasEnteredView } = useInView<HTMLDivElement>({
-    rootMargin: '400px 0px',
-    initialInView,
-  });
 
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
@@ -369,7 +361,7 @@ export const LossesMap: React.FC<LossesMapProps> = ({ data, t, initialInView }) 
   // Initialize MapLibre GL map
   // biome-ignore lint/correctness/useExhaustiveDependencies: geojson is only used to seed initial source; filter updates are applied via setData() in dedicated effect
   useEffect(() => {
-    if (!hasEnteredView || !mapContainerRef.current || mapRef.current) return;
+    if (!mapContainerRef.current || mapRef.current) return;
 
     const map = new MapLibreMap({
       container: mapContainerRef.current,
@@ -447,7 +439,7 @@ export const LossesMap: React.FC<LossesMapProps> = ({ data, t, initialInView }) 
       mapRef.current = null;
       mapSourceLoadedRef.current = false;
     };
-  }, [hasEnteredView, data, resolvedTheme, tokens.text.dim]);
+  }, [data, resolvedTheme, tokens.text.dim]);
 
   // Update GeoJSON source when filters change (preserves camera position and zoom)
   useEffect(() => {
@@ -476,150 +468,142 @@ export const LossesMap: React.FC<LossesMapProps> = ({ data, t, initialInView }) 
   const hasActiveFilters = selectedSide !== 'all' || selectedCategories.length > 0 || selectedModels.length > 0 || Boolean(dateFrom) || Boolean(dateTo);
 
   return (
-    <div ref={containerRef} className="flex flex-col gap-2 min-h-145">
-      {!hasEnteredView ? (
-        <div className="relative w-full h-145 card flex items-center justify-center">
-          <LoadingSpinner isVisible={true} fullscreen={false} size="md" />
-        </div>
-      ) : (
-        <>
-          {/* Header & Filter Controls Bar */}
-          <div className="flex flex-col gap-1.5">
-            {/* Primary Controls Row: Side Toggle & Model Search */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 items-center">
-              {/* Faction / Side Toggle */}
-              <ToggleGroup
-                type="single"
-                value={selectedSide}
-                onValueChange={(val) => {
-                  if (val) {
-                    startTransition(() => {
-                      setSelectedSide(val as 'all' | 'rf' | 'ua' | 'unk');
-                    });
-                  }
-                }}
-                className="w-full flex items-center h-7.5 p-0.5"
-              >
-                <ToggleGroupItem value="all" className="flex-1 h-full py-0 px-2 flex items-center justify-center text-center gap-1 text-[11px]">
-                  <span>{t.map.allSides}</span>
-                  <span className="tabular-nums text-[10px] opacity-75">({fmt.number(sideCounts.all)})</span>
-                </ToggleGroupItem>
-                <ToggleGroupItem value="rf" className="flex-1 h-full py-0 px-2 flex items-center justify-center text-center gap-1 text-[11px]">
-                  <span>RF</span>
-                  <span className="tabular-nums text-[10px] opacity-75">({fmt.number(sideCounts.rf)})</span>
-                </ToggleGroupItem>
-                <ToggleGroupItem value="ua" className="flex-1 h-full py-0 px-2 flex items-center justify-center text-center gap-1 text-[11px]">
-                  <span>UA</span>
-                  <span className="tabular-nums text-[10px] opacity-75">({fmt.number(sideCounts.ua)})</span>
-                </ToggleGroupItem>
-                <ToggleGroupItem value="unk" title={unkName} className="flex-1 h-full py-0 px-2 flex items-center justify-center text-center gap-1 text-[11px]">
-                  <span>?</span>
-                  <span className="tabular-nums text-[10px] opacity-75">({fmt.number(sideCounts.unk)})</span>
-                </ToggleGroupItem>
-              </ToggleGroup>
-
-              {/* Search Model by Name via SearchSelect */}
-              <SearchSelect
-                items={availableModels}
-                selectedValues={selectedModels}
-                onSelect={(item) => addModel(Number(item.value))}
-                placeholder={t.map.searchPlaceholder}
-                emptyLabel={t.map.noModelsFound}
-              />
-            </div>
-
-            {/* Category Pills Strip & Reset Action */}
-            <div className="flex items-center justify-between gap-2">
-              <div className="min-w-0 flex-1">
-                <FilterPills
-                  items={data.categories.map((catKey, idx) => ({
-                    id: idx,
-                    label: t.categories.items[catKey] || catKey,
-                    icon: <CategoryIcon category={catKey} className="h-3 w-auto shrink-0" />,
-                    count: categoryCounts.get(idx) || 0,
-                  }))}
-                  selected={selectedCategories}
-                  onChange={(cats) => {
-                    startTransition(() => {
-                      setSelectedCategories(cats);
-                    });
-                  }}
-                  allLabel={t.map.allCategories}
-                  allCount={hasSide ? (selectedSide === 'rf' ? sideCounts.rf : selectedSide === 'ua' ? sideCounts.ua : sideCounts.unk) : sideCounts.all}
-                />
-              </div>
-              {hasActiveFilters && (
-                <button type="button" onClick={resetAllFilters} className="text-xs text-content-muted hover:text-accent-primary transition-colors underline cursor-pointer shrink-0">
-                  {tCommon.reset}
-                </button>
-              )}
-            </div>
-
-            {/* Selected Model Badges Strip (matching category pill styling) */}
-            {selectedModels.length > 0 && (
-              <div className="flex flex-wrap items-center gap-1">
-                <span className="text-[11px] font-bold text-content-muted mr-1">{t.map.selectedModels}:</span>
-                {selectedModels.map((mIdx) => {
-                  const name = data.models[mIdx] || t.timeline.unrecognized;
-                  const count = modelCounts.get(mIdx) || 0;
-                  return (
-                    <button
-                      key={mIdx}
-                      type="button"
-                      onClick={() => removeModel(mIdx)}
-                      className="tag-pill transition-all cursor-pointer inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] bg-accent-glow text-accent-primary border-accent-primary/40 font-bold shadow-xs hover:border-danger/50 hover:text-danger hover:bg-danger/10 select-none"
-                      title={name}
-                    >
-                      <span className="leading-none">{name}</span>
-                      <span className="tabular-nums text-[10px] leading-none opacity-75">({fmt.number(count)})</span>
-                    </button>
-                  );
-                })}
-                <button type="button" onClick={clearAllModels} className="text-[11px] text-content-muted hover:text-accent-primary transition-colors underline cursor-pointer ml-1">
-                  {tCommon.clear}
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* Map Container */}
-          <div className="relative w-full h-135 sm:h-155 rounded-xl overflow-hidden border border-border-subtle bg-surface-base/90 shadow-inner">
-            <div ref={mapContainerRef} className="w-full h-full" />
-
-            {/* Map Legend Floating Overlay */}
-            <div className="absolute bottom-3 left-3 z-10 glass-overlay px-3 py-1.5 flex items-center gap-4 text-xs font-medium">
-              <div className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: lossColors.rf, boxShadow: `0 0 8px ${lossColors.rf}80` }} />
-                <span className="text-content-secondary">{rfName}</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: lossColors.ua, boxShadow: `0 0 8px ${lossColors.ua}80` }} />
-                <span className="text-content-secondary">{uaName}</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: lossColors.unk, boxShadow: `0 0 8px ${lossColors.unk}80` }} />
-                <span className="text-content-secondary">{unkName}</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Timeline Scrubber (Bottom Time Controls Bar) */}
-          <div className="control-panel p-2 sm:px-2.5 sm:py-1.5">
-            <TimelineScrubber
-              periods={timelinePeriods}
-              density={timelineDensity}
-              dateFrom={dateFrom}
-              dateTo={dateTo}
-              onChange={({ dateFrom: nextFrom, dateTo: nextTo }) => {
+    <div className="flex flex-col gap-2 min-h-145">
+      {/* Header & Filter Controls Bar */}
+      <div className="flex flex-col gap-1.5">
+        {/* Primary Controls Row: Side Toggle & Model Search */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 items-center">
+          {/* Faction / Side Toggle */}
+          <ToggleGroup
+            type="single"
+            value={selectedSide}
+            onValueChange={(val) => {
+              if (val) {
                 startTransition(() => {
-                  setDateFrom(nextFrom);
-                  setDateTo(nextTo);
+                  setSelectedSide(val as 'all' | 'rf' | 'ua' | 'unk');
+                });
+              }
+            }}
+            className="w-full flex items-center h-7.5 p-0.5"
+          >
+            <ToggleGroupItem value="all" className="flex-1 h-full py-0 px-2 flex items-center justify-center text-center gap-1 text-[11px]">
+              <span>{t.map.allSides}</span>
+              <span className="tabular-nums text-[10px] opacity-75">({fmt.number(sideCounts.all)})</span>
+            </ToggleGroupItem>
+            <ToggleGroupItem value="rf" className="flex-1 h-full py-0 px-2 flex items-center justify-center text-center gap-1 text-[11px]">
+              <span>RF</span>
+              <span className="tabular-nums text-[10px] opacity-75">({fmt.number(sideCounts.rf)})</span>
+            </ToggleGroupItem>
+            <ToggleGroupItem value="ua" className="flex-1 h-full py-0 px-2 flex items-center justify-center text-center gap-1 text-[11px]">
+              <span>UA</span>
+              <span className="tabular-nums text-[10px] opacity-75">({fmt.number(sideCounts.ua)})</span>
+            </ToggleGroupItem>
+            <ToggleGroupItem value="unk" title={unkName} className="flex-1 h-full py-0 px-2 flex items-center justify-center text-center gap-1 text-[11px]">
+              <span>?</span>
+              <span className="tabular-nums text-[10px] opacity-75">({fmt.number(sideCounts.unk)})</span>
+            </ToggleGroupItem>
+          </ToggleGroup>
+
+          {/* Search Model by Name via SearchSelect */}
+          <SearchSelect
+            items={availableModels}
+            selectedValues={selectedModels}
+            onSelect={(item) => addModel(Number(item.value))}
+            placeholder={t.map.searchPlaceholder}
+            emptyLabel={t.map.noModelsFound}
+          />
+        </div>
+
+        {/* Category Pills Strip & Reset Action */}
+        <div className="flex items-center justify-between gap-2">
+          <div className="min-w-0 flex-1">
+            <FilterPills
+              items={data.categories.map((catKey, idx) => ({
+                id: idx,
+                label: t.categories.items[catKey] || catKey,
+                icon: <CategoryIcon category={catKey} className="h-3 w-auto shrink-0" />,
+                count: categoryCounts.get(idx) || 0,
+              }))}
+              selected={selectedCategories}
+              onChange={(cats) => {
+                startTransition(() => {
+                  setSelectedCategories(cats);
                 });
               }}
+              allLabel={t.map.allCategories}
+              allCount={hasSide ? (selectedSide === 'rf' ? sideCounts.rf : selectedSide === 'ua' ? sideCounts.ua : sideCounts.unk) : sideCounts.all}
             />
           </div>
-        </>
-      )}
+          {hasActiveFilters && (
+            <button type="button" onClick={resetAllFilters} className="text-xs text-content-muted hover:text-accent-primary transition-colors underline cursor-pointer shrink-0">
+              {tCommon.reset}
+            </button>
+          )}
+        </div>
+
+        {/* Selected Model Badges Strip (matching category pill styling) */}
+        {selectedModels.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1">
+            <span className="text-[11px] font-bold text-content-muted mr-1">{t.map.selectedModels}:</span>
+            {selectedModels.map((mIdx) => {
+              const name = data.models[mIdx] || t.timeline.unrecognized;
+              const count = modelCounts.get(mIdx) || 0;
+              return (
+                <button
+                  key={mIdx}
+                  type="button"
+                  onClick={() => removeModel(mIdx)}
+                  className="tag-pill transition-all cursor-pointer inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] bg-accent-glow text-accent-primary border-accent-primary/40 font-bold shadow-xs hover:border-status-danger/50 hover:text-status-danger hover:bg-status-danger/10 select-none"
+                  title={name}
+                >
+                  <span className="leading-none">{name}</span>
+                  <span className="tabular-nums text-[10px] leading-none opacity-75">({fmt.number(count)})</span>
+                </button>
+              );
+            })}
+            <button type="button" onClick={clearAllModels} className="text-[11px] text-content-muted hover:text-accent-primary transition-colors underline cursor-pointer ml-1">
+              {tCommon.clear}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Map Container */}
+      <div className="relative w-full h-145 rounded-xl overflow-hidden border border-border-subtle bg-surface-base/90 shadow-inner">
+        <div ref={mapContainerRef} className="w-full h-full" />
+
+        {/* Map Legend Floating Overlay */}
+        <div className="absolute bottom-3 left-3 z-10 glass-overlay px-3 py-1.5 flex items-center gap-4 text-xs font-medium">
+          <div className="flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: lossColors.rf, boxShadow: `0 0 8px ${lossColors.rf}80` }} />
+            <span className="text-content-secondary">{rfName}</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: lossColors.ua, boxShadow: `0 0 8px ${lossColors.ua}80` }} />
+            <span className="text-content-secondary">{uaName}</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: lossColors.unk, boxShadow: `0 0 8px ${lossColors.unk}80` }} />
+            <span className="text-content-secondary">{unkName}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Timeline Scrubber (Bottom Time Controls Bar) */}
+      <div className="control-panel p-2">
+        <TimelineScrubber
+          periods={timelinePeriods}
+          density={timelineDensity}
+          dateFrom={dateFrom}
+          dateTo={dateTo}
+          onChange={({ dateFrom: nextFrom, dateTo: nextTo }) => {
+            startTransition(() => {
+              setDateFrom(nextFrom);
+              setDateTo(nextTo);
+            });
+          }}
+        />
+      </div>
     </div>
   );
 };

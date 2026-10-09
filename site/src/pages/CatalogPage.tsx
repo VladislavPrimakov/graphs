@@ -1,5 +1,5 @@
 import metadata from '@data/metadata.json';
-import { startTransition, useState } from 'react';
+import { startTransition, useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import { ArrowRightIcon, ClockIcon, FilterIcon } from '@/components/icons';
 import { FilterPills } from '@/components/ui/FilterPills';
@@ -16,6 +16,10 @@ export default function CatalogPage() {
   const [selectedTags, setSelectedTags] = useState<ProjectTag[]>([]);
   const { t, getTagLabel } = useTranslation();
   const fmt = useFormat();
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'instant' });
+  }, []);
 
   const isAllActive = selectedTags.length === 0;
 
@@ -34,15 +38,19 @@ export default function CatalogPage() {
     <>
       <title>{t.common.catalog}</title>
       <meta name="description" content={t.common.heroSubtitle} />
-      <div className="flex flex-col gap-8 sm:gap-10">
+      <meta property="og:site_name" content={t.common.graphs} />
+      <meta property="og:type" content="website" />
+      <meta property="og:title" content={t.common.catalog} />
+      <meta property="og:description" content={t.common.heroSubtitle} />
+      <div className="flex flex-col gap-8">
         {/* Hero Banner */}
-        <div className="relative overflow-hidden rounded-2xl bg-linear-to-b from-surface-card via-surface-card/80 to-surface-base border border-border-subtle p-8 sm:p-10 shadow-xl">
+        <div className="relative overflow-hidden rounded-2xl bg-linear-to-b from-surface-card via-surface-card/80 to-surface-base border border-border-subtle p-8 shadow-xl">
           <div className="w-full">
             <div className="tag-pill bg-accent-glow text-accent-primary border-accent-primary/20 mb-3 space-x-2">
               <span>{t.common.dataVisualizations}</span>
             </div>
-            <h1 className="text-3xl sm:text-4xl font-extrabold text-content-primary tracking-tight">{t.common.heroTitle}</h1>
-            <p className="mt-3 text-sm sm:text-base text-content-secondary leading-relaxed">{t.common.heroSubtitle}</p>
+            <h1 className="text-3xl font-extrabold text-content-primary tracking-tight">{t.common.heroTitle}</h1>
+            <p className="mt-3 text-sm text-content-secondary leading-relaxed">{t.common.heroSubtitle}</p>
           </div>
         </div>
 

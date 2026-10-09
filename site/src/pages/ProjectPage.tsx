@@ -1,5 +1,5 @@
 import metadata from '@data/metadata.json';
-import { use, useEffect, useEffectEvent, useState } from 'react';
+import { use, useEffect, useLayoutEffect } from 'react';
 import { useParams } from 'react-router';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { SectionNav } from '@/components/layout/SectionNav';
@@ -7,6 +7,9 @@ import { Section } from '@/components/sections/Section';
 import NotFoundPage from '@/pages/NotFoundPage';
 import { loadProjectBundle, STATIC_PROJECT_MAP } from '@/projects/registry';
 import { type Language, useFormat, useLanguage, useTheme, useTranslation } from '@/utils/provider';
+import { getAbsoluteUrl } from '@/utils/version';
+
+const useIsomorphicLayoutEffect = typeof window !== 'undefined' ? useLayoutEffect : useEffect;
 
 interface ProjectDashboardProps {
   slug: string;
@@ -22,39 +25,14 @@ function ProjectDashboard({ slug, section, lang }: ProjectDashboardProps) {
 
   const { project, t: routeT } = use(loadProjectBundle(slug, lang));
 
-  // If entering with a target section in URL or clicking a nav pill, hold target lock until scroll settles
-  const [navTarget, setNavTarget] = useState<string | null>(section ?? null);
-
-  useEffect(() => {
-    if (!section) return;
-
-    // Scroll to target element with proper scroll-mt offset on initial mount
-    const el = document.getElementById(section);
-    if (el) {
-      el.scrollIntoView({ behavior: 'instant', block: 'start' });
+  useIsomorphicLayoutEffect(() => {
+    if (section) {
+      const el = document.getElementById(section);
+      el?.scrollIntoView({ behavior: 'instant' });
+    } else {
+      window.scrollTo({ top: 0, behavior: 'instant' });
     }
   }, [section]);
-
-  const unlock = useEffectEvent(() => {
-    setNavTarget(null);
-  });
-
-  useEffect(() => {
-    if (!navTarget) return;
-
-    // Release target lock strictly when scrolling settles or user manually interacts
-    window.addEventListener('scrollend', unlock, { once: true, passive: true });
-    window.addEventListener('wheel', unlock, { once: true, passive: true });
-    window.addEventListener('touchmove', unlock, { once: true, passive: true });
-    window.addEventListener('keydown', unlock, { once: true, passive: true });
-
-    return () => {
-      window.removeEventListener('scrollend', unlock);
-      window.removeEventListener('wheel', unlock);
-      window.removeEventListener('touchmove', unlock);
-      window.removeEventListener('keydown', unlock);
-    };
-  }, [navTarget]);
 
   const t = {
     common: localeT.common,
@@ -72,32 +50,38 @@ function ProjectDashboard({ slug, section, lang }: ProjectDashboardProps) {
     if (s.title) sectionTitles[s.id] = s.title;
   }
 
-  const activeSection = section ? sections.find((s) => s.id === section) : undefined;
-  const activeSectionTitle = activeSection?.title || (section ? sectionTitles[section] : undefined);
+  const activeSectionTitle = section ? (routeT.projMeta.sections as Record<string, string>)[section] : undefined;
   const pageTitle = activeSectionTitle ? `${title} — ${activeSectionTitle}` : title;
+  const pageDescription = (section ? sectionTitles[section] : undefined) || description;
+
+  const targetSectionId = section || (project.sections?.[0] as string | undefined);
+  const ogImage = targetSectionId ? getAbsoluteUrl(`/og/${project.id}-${targetSectionId}.png`) : undefined;
 
   return (
     <>
       <title>{pageTitle}</title>
+      <meta property="og:site_name" content={t.common.graphs} />
+      <meta property="og:type" content="website" />
       <meta property="og:title" content={pageTitle} />
-      <meta name="twitter:title" content={pageTitle} />
-      <meta name="description" content={description} />
-      <meta property="og:description" content={description} />
-      <div className="flex flex-col gap-6 sm:gap-8">
-        <SectionNav
-          sections={project.sections as unknown as string[]}
-          projectSlug={project.id}
-          sectionTitles={sectionTitles}
-          projectTitle={title}
-          initialSection={section}
-          onNavigate={(sectionId) => setNavTarget(sectionId)}
-        />
+      {pageDescription && (
+        <>
+          <meta name="description" content={pageDescription} />
+          <meta property="og:description" content={pageDescription} />
+        </>
+      )}
+      {ogImage && (
+        <>
+          <meta property="og:image" content={ogImage} />
+          <meta name="twitter:card" content="summary_large_image" />
+        </>
+      )}
+      <div className="flex flex-col gap-8">
+        <SectionNav sections={project.sections as unknown as string[]} projectSlug={project.id} sectionTitles={sectionTitles} projectTitle={title} initialSection={section} />
         <PageHeader title={title} description={description} tags={project.tags} lastUpdated={lastUpdated} />
         <div className="flex flex-col gap-8">
           {sections.map((sec, index) => {
-            const isTarget = navTarget ? sec.id === navTarget : section ? sec.id === section : index === 0;
-            const enabled = !navTarget || isTarget;
-            return <Section key={sec.id} section={sec} projectSlug={project.id} initialInView={isTarget} enabled={enabled} />;
+            const isInitial = section ? sec.id === section : index === 0;
+            return <Section key={sec.id} section={sec} projectSlug={project.id} initialInView={isInitial} />;
           })}
         </div>
       </div>

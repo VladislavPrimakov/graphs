@@ -22,9 +22,9 @@ export const PageHeader: React.FC<PageHeaderProps> = ({ title, description, tags
   const fmt = useFormat();
 
   return (
-    <div>
+    <header className="flex flex-col">
       <div className="flex flex-wrap items-center justify-between gap-4">
-        <h1 className="text-3xl sm:text-4xl font-extrabold text-content-primary tracking-tight">{title}</h1>
+        <h1 className="text-3xl font-extrabold text-content-primary tracking-tight">{title}</h1>
         {lastUpdated && (
           <div className="control-panel inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-content-muted shrink-0">
             <ClockIcon className="w-3.5 h-3.5 text-accent-primary shrink-0" />
@@ -44,6 +44,6 @@ export const PageHeader: React.FC<PageHeaderProps> = ({ title, description, tags
           ))}
         </div>
       )}
-    </div>
+    </header>
   );
 };

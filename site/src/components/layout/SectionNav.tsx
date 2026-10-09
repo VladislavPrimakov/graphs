@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { cn } from '@/utils/cn';
 import { usePath } from '@/utils/provider';
+import { startScrollLock } from '@/utils/useInView';
 import { SECTION_DATA_ATTR, useScrollSpy } from '@/utils/useScrollSpy';
 
 /** Props for the SectionNav outline component. */
@@ -17,12 +18,10 @@ export interface SectionNavProps {
   projectTitle?: string;
   /** Initial section identifier from route params. */
   initialSection?: string;
-  /** Optional callback fired when navigating to a target section via anchor pill. */
-  onNavigate?: (sectionId: string) => void;
 }
 
 /** Horizontal outline navigation pill bar rendered into header center slot via React Portal. */
-export const SectionNav: React.FC<SectionNavProps> = ({ sections, projectSlug, sectionTitles, projectTitle, initialSection, onNavigate }) => {
+export const SectionNav: React.FC<SectionNavProps> = ({ sections, projectSlug, sectionTitles, projectTitle, initialSection }) => {
   const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
   const containerRef = useRef<HTMLElement>(null);
   const { getHref } = usePath();
@@ -40,15 +39,32 @@ export const SectionNav: React.FC<SectionNavProps> = ({ sections, projectSlug, s
     setPortalTarget(document.getElementById('header-section-nav'));
   }, []);
 
-  // Auto-center active pill within horizontal scroll container
+  // Auto-center active pill within horizontal scroll container on activeId change and resize
   useEffect(() => {
     if (!containerRef.current || !activeId) return;
-    const activePill = containerRef.current.querySelector<HTMLElement>(`[data-nav-section="${activeId}"]`);
-    if (activePill) {
+
+    const centerPill = (behavior: ScrollBehavior = 'smooth') => {
       const container = containerRef.current;
-      const targetScrollLeft = activePill.offsetLeft - container.offsetWidth / 2 + activePill.offsetWidth / 2;
-      container.scrollTo({ left: targetScrollLeft, behavior: 'smooth' });
-    }
+      if (!container) return;
+      const activePill = container.querySelector<HTMLElement>(`[data-nav-section="${activeId}"]`);
+      if (activePill) {
+        const targetScrollLeft = activePill.offsetLeft - container.offsetWidth / 2 + activePill.offsetWidth / 2;
+        container.scrollTo({ left: targetScrollLeft, behavior });
+      }
+    };
+
+    centerPill('smooth');
+
+    const handleResize = () => centerPill('instant');
+    window.addEventListener('resize', handleResize, { passive: true });
+
+    const observer = new ResizeObserver(handleResize);
+    observer.observe(containerRef.current);
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      observer.disconnect();
+    };
   }, [activeId]);
 
   if (!portalTarget || sections.length <= 1) return null;
@@ -72,7 +88,7 @@ export const SectionNav: React.FC<SectionNavProps> = ({ sections, projectSlug, s
               const target = document.querySelector<HTMLElement>(`[${SECTION_DATA_ATTR}="${sectionId}"], #${CSS.escape(sectionId)}`);
               if (target) {
                 e.preventDefault();
-                onNavigate?.(sectionId);
+                startScrollLock(sectionId);
                 target.scrollIntoView({ behavior: 'smooth' });
               }
             }}

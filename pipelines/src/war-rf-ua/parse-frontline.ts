@@ -262,6 +262,35 @@ function isOccupiedFeature(name?: string): boolean {
   return false;
 }
 
+/** Identifies if a DeepState feature represents Crimea territory. */
+function isCrimeaTerritoryFeature(f: GeoJsonFeature): boolean {
+  if (!f.geometry || (f.geometry.type !== 'Polygon' && f.geometry.type !== 'MultiPolygon')) return false;
+  const name = f.properties?.name || '';
+  if (name.includes('Кримськ') || name.includes('міст') || name.includes('Bridge') || name.includes('airfield')) {
+    return false;
+  }
+  return name.includes('geoJSON.territories.crimea') || name.includes('Окупований Крим') || name.includes('Occupied Crimea') || name === 'Крим';
+}
+
+/** Identifies if a LostArmour placemark represents Crimea territory (to avoid conflicting boundary slivers). */
+function isLaCrimeaPlacemark(p: KmlPlacemark): boolean {
+  const n = (p.name || p.description || '').toLowerCase();
+  return n.includes('республика крым') || n.includes('севастополь') || n.includes('occupied crimea') || n.includes('крым');
+}
+
+/** Checks if a polygon ring is located within the Crimean peninsula boundary. */
+function isCrimeaPolygon(poly: Polygon): boolean {
+  if (!poly?.[0] || poly[0].length === 0) return false;
+  const ring = poly[0];
+  let inCrimeaCount = 0;
+  for (const [lng, lat] of ring) {
+    if (lat < 46.05 && lat > 44.2 && lng > 32.4 && lng < 36.65) {
+      inCrimeaCount++;
+    }
+  }
+  return inCrimeaCount > ring.length * 0.7;
+}
+
 /** Identifies if a DeepState feature represents grey / contested zone. */
 function isGreyFeature(name?: string): boolean {
   if (!name) return false;
@@ -324,8 +353,23 @@ export async function parseFrontline(forceUpdate = false): Promise<WarFrontlineD
     }
   }
 
+  // Fast-path: Return cached dataset immediately on standard builds if snapshot is valid
+  if (!forceUpdate && existing && existing.summary && existing.layers && existing.timeline && existing.timeline.length > 0 && existing.days) {
+    logger.debug(`Frontline daily history is complete and up to date (${existing.timeline.length} days cached).`);
+    const needsDeltaEnrichment = existing.timeline.length > 1 && typeof existing.timeline[1].deltaKm2 !== 'number';
+    if (needsDeltaEnrichment) {
+      existing.timeline = enrichTimelineWithDeltas(existing.timeline);
+      await writeJson(DATA_FRONTLINE_PATH, existing, 0);
+    }
+    if (!(await fileExists(FRONTLINE_HISTORY_PATH))) {
+      logger.debug('Public frontline history bundle missing, exporting to site/public/data/war-rf-ua/frontline-map/frontline-history.json...');
+      await exportFrontlineHistory(existing.days);
+    }
+    return existing;
+  }
+
   // 1. Fetch LostArmour metadata for latest available date
-  logger.info('Fetching latest LostArmour frontline metadata...');
+  logger.debug('Fetching latest LostArmour frontline metadata...');
   let latestDate = new Date().toISOString().slice(0, 10);
   try {
     const laMetaRes = await fetch('https://lostarmour.info/panel/next/api/public/map/kml-meta', {
@@ -343,7 +387,7 @@ export async function parseFrontline(forceUpdate = false): Promise<WarFrontlineD
   }
 
   // 2. Fetch DeepState public history revisions
-  logger.info('Fetching DeepState public revision history...');
+  logger.debug('Fetching DeepState public revision history...');
   const dsHistRes = await fetch('https://deepstatemap.live/api/history/public', {
     headers: { 'User-Agent': 'Mozilla/5.0' },
   });
@@ -357,32 +401,36 @@ export async function parseFrontline(forceUpdate = false): Promise<WarFrontlineD
   }
 
   const allDates = generateDateRange(START_DATE, latestDate);
-  const existingDays: Record<string, DayFrontlineEntry> = existing?.days || {};
+  const existingDays: Record<string, DayFrontlineEntry> = forceUpdate ? {} : existing?.days || {};
   const existingTimeline: Record<string, FrontlineTimelinePoint> = {};
-  if (existing?.timeline) {
+  if (!forceUpdate && existing?.timeline) {
     for (const p of existing.timeline) {
       existingTimeline[p.date] = p;
     }
   }
 
-  // Determine missing dates
-  const missingDates = allDates.filter((d) => !existingDays[d] || !existingTimeline[d] || (forceUpdate && d >= allDates[allDates.length - 3]));
+  // Determine missing dates (all dates when forceUpdate is active, otherwise only genuinely missing dates)
+  const missingDates = forceUpdate ? allDates : allDates.filter((d) => !existingDays[d] || !existingTimeline[d] || (existingTimeline[d]?.laClaimedKm2 ?? 0) < 100000);
 
   if (missingDates.length === 0 && existing && existing.summary && existing.layers) {
-    logger.success(`Frontline daily history is complete and up to date (${allDates.length} days cached).`);
+    logger.debug(`Frontline daily history is complete and up to date (${allDates.length} days cached).`);
     const needsDeltaEnrichment = existing.timeline.length > 1 && typeof existing.timeline[1].deltaKm2 !== 'number';
     if (needsDeltaEnrichment) {
       existing.timeline = enrichTimelineWithDeltas(existing.timeline);
       await writeJson(DATA_FRONTLINE_PATH, existing, 0);
     }
     if (!(await fileExists(FRONTLINE_HISTORY_PATH))) {
-      logger.info('Public frontline history bundle missing, exporting to site/public/data/war-rf-ua/frontline-map/frontline-history.json...');
+      logger.debug('Public frontline history bundle missing, exporting to site/public/data/war-rf-ua/frontline-map/frontline-history.json...');
       await exportFrontlineHistory(existingDays);
     }
     return existing;
   }
 
-  logger.info(`Processing ${missingDates.length} missing daily frontline entries (${allDates.length} total from ${START_DATE})...`);
+  if (forceUpdate) {
+    logger.info(`Force update (-u) active: re-processing all ${missingDates.length} daily frontline entries from ${START_DATE}...`);
+  } else {
+    logger.info(`Processing ${missingDates.length} missing daily frontline entries (${allDates.length} total from ${START_DATE})...`);
+  }
 
   const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_' });
   const dsGeoCache = new Map<number, { features?: GeoJsonFeature[] }>();
@@ -417,11 +465,12 @@ export async function parseFrontline(forceUpdate = false): Promise<WarFrontlineD
         dsGeoCache.set(revId, dsGeo);
       }
 
-      // Parse LA placemarks
+      // Parse LA placemarks, filtering out duplicate Crimea placemarks to use DeepState canonical Crimea
       const laDoc = parser.parse(laKml);
       const rawPlacemarks = laDoc?.kml?.Document?.Folder?.Placemark || [];
       const laPlacemarks: KmlPlacemark[] = Array.isArray(rawPlacemarks) ? rawPlacemarks : [rawPlacemarks];
-      const laPolys = laPlacemarks.filter((p) => p.Polygon);
+      const laPolys = laPlacemarks.filter((p) => p.Polygon && (p.Polygon?.outerBoundaryIs?.LinearRing?.coordinates || '').trim().length > 100 && !isLaCrimeaPlacemark(p));
+
       const laMultiPoly: MultiPolygon = [];
       for (const p of laPolys) {
         const rawCoords = (p.Polygon?.outerBoundaryIs?.LinearRing?.coordinates || '').trim().split(/\s+/);
@@ -439,8 +488,12 @@ export async function parseFrontline(forceUpdate = false): Promise<WarFrontlineD
       const features = dsGeo.features || [];
       const dsOccupiedPolys: MultiPolygon = [];
       const dsGreyPolys: MultiPolygon = [];
+      const dsCrimeaPolys: MultiPolygon = [];
       for (const f of features) {
         const name = f.properties?.name || '';
+        if (isCrimeaTerritoryFeature(f)) {
+          dsCrimeaPolys.push(...featureToPolygons(f));
+        }
         if (isOccupiedFeature(name)) {
           dsOccupiedPolys.push(...featureToPolygons(f));
         } else if (isGreyFeature(name)) {
@@ -448,11 +501,25 @@ export async function parseFrontline(forceUpdate = false): Promise<WarFrontlineD
         }
       }
 
+      // Canonical DeepState Crimea is included in both sources
+      if (dsCrimeaPolys.length > 0) {
+        laMultiPoly.push(...dsCrimeaPolys);
+      }
+
       const laUnion = polygonClipping.union(laMultiPoly as polygonClipping.Geom) as MultiPolygon;
       const dsOccupiedUnion = polygonClipping.union(dsOccupiedPolys as polygonClipping.Geom) as MultiPolygon;
       const dsGreyUnion = polygonClipping.union(dsGreyPolys as polygonClipping.Geom) as MultiPolygon;
+      const dsCrimeaUnion = dsCrimeaPolys.length > 0 ? (polygonClipping.union(dsCrimeaPolys as polygonClipping.Geom) as MultiPolygon) : [];
 
-      const consensusRf = polygonClipping.intersection(laUnion as polygonClipping.Geom, dsOccupiedUnion as polygonClipping.Geom) as MultiPolygon;
+      let consensusRf = polygonClipping.intersection(laUnion as polygonClipping.Geom, dsOccupiedUnion as polygonClipping.Geom) as MultiPolygon;
+      if (dsCrimeaUnion.length > 0) {
+        try {
+          consensusRf = polygonClipping.union([...consensusRf, ...dsCrimeaUnion] as polygonClipping.Geom) as MultiPolygon;
+        } catch {
+          consensusRf = [...consensusRf, ...dsCrimeaUnion];
+        }
+      }
+
       const xorDisputed = polygonClipping.xor(laUnion as polygonClipping.Geom, dsOccupiedUnion as polygonClipping.Geom) as MultiPolygon;
       let disputed: MultiPolygon;
       try {
@@ -468,17 +535,17 @@ export async function parseFrontline(forceUpdate = false): Promise<WarFrontlineD
         dsFrontline = [...dsOccupiedUnion, ...dsGreyUnion];
       }
 
-      const consensusRfKm2 = round(getMultiPolyAreaKm2(consensusRf), 1);
-      const disputedKm2 = round(getMultiPolyAreaKm2(disputed), 1);
-      const laClaimedKm2 = round(getMultiPolyAreaKm2(laUnion), 1);
+      const cleanC = simplifyMultiPolygon(consensusRf, RDP_EPSILON, 0.05);
+      const cleanD = simplifyMultiPolygon(disputed, RDP_EPSILON, 0.3).filter((poly) => !isCrimeaPolygon(poly));
+      const cleanDS = simplifyMultiPolygon(dsFrontline, RDP_EPSILON, 0.05);
+      const cleanLA = simplifyMultiPolygon(laUnion, RDP_EPSILON, 0.05);
+
+      const consensusRfKm2 = round(getMultiPolyAreaKm2(cleanC), 1);
+      const disputedKm2 = round(getMultiPolyAreaKm2(cleanD), 1);
+      const laClaimedKm2 = round(getMultiPolyAreaKm2(cleanLA), 1);
       const dsOccupiedKm2 = round(getMultiPolyAreaKm2(dsOccupiedUnion), 1);
       const dsGreyKm2 = round(getMultiPolyAreaKm2(dsGreyUnion), 1);
       const consensusUaKm2 = round(Math.max(0, UKRAINE_TOTAL_KM2 - consensusRfKm2 - disputedKm2), 1);
-
-      const cleanC = simplifyMultiPolygon(consensusRf, RDP_EPSILON, 0.05);
-      const cleanD = simplifyMultiPolygon(disputed, RDP_EPSILON, 0.3);
-      const cleanDS = simplifyMultiPolygon(dsFrontline, RDP_EPSILON, 0.05);
-      const cleanLA = simplifyMultiPolygon(laUnion, RDP_EPSILON, 0.05);
 
       const point: FrontlineTimelinePoint = {
         date,
@@ -515,8 +582,8 @@ export async function parseFrontline(forceUpdate = false): Promise<WarFrontlineD
     }
   };
 
-  // Process missing dates in chunks of 12
-  const CHUNK_SIZE = 12;
+  // Process missing dates in chunks of 24
+  const CHUNK_SIZE = 24;
   let processedCount = 0;
   let lastRawLayers: FrontlineMapLayers | null = null;
   let prevSerialized = '';

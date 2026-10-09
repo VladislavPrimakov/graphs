@@ -2,8 +2,7 @@ import type { LocaleProjectMeta } from '@/types';
 
 export const meta = {
   title: 'War RF-UA',
-  description:
-    'Comprehensive database of Russian and Ukrainian military equipment losses (19,000+ photo- and video-verified geo-tagged records across 14 categories) alongside daily and monthly air attacks and air defense interceptions.',
+  description: 'Verified database of Russian & Ukrainian military equipment losses (19k+ records), frontline dynamics, and air defense interceptions.',
   sections: {
     'frontline-map': 'Territory Map',
     'frontline-dynamics': 'Frontline Dynamics',

@@ -1,9 +1,7 @@
 {
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
-    "target": "ES2022",
-    "lib": ["ES2022"],
-    "noEmit": true,
+    "lib": ["ESNext"],
     "incremental": true,
     "tsBuildInfoFile": "./.cache/tsbuildinfo",
     "paths": {
@@ -11,5 +9,5 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src/**/*", "scripts/**/*", "../types/**/*"]
+  "include": ["src/**/*", "knip.ts"]
 }

@@ -36,9 +36,10 @@ const init = echarts.init;
 import type React from 'react';
 import { useEffect, useEffectEvent, useRef, useState } from 'react';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
-import { bindChartEvents, enhanceOption, renderChart, resizeChart } from '@/utils/chart-builder';
+import type { ResolvedTheme } from '@/styles/tokens';
+import { bindChartEvents, enhanceOption, exportChartAsPng, renderChart, resizeChart } from '@/utils/chart-builder';
+import { cn } from '@/utils/cn';
 import { useTheme, useTranslation } from '@/utils/provider';
-import { useInView } from '@/utils/useInView';
 
 /** Props for the ECharts canvas SectionChart visualizer component. */
 export interface SectionChartProps {
@@ -50,40 +51,32 @@ export interface SectionChartProps {
   id?: string;
   /** Optional container CSS class name. @default 'w-full h-[60dvh]' */
   className?: string;
-  /** Vertical top offset in pixels applied to the canvas HTML container to clear overlapping card controls. @default 0 */
-  offsetTop?: number;
   /** Callback fired once the chart completes its initial canvas render. */
   onReady?: () => void;
+  /** Section title to draw atop exported PNG snapshots. */
+  title?: string;
 }
 
 /**
- * Interactive ECharts canvas visualizer component handling lazy viewport initialization,
- * theme switching, reactive option updates, responsive resizing, and viewport-aware resize observer decoupling.
+ * Interactive ECharts canvas visualizer component handling theme switching,
+ * reactive option updates, responsive resizing, and viewport-aware resize observer decoupling.
  */
-export const SectionChart: React.FC<SectionChartProps> = ({ option: rawOption, exportName, id, className = 'w-full h-[60dvh]', offsetTop = 0, onReady }) => {
+export const SectionChart: React.FC<SectionChartProps> = ({ option: rawOption, exportName, id, className = 'w-full h-[60dvh]', onReady, title }) => {
   const { t } = useTranslation();
   const { resolvedTheme, tokens } = useTheme();
-  const option = enhanceOption(rawOption, t.common, exportName, tokens);
 
-  const { ref: containerRef, hasEnteredView, isIntersecting } = useInView<HTMLDivElement>();
   const chartRef = useRef<HTMLDivElement>(null);
   const chartInstance = useRef<ECharts | null>(null);
-  const optionRef = useRef(option);
-  optionRef.current = option;
-  const resolvedThemeRef = useRef(resolvedTheme);
-  resolvedThemeRef.current = resolvedTheme;
   const dprRef = useRef(typeof window !== 'undefined' ? window.devicePixelRatio : 1);
-  const isIntersectingRef = useRef(isIntersecting);
-  isIntersectingRef.current = isIntersecting;
+  const isIntersectingRef = useRef(true);
   const needsResizeRef = useRef(false);
   const lastWidthRef = useRef(0);
   const lastHeightRef = useRef(0);
   const [isRendered, setIsRendered] = useState(false);
   const hasNotifiedReady = useRef(false);
 
-  const rawOptionRef = useRef(rawOption);
-  rawOptionRef.current = rawOption;
-  const rawOptionJsonRef = useRef<string>('');
+  const lastRenderedRawOptionRef = useRef<EChartsOption | null>(null);
+  const lastRenderedThemeRef = useRef<ResolvedTheme | null>(null);
 
   const notifyReady = useEffectEvent(() => {
     if (onReady && !hasNotifiedReady.current) {
@@ -92,9 +85,25 @@ export const SectionChart: React.FC<SectionChartProps> = ({ option: rawOption, e
     }
   });
 
-  // Initialize ECharts instance on demand once the section enters the viewport proximity
+  const handleExport = useEffectEvent(() => {
+    if (chartInstance.current) {
+      exportChartAsPng(chartInstance.current, title, exportName, tokens);
+    }
+  });
+
+  const renderCurrentChart = useEffectEvent((targetChart: ECharts) => {
+    lastRenderedRawOptionRef.current = rawOption;
+    lastRenderedThemeRef.current = resolvedTheme;
+    const enhanced = enhanceOption(rawOption, t.common, exportName, tokens, handleExport);
+    renderChart(targetChart, enhanced, () => {
+      setIsRendered(true);
+      notifyReady();
+    });
+  });
+
+  // 1. Initialize ECharts instance and setup observers (ResizeObserver & IntersectionObserver)
   useEffect(() => {
-    if (!hasEnteredView || !chartRef.current) return;
+    if (!chartRef.current) return;
 
     const initialDpr = typeof window !== 'undefined' ? window.devicePixelRatio : 1;
     dprRef.current = initialDpr;
@@ -108,13 +117,24 @@ export const SectionChart: React.FC<SectionChartProps> = ({ option: rawOption, e
     const rect = chartRef.current.getBoundingClientRect();
     lastWidthRef.current = rect.width;
     lastHeightRef.current = rect.height;
-    rawOptionJsonRef.current = JSON.stringify(rawOptionRef.current);
 
     let resizeRaf: number | null = null;
-    const handleLayout = () => {
+    const handleLayout = (entries?: ResizeObserverEntry[]) => {
       if (!chartRef.current) return;
-      const r = chartRef.current.getBoundingClientRect();
-      const hasSizeChanged = Math.abs(r.width - lastWidthRef.current) >= 1 || Math.abs(r.height - lastHeightRef.current) >= 1;
+      let newWidth = lastWidthRef.current;
+      let newHeight = lastHeightRef.current;
+
+      const entry = entries?.[0];
+      if (entry) {
+        newWidth = entry.contentRect.width;
+        newHeight = entry.contentRect.height;
+      } else {
+        const r = chartRef.current.getBoundingClientRect();
+        newWidth = r.width;
+        newHeight = r.height;
+      }
+
+      const hasSizeChanged = Math.abs(newWidth - lastWidthRef.current) >= 1 || Math.abs(newHeight - lastHeightRef.current) >= 1;
       if (!hasSizeChanged) return;
 
       // Pause layout calculations when chart is scrolled outside viewport
@@ -123,8 +143,8 @@ export const SectionChart: React.FC<SectionChartProps> = ({ option: rawOption, e
         return;
       }
 
-      lastWidthRef.current = r.width;
-      lastHeightRef.current = r.height;
+      lastWidthRef.current = newWidth;
+      lastHeightRef.current = newHeight;
 
       if (resizeRaf !== null) cancelAnimationFrame(resizeRaf);
       resizeRaf = requestAnimationFrame(() => {
@@ -135,13 +155,13 @@ export const SectionChart: React.FC<SectionChartProps> = ({ option: rawOption, e
         if (newDpr !== dprRef.current) {
           dprRef.current = newDpr;
           currentChart.dispose();
-          const nextChart = init(chartRef.current, resolvedThemeRef.current === 'dark' ? 'dark' : undefined, {
+          const nextChart = init(chartRef.current, resolvedTheme === 'dark' ? 'dark' : undefined, {
             renderer: 'canvas',
             devicePixelRatio: newDpr,
           });
           bindChartEvents(nextChart);
           chartInstance.current = nextChart;
-          renderChart(nextChart, optionRef.current);
+          renderCurrentChart(nextChart);
           return;
         }
 
@@ -151,6 +171,22 @@ export const SectionChart: React.FC<SectionChartProps> = ({ option: rawOption, e
 
     const resizeObserver = new ResizeObserver(handleLayout);
     resizeObserver.observe(chartRef.current);
+
+    // Track intersection purely in ref without causing React re-renders on scroll
+    const intersectionObserver = new IntersectionObserver(([entry]) => {
+      if (!entry) return;
+      isIntersectingRef.current = entry.isIntersecting;
+      if (entry.isIntersecting && needsResizeRef.current && chartInstance.current) {
+        needsResizeRef.current = false;
+        const r = chartRef.current?.getBoundingClientRect();
+        if (r && (Math.abs(r.width - lastWidthRef.current) >= 1 || Math.abs(r.height - lastHeightRef.current) >= 1)) {
+          lastWidthRef.current = r.width;
+          lastHeightRef.current = r.height;
+          resizeChart(chartInstance.current);
+        }
+      }
+    });
+    intersectionObserver.observe(chartRef.current);
 
     let cleanupMedia: (() => void) | null = null;
     const watchDpr = () => {
@@ -165,65 +201,34 @@ export const SectionChart: React.FC<SectionChartProps> = ({ option: rawOption, e
     };
     watchDpr();
 
-    // Render initial dataset
-    renderChart(chart, optionRef.current, () => {
-      setIsRendered(true);
-      notifyReady();
-    });
+    // Render chart immediately upon instance creation
+    renderCurrentChart(chart);
 
     return () => {
       if (resizeRaf !== null) cancelAnimationFrame(resizeRaf);
       if (cleanupMedia) cleanupMedia();
       resizeObserver.disconnect();
+      intersectionObserver.disconnect();
       chartInstance.current?.dispose();
       chartInstance.current = null;
+      lastRenderedRawOptionRef.current = null;
+      lastRenderedThemeRef.current = null;
       setIsRendered(false);
     };
-  }, [hasEnteredView, resolvedTheme]);
+  }, [resolvedTheme]);
 
-  // Reactively apply option updates to existing instance strictly when rawOption has mutated
+  // 2. Reactively apply option updates strictly when rawOption or theme changes
   useEffect(() => {
-    if (!chartInstance.current || !hasEnteredView) return;
-    const optionJson = JSON.stringify(rawOption);
-    if (rawOptionJsonRef.current === optionJson) return;
-    rawOptionJsonRef.current = optionJson;
-
-    renderChart(chartInstance.current, option, () => {
-      setIsRendered(true);
-      notifyReady();
-    });
-  }, [rawOption, option, hasEnteredView]);
-
-  // Catch up with deferred resize operations once scrolled back into the active viewport
-  useEffect(() => {
-    if (isIntersecting && needsResizeRef.current && chartInstance.current && chartRef.current) {
-      needsResizeRef.current = false;
-      const r = chartRef.current.getBoundingClientRect();
-      const hasSizeChanged = Math.abs(r.width - lastWidthRef.current) >= 1 || Math.abs(r.height - lastHeightRef.current) >= 1;
-      if (hasSizeChanged) {
-        lastWidthRef.current = r.width;
-        lastHeightRef.current = r.height;
-        const newDpr = typeof window !== 'undefined' ? window.devicePixelRatio : 1;
-        if (newDpr !== dprRef.current) {
-          dprRef.current = newDpr;
-          chartInstance.current.dispose();
-          const nextChart = init(chartRef.current, resolvedTheme === 'dark' ? 'dark' : undefined, {
-            renderer: 'canvas',
-            devicePixelRatio: newDpr,
-          });
-          bindChartEvents(nextChart);
-          chartInstance.current = nextChart;
-          renderChart(nextChart, optionRef.current);
-        } else {
-          resizeChart(chartInstance.current);
-        }
-      }
+    if (!chartInstance.current) return;
+    if (lastRenderedRawOptionRef.current === rawOption && lastRenderedThemeRef.current === resolvedTheme) {
+      return;
     }
-  }, [isIntersecting, resolvedTheme]);
+    renderCurrentChart(chartInstance.current);
+  }, [rawOption, resolvedTheme]);
 
   return (
-    <div ref={containerRef} className="relative w-full">
-      <div ref={chartRef} id={id} className={className} style={offsetTop > 0 ? { marginTop: offsetTop } : undefined} />
+    <div className="relative w-full min-w-0 overflow-hidden">
+      <div ref={chartRef} id={id} className={cn('w-full min-w-0 max-w-full', className)} />
       <LoadingSpinner isVisible={!isRendered} fullscreen={false} size="sm" />
     </div>
   );

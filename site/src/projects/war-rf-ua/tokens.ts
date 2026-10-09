@@ -39,4 +39,6 @@ export const frontlineColors = {
   deepstateLine: '#38bdf8',
   /** LostArmour claimed frontline boundary line - Rose/Red. */
   lostarmourLine: '#f43f5e',
+  /** Net monthly territorial change trajectory line - Amber. */
+  netChange: '#f59e0b',
 } as const;

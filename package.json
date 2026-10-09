@@ -14,6 +14,7 @@
     "build:pipeline": "bun --filter @graphs/pipelines --silent build",
     "build:site": "bun --filter @graphs/site build",
     "preview": "bun --filter @graphs/site preview",
+    "generate:og": "bun --filter @graphs/site generate:og",
     "test": "bun --filter @graphs/pipelines test"
   },
   "devDependencies": {

@@ -10,11 +10,11 @@ import type {
   LineSeriesOption,
   SeriesOption,
   SliderDataZoomComponentOption,
-  TitleComponentOption,
   TooltipComponentOption,
   XAXisComponentOption,
   YAXisComponentOption,
 } from 'echarts';
+import { init } from 'echarts/core';
 import { type ThemeColors, themeFonts } from '@/styles/tokens';
 import { resolveColor, type SemanticColor } from '@/utils/color';
 import {
@@ -37,9 +37,9 @@ export type { TableColumnSpec, TableRowSpec, TooltipFooterSpec, TooltipRowSpec }
 
 /** Geometric layout metrics and tolerance thresholds shared across options and runtime adjustments. */
 const CANVAS_LAYOUT = {
-  /** Reserved clearance in pixels for top card controls (floating anchor copy button and filter pills). @default 28 */
-  cardControlsHeight: 28,
-  /** Default vertical spacing in pixels between card header and chart components (legend / Y-axis). @default 12 */
+  /** Top clearance in pixels for the legend, grid, and toolbox. @default 4 */
+  topClearance: 4,
+  /** Default vertical spacing in pixels between legend and chart grid. @default 12 */
   layoutGap: 12,
 } as const;
 
@@ -128,24 +128,6 @@ function getCanvasInvariants(tokens: ThemeColors) {
 /** Resolves opt-in feature templates applied only when explicitly declared in the user option. */
 function getOptInTemplates(tokens: ThemeColors) {
   return {
-    title: {
-      left: 'center',
-      top: 0,
-      padding: 0,
-      textStyle: {
-        color: tokens.text.primary,
-        fontSize: 16,
-        lineHeight: 28,
-        fontFamily: themeFonts.sansFamily,
-      },
-      subtextStyle: {
-        color: tokens.text.muted,
-        fontSize: 12,
-        lineHeight: 14,
-        fontFamily: themeFonts.sansFamily,
-      },
-      itemGap: 4,
-    } satisfies TitleComponentOption,
     dataZoom: {
       bottom: 4,
       height: 22,
@@ -387,19 +369,12 @@ function enhanceSeries(series: EChartsOption['series'], labelStyle: SeriesLabelS
   return Array.isArray(series) ? list : list[0];
 }
 
-/** Computes dynamic vertical layout offsets for title, legend, grid, and toolbox to prevent visual collisions. */
-function computeLayoutOffsets(option: EChartsOption, controlsHeight = 0) {
-  const optTitle = Array.isArray(option.title) ? option.title[0] : option.title;
-  const hasTitle = Boolean(optTitle && optTitle.show !== false && optTitle.text);
-  const titleHeight = hasTitle ? (optTitle?.subtext ? 42 : 26) : 0;
-  const headerClearance = Math.max(titleHeight, controlsHeight || CANVAS_LAYOUT.cardControlsHeight);
-
+/** Computes baseline vertical layout offsets for legend, grid, and toolbox. */
+function computeLayoutOffsets(option: EChartsOption) {
   const optLegend = Array.isArray(option.legend) ? option.legend[0] : option.legend;
   const isShowLegend = optLegend?.show !== false;
-
-  const layoutGap = CANVAS_LAYOUT.layoutGap;
-  const legendTop = headerClearance + layoutGap;
-  const initialOuterTop = legendTop;
+  const legendTop = CANVAS_LAYOUT.topClearance;
+  const initialOuterTop = CANVAS_LAYOUT.topClearance;
 
   return {
     legendTop,
@@ -550,12 +525,115 @@ function enhanceAxis<T extends XAXisComponentOption | YAXisComponentOption>(axis
   return Array.isArray(axis) ? (axis.map(enhanceSingle) as T[]) : enhanceSingle(axis);
 }
 
+/** Standard presentation dimensions for exported PNG charts. */
+const EXPORT_CANVAS_WIDTH = 1200;
+const EXPORT_CANVAS_HEIGHT = 560;
+
+/** Exports an ECharts canvas instance to a high-resolution PNG image at standard presentation dimensions (2400x1120 Retina). */
+export function exportChartAsPng(chart: ECharts, title: string | undefined, exportName: string, tokens: ThemeColors): void {
+  if (!chart || chart.isDisposed()) return;
+
+  // biome-ignore lint/suspicious/noExplicitAny: ECharts internal model inspection
+  const model = (chart as any).getModel?.();
+  const dataZoomModel = model?.getComponent('dataZoom');
+  const hasDataZoom = Boolean(dataZoomModel && dataZoomModel.get('show') !== false);
+
+  const pixelRatio = 2;
+
+  // 1. Create hidden offscreen container with fixed standard presentation dimensions
+  const offscreenDiv = document.createElement('div');
+  offscreenDiv.style.cssText = `position:fixed;left:-9999px;top:-9999px;width:${EXPORT_CANVAS_WIDTH}px;height:${EXPORT_CANVAS_HEIGHT}px;visibility:hidden;pointer-events:none;`;
+  document.body.appendChild(offscreenDiv);
+
+  let dataUrl: string;
+  try {
+    const offscreenChart = init(offscreenDiv, undefined, {
+      renderer: 'canvas',
+      devicePixelRatio: pixelRatio,
+      width: EXPORT_CANVAS_WIDTH,
+      height: EXPORT_CANVAS_HEIGHT,
+    });
+
+    const currentOption = chart.getOption() as EChartsOption;
+    offscreenChart.setOption(
+      {
+        ...currentOption,
+        animation: false,
+      },
+      true,
+    );
+
+    dataUrl = offscreenChart.getDataURL({
+      type: 'png',
+      pixelRatio,
+      backgroundColor: tokens.surface.card,
+      excludeComponents: ['toolbox', 'dataZoom'],
+    });
+
+    offscreenChart.dispose();
+  } catch {
+    // Fallback to live canvas data URL if offscreen rendering encounters DOM constraints
+    dataUrl = chart.getDataURL({
+      type: 'png',
+      pixelRatio,
+      backgroundColor: tokens.surface.card,
+      excludeComponents: ['toolbox', 'dataZoom'],
+    });
+  } finally {
+    offscreenDiv.remove();
+  }
+
+  const triggerDownload = (url: string) => {
+    const link = document.createElement('a');
+    link.download = `${exportName || 'chart'}.png`;
+    link.href = url;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const img = new Image();
+  img.onload = () => {
+    const headerHeight = title ? 40 * pixelRatio : 0;
+    const bottomCrop = hasDataZoom ? 40 * pixelRatio : 0;
+    const sourceHeight = Math.max(1, img.height - bottomCrop);
+    const canvas = document.createElement('canvas');
+    canvas.width = img.width;
+    canvas.height = headerHeight + sourceHeight;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      triggerDownload(dataUrl);
+      return;
+    }
+
+    // 1. Fill composite background with theme card surface color
+    ctx.fillStyle = tokens.surface.card;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // 2. Draw centered title text if provided
+    if (title) {
+      ctx.font = `bold ${16 * pixelRatio}px ${themeFonts.sansFamily}`;
+      ctx.fillStyle = tokens.text.primary;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(title, canvas.width / 2, headerHeight / 2);
+    }
+
+    // 3. Draw cropped chart canvas below title
+    ctx.drawImage(img, 0, 0, img.width, sourceHeight, 0, headerHeight, img.width, sourceHeight);
+
+    triggerDownload(canvas.toDataURL('image/png'));
+  };
+  img.src = dataUrl;
+}
+
 /** Merges user-specified native ECharts option with theme defaults, fonts, and localized export controls. */
-export function enhanceOption(option: EChartsOption, labels: ToolboxLabels, exportName: string, tokens: ThemeColors, controlsHeight = 0): EChartsOption {
+export function enhanceOption(option: EChartsOption, labels: ToolboxLabels, _exportName: string, tokens: ThemeColors, onExport?: () => void): EChartsOption {
   const invariants = getCanvasInvariants(tokens);
   const optInTemplates = getOptInTemplates(tokens);
   const defaultLabelStyle = getDefaultLabelStyle(tokens);
-  const layout = computeLayoutOffsets(option, controlsHeight);
+  const layout = computeLayoutOffsets(option);
   const dataZoomArr = Array.isArray(option.dataZoom) ? option.dataZoom : option.dataZoom ? [option.dataZoom] : [];
   const hasDataZoom = dataZoomArr.some((dz) => dz && typeof dz === 'object' && ('show' in dz ? dz.show !== false : 'disabled' in dz ? !dz.disabled : true));
   const optTooltip = Array.isArray(option.tooltip) ? option.tooltip[0] : option.tooltip;
@@ -571,11 +649,11 @@ export function enhanceOption(option: EChartsOption, labels: ToolboxLabels, expo
     emphasis: { iconStyle: { borderColor: tokens.accent.primary } },
     feature: {
       ...(hasDataZoom ? { restore: { title: labels.restore ?? 'Restore' } } : {}),
-      saveAsImage: {
-        name: exportName,
+      myExport: {
+        show: true,
         title: labels.exportPng ?? 'Export PNG',
-        pixelRatio: 2,
-        backgroundColor: tokens.surface.card,
+        icon: 'path://M4.7,22.9L29.3,45.5L54.7,23.4M4.6,43.6L4.6,58L53.8,58L53.8,43.6M29.2,45.1L29.2,0',
+        onclick: onExport,
       },
     },
   };
@@ -583,7 +661,7 @@ export function enhanceOption(option: EChartsOption, labels: ToolboxLabels, expo
   return {
     backgroundColor: 'transparent',
     textStyle: { fontFamily: invariants.fontFamily, ...option.textStyle },
-    title: option.title ? smartMerge(optInTemplates.title, option.title) : undefined,
+    title: { show: false },
     legend: layout.isShowLegend ? smartMerge({ ...invariants.legend, top: layout.legendTop }, option.legend || {}) : { show: false },
     grid: smartMerge(
       {

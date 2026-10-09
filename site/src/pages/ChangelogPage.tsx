@@ -73,22 +73,25 @@ function ChangelogContent({ html, versions, normalizedVersion }: ChangelogConten
     document.title = pageTitle;
   }, [pageTitle]);
 
+  const changelogDesc = `Release history and changelog for Graphs (v${activeVersion})`;
+
   return (
     <>
       <title>{pageTitle}</title>
+      <meta name="description" content={changelogDesc} />
+      <meta property="og:site_name" content={t.common.graphs} />
+      <meta property="og:type" content="article" />
       <meta property="og:title" content={pageTitle} />
-      <meta name="twitter:title" content={pageTitle} />
-      <meta name="description" content={`Release history and changelog for Graphs (v${activeVersion})`} />
-      <meta property="og:description" content={`Release history and changelog for Graphs (v${activeVersion})`} />
+      <meta property="og:description" content={changelogDesc} />
 
-      <div className="max-w-7xl mx-auto py-4 sm:py-6">
+      <div className="max-w-7xl mx-auto py-6">
         <div className="flex gap-8 items-start justify-center">
           {/* Left balance spacer to guarantee pixel-perfect viewport centering on desktop */}
           <div className="hidden lg:block w-36 shrink-0 pointer-events-none" aria-hidden="true" />
 
           {/* Main changelog document */}
           <div className="max-w-5xl w-full min-w-0">
-            <div className="card bg-surface-card/60 p-6 sm:p-8 shadow-sm">
+            <div className="card bg-surface-card/60 p-6 shadow-sm">
               {/* biome-ignore lint/security/noDangerouslySetInnerHtml: Sanitized static build markdown content */}
               <div className="changelog-markdown text-sm leading-relaxed" dangerouslySetInnerHTML={{ __html: html }} />
             </div>

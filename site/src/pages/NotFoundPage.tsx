@@ -6,14 +6,20 @@ export default function NotFoundPage() {
   const { getPath } = usePath();
   const { t } = useTranslation();
   const homePath = getPath('/');
+  const title = `404 — ${t.common.pageNotFound}`;
+  const description = t.common.pageNotFoundDescription;
 
   return (
-    <div className="flex flex-col items-center justify-center py-16 sm:py-24 text-center">
-      <title>{`404 — ${t.common.pageNotFound}`}</title>
-      <meta name="description" content={t.common.pageNotFoundDescription} />
+    <div className="flex flex-col items-center justify-center py-20 text-center">
+      <title>{title}</title>
+      <meta name="description" content={description} />
+      <meta property="og:site_name" content={t.common.graphs} />
+      <meta property="og:type" content="website" />
+      <meta property="og:title" content={title} />
+      <meta property="og:description" content={description} />
 
       <div className="space-y-4 max-w-md">
-        <h1 className="text-5xl sm:text-6xl font-mono font-bold tracking-tight text-accent-primary">404</h1>
+        <h1 className="text-6xl font-mono font-bold tracking-tight text-accent-primary">404</h1>
         <p className="text-base text-content-secondary leading-relaxed">{t.common.pageNotFoundDescription}</p>
         <div className="pt-2">
           <Link to={homePath} className="btn-accent px-5 py-2.5 text-sm font-semibold">

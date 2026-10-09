@@ -9,7 +9,7 @@ export const SEMANTIC_COLORS: Record<SemanticColor, string> = {
   warning: 'text-status-warning',
   danger: 'text-status-danger',
   info: 'text-status-info',
-  blue: 'text-accent-blue',
+  blue: 'text-accent-primary',
   muted: 'text-content-muted',
 };
 

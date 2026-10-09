@@ -10,12 +10,6 @@ export function round(value: number, decimals = 1): number {
   return Math.round(value * factor) / factor;
 }
 
-/** Rounds a nullable or optional numeric value to a specified number of decimal places. */
-export function roundNullable(value: number | null | undefined, decimals = 1): number | null {
-  if (value == null || !Number.isFinite(value)) return null;
-  return round(value, decimals);
-}
-
 /** Computes percentage (numerator / denominator * 100) rounded to specified decimal places. */
 export function percentage(numerator: number, denominator: number, decimals = 1): number {
   if (!denominator || denominator <= 0 || !Number.isFinite(numerator)) return 0;
@@ -32,20 +26,6 @@ export function percentageNullable(numerator: number, denominator: number | null
 export function ratio(numerator: number, denominator: number, decimals = 2, fallback?: number): number | undefined {
   if (!denominator || denominator <= 0 || !Number.isFinite(numerator)) return fallback;
   return round(numerator / denominator, decimals);
-}
-
-/** Computes the arithmetic mean of an array of numbers, rounded to specified decimal places. */
-export function average(values: readonly number[], decimals = 1): number {
-  if (!values.length) return 0;
-  let total = 0;
-  let count = 0;
-  for (const v of values) {
-    if (Number.isFinite(v)) {
-      total += v;
-      count++;
-    }
-  }
-  return count > 0 ? round(total / count, decimals) : 0;
 }
 
 /** Computes the sum of finite numbers in an array. */

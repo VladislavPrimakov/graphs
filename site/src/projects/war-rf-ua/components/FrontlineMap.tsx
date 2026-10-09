@@ -7,14 +7,12 @@ import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { TimelineScrubber } from '@/components/ui/TimelineScrubber';
 import { createFillLayer, createLineLayer, decodeMultiPolygon, getMapTileStyle, multiPolygonToGeoJson, registerFallbackDot, UKRAINE_MAP_PRESETS } from '@/utils/map-builder';
 import { useFormat, useTheme } from '@/utils/provider';
-import { useInView } from '@/utils/useInView';
 import type { dict as enDict } from '../locales/dict-en';
 import { frontlineColors } from '../tokens';
 
 interface FrontlineMapProps {
   data: FrontlineMapSectionData;
   t: typeof enDict;
-  initialInView?: boolean;
 }
 
 /** Resolves and decodes layers for a target date from history bundle, traversing reference chains. */
@@ -76,7 +74,7 @@ function getTimelineData(data: FrontlineMapSectionData): { dates: string[]; dens
   return cached;
 }
 
-export const FrontlineMap: React.FC<FrontlineMapProps> = ({ data, t, initialInView }) => {
+export const FrontlineMap: React.FC<FrontlineMapProps> = ({ data, t }) => {
   const { resolvedTheme, tokens } = useTheme();
   const fmt = useFormat();
 
@@ -98,14 +96,9 @@ export const FrontlineMap: React.FC<FrontlineMapProps> = ({ data, t, initialInVi
     }
   }, [data]);
 
-  const { ref: containerRef, hasEnteredView } = useInView<HTMLDivElement>({
-    rootMargin: '400px 0px',
-    initialInView,
-  });
-
   // Map initialization
   useEffect(() => {
-    if (!hasEnteredView || !mapContainerRef.current || mapRef.current) return;
+    if (!mapContainerRef.current || mapRef.current) return;
 
     const initialLayers = data.layers;
 
@@ -174,7 +167,7 @@ export const FrontlineMap: React.FC<FrontlineMapProps> = ({ data, t, initialInVi
       map.remove();
       mapRef.current = null;
     };
-  }, [hasEnteredView, resolvedTheme, tokens.text.dim, data]);
+  }, [resolvedTheme, tokens.text.dim, data]);
 
   // Reactive layer updates when selectedDate changes (cached or on-demand fetch)
   useEffect(() => {
@@ -269,90 +262,82 @@ export const FrontlineMap: React.FC<FrontlineMapProps> = ({ data, t, initialInVi
   const laPct = summary.totalUkraineKm2 > 0 ? fmt.percent((summary.laClaimedKm2 / summary.totalUkraineKm2) * 100, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '';
 
   return (
-    <div ref={containerRef} className="flex flex-col gap-2 w-full">
-      <div className="relative w-full h-135 sm:h-155 rounded-xl overflow-hidden border border-border-subtle bg-surface-base/90 shadow-inner">
-        {!hasEnteredView ? (
-          <div className="w-full h-full flex items-center justify-center">
+    <div className="flex flex-col gap-2 w-full">
+      <div className="relative w-full h-145 rounded-xl overflow-hidden border border-border-subtle bg-surface-base/90 shadow-inner">
+        <div ref={mapContainerRef} className="w-full h-full" />
+
+        {/* Centered Loading Overlay while downloading history bundle */}
+        {isLoadingHistory && (
+          <div className="absolute inset-0 z-30 flex items-center justify-center bg-surface-base transition-opacity">
             <LoadingSpinner isVisible={true} fullscreen={false} size="md" />
           </div>
-        ) : (
-          <>
-            <div ref={mapContainerRef} className="w-full h-full" />
-
-            {/* Centered Loading Overlay while downloading history bundle */}
-            {isLoadingHistory && (
-              <div className="absolute inset-0 z-30 flex items-center justify-center bg-surface-base transition-opacity">
-                <LoadingSpinner isVisible={true} fullscreen={false} size="md" />
-              </div>
-            )}
-
-            {/* Floating Dark Glassmorphic Map Legend */}
-            <div className="absolute bottom-4 left-4 z-10 glass-bar rounded-xl p-3.5 text-xs max-w-90 sm:max-w-95 shadow-lg border border-border-subtle/80 flex flex-col gap-2.5 pointer-events-auto">
-              <div className="font-semibold text-content-primary text-[11px] uppercase tracking-wider text-accent-primary">{t.frontline.legendTitle}</div>
-
-              {/* Territorial Zones */}
-              <div className="flex flex-col gap-1.5 text-[11px]">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="flex items-center gap-1.5 min-w-0">
-                    <span className="inline-block w-3 h-3 rounded-xs shrink-0 opacity-80 border" style={{ backgroundColor: frontlineColors.consensusRf, borderColor: frontlineColors.consensusRf }} />
-                    <span className="truncate text-content-secondary">{t.frontline.consensusRf}</span>
-                  </span>
-                  <span className="font-medium text-content-primary shrink-0 tabular-nums">
-                    {fmt.number(summary.consensusRfKm2)} km² <span className="text-content-muted font-normal">({rfPct})</span>
-                  </span>
-                </div>
-
-                <div className="flex items-center justify-between gap-3">
-                  <span className="flex items-center gap-1.5 min-w-0">
-                    <span className="inline-block w-3 h-3 rounded-xs shrink-0 opacity-80 border" style={{ backgroundColor: frontlineColors.disputed, borderColor: frontlineColors.disputedStroke }} />
-                    <span className="truncate text-content-secondary">{t.frontline.disputed}</span>
-                  </span>
-                  <span className="font-medium text-content-primary shrink-0 tabular-nums">
-                    {fmt.number(summary.disputedKm2)} km² <span className="text-content-muted font-normal">({dispPct})</span>
-                  </span>
-                </div>
-
-                <div className="flex items-center justify-between gap-3">
-                  <span className="flex items-center gap-1.5 min-w-0">
-                    <span className="inline-block w-3 h-3 rounded-xs shrink-0 bg-blue-500/20 border" style={{ borderColor: frontlineColors.consensusUa }} />
-                    <span className="truncate text-content-secondary">{t.frontline.consensusUa}</span>
-                  </span>
-                  <span className="font-medium text-content-primary shrink-0 tabular-nums">
-                    {fmt.number(summary.consensusUaKm2)} km² <span className="text-content-muted font-normal">({uaPct})</span>
-                  </span>
-                </div>
-              </div>
-
-              {/* Frontline Lines Section */}
-              <div className="pt-2 border-t border-border-subtle/60 flex flex-col gap-1.5 text-[11px]">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="flex items-center gap-2 min-w-0">
-                    <span className="inline-block w-4 h-0.5 shrink-0 rounded-full" style={{ backgroundColor: frontlineColors.deepstateLine }} />
-                    <span className="truncate text-content-secondary">{t.frontline.deepstateLine}</span>
-                  </span>
-                  <span className="font-medium text-content-primary shrink-0 tabular-nums">
-                    {fmt.number(dsTotalKm2)} km² <span className="text-content-muted font-normal">({dsPct})</span>
-                  </span>
-                </div>
-
-                <div className="flex items-center justify-between gap-3">
-                  <span className="flex items-center gap-2 min-w-0">
-                    <span className="inline-block w-4 h-0.5 shrink-0 rounded-full" style={{ backgroundColor: frontlineColors.lostarmourLine }} />
-                    <span className="truncate text-content-secondary">{t.frontline.lostarmourLine}</span>
-                  </span>
-                  <span className="font-medium text-content-primary shrink-0 tabular-nums">
-                    {fmt.number(summary.laClaimedKm2)} km² <span className="text-content-muted font-normal">({laPct})</span>
-                  </span>
-                </div>
-              </div>
-            </div>
-          </>
         )}
+
+        {/* Floating Dark Glassmorphic Map Legend */}
+        <div className="absolute bottom-4 left-4 z-10 glass-bar rounded-xl p-3.5 text-xs max-w-90 shadow-lg border border-border-subtle/80 flex flex-col gap-2.5 pointer-events-auto">
+          <div className="font-semibold text-content-primary text-[11px] uppercase tracking-wider text-accent-primary">{t.frontline.legendTitle}</div>
+
+          {/* Territorial Zones */}
+          <div className="flex flex-col gap-1.5 text-[11px]">
+            <div className="flex items-center justify-between gap-3">
+              <span className="flex items-center gap-1.5 min-w-0">
+                <span className="inline-block w-3 h-3 rounded-xs shrink-0 opacity-80 border" style={{ backgroundColor: frontlineColors.consensusRf, borderColor: frontlineColors.consensusRf }} />
+                <span className="truncate text-content-secondary">{t.frontline.consensusRf}</span>
+              </span>
+              <span className="font-medium text-content-primary shrink-0 tabular-nums">
+                {fmt.number(summary.consensusRfKm2)} km² <span className="text-content-muted font-normal">({rfPct})</span>
+              </span>
+            </div>
+
+            <div className="flex items-center justify-between gap-3">
+              <span className="flex items-center gap-1.5 min-w-0">
+                <span className="inline-block w-3 h-3 rounded-xs shrink-0 opacity-80 border" style={{ backgroundColor: frontlineColors.disputed, borderColor: frontlineColors.disputedStroke }} />
+                <span className="truncate text-content-secondary">{t.frontline.disputed}</span>
+              </span>
+              <span className="font-medium text-content-primary shrink-0 tabular-nums">
+                {fmt.number(summary.disputedKm2)} km² <span className="text-content-muted font-normal">({dispPct})</span>
+              </span>
+            </div>
+
+            <div className="flex items-center justify-between gap-3">
+              <span className="flex items-center gap-1.5 min-w-0">
+                <span className="inline-block w-3 h-3 rounded-xs shrink-0 bg-blue-500/20 border" style={{ borderColor: frontlineColors.consensusUa }} />
+                <span className="truncate text-content-secondary">{t.frontline.consensusUa}</span>
+              </span>
+              <span className="font-medium text-content-primary shrink-0 tabular-nums">
+                {fmt.number(summary.consensusUaKm2)} km² <span className="text-content-muted font-normal">({uaPct})</span>
+              </span>
+            </div>
+          </div>
+
+          {/* Frontline Lines Section */}
+          <div className="pt-2 border-t border-border-subtle/60 flex flex-col gap-1.5 text-[11px]">
+            <div className="flex items-center justify-between gap-3">
+              <span className="flex items-center gap-2 min-w-0">
+                <span className="inline-block w-4 h-0.5 shrink-0 rounded-full" style={{ backgroundColor: frontlineColors.deepstateLine }} />
+                <span className="truncate text-content-secondary">{t.frontline.deepstateLine}</span>
+              </span>
+              <span className="font-medium text-content-primary shrink-0 tabular-nums">
+                {fmt.number(dsTotalKm2)} km² <span className="text-content-muted font-normal">({dsPct})</span>
+              </span>
+            </div>
+
+            <div className="flex items-center justify-between gap-3">
+              <span className="flex items-center gap-2 min-w-0">
+                <span className="inline-block w-4 h-0.5 shrink-0 rounded-full" style={{ backgroundColor: frontlineColors.lostarmourLine }} />
+                <span className="truncate text-content-secondary">{t.frontline.lostarmourLine}</span>
+              </span>
+              <span className="font-medium text-content-primary shrink-0 tabular-nums">
+                {fmt.number(summary.laClaimedKm2)} km² <span className="text-content-muted font-normal">({laPct})</span>
+              </span>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Single-Date Timeline Scrubber Bar */}
       {dates.length > 1 && (
-        <div className="control-panel p-2 sm:px-2.5 sm:py-1.5">
+        <div className="control-panel p-2">
           <TimelineScrubber mode="single" periods={dates} density={timelineDensity} selectedDate={selectedDate} onSelectDate={setSelectedDate} />
         </div>
       )}

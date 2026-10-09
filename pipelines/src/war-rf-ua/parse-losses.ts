@@ -636,7 +636,7 @@ export async function parseLosses(forceUpdate = false): Promise<ParsedLossesResu
       },
       0,
     );
-    logger.info(`Saved ${placemarks.length.toLocaleString()} minimal placemarks to data-losses.json`);
+    logger.debug(`Saved ${placemarks.length.toLocaleString()} minimal placemarks to data-losses.json`);
   }
 
   const rules = await readJson<ClassificationRules>(CLASSIFICATION_FILE);
@@ -649,7 +649,7 @@ export async function parseLosses(forceUpdate = false): Promise<ParsedLossesResu
   const otherUnclassified = [...unclassifiedNames.entries()].filter(([name]) => name !== 'без названия' && name !== '').sort((a, b) => b[1] - a[1]);
   const otherCount = otherUnclassified.reduce((sum, [, count]) => sum + count, 0);
 
-  logger.info(
+  logger.debug(
     `Classification: ${classifiedCount.toLocaleString()} / ${totalPlacemarks.toLocaleString()} (${classifiedPct}%) classified | ${unclassifiedCount} skipped (${unkSideCount} UNK side, ${namelessCount} nameless pins, ${otherCount} excluded/markers)`,
   );
 

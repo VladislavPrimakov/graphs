@@ -6,8 +6,10 @@
     "extract-cldr": "bun scripts/extract-cldr-units.ts",
     "dev": "bun run extract-cldr && react-router dev",
     "start": "react-router dev",
-    "build": "bun run --silent extract-cldr && bun run --silent knip && bun run --silent check && bun run --silent type-check && react-router build",
-    "preview": "serve -l 3001 dist/client",
+    "build": "bun run --silent extract-cldr && bun run --silent knip && bun run --silent check && bun run --silent type-check && react-router build && bun scripts/postbuild.ts",
+    "preview": "bun scripts/preview.ts",
+    "generate:og": "bun scripts/generate-og.ts",
+    "test:meta": "bun test tests/validate-meta.test.ts",
     "check": "biome check --write",
     "knip": "knip --directory .. --workspace @graphs/site",
     "type-check": "tsc --noEmit"
@@ -47,7 +49,7 @@
     "@types/string-hash": "^1.1.3",
     "babel-plugin-react-compiler": "^1.0.0",
     "cldr-units-full": "^48.2.0",
-    "serve": "^14.2.6",
+    "playwright": "^1.64.0",
     "typescript": "^5.9.3",
     "vite": "^6.0.0"
   }

@@ -1,10 +1,9 @@
 import type { EChartsOption } from 'echarts';
 import type React from 'react';
-import { Suspense, startTransition, use, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, startTransition, use, useState } from 'react';
 import { ExternalLinkIcon } from '@/components/icons';
 import { SectionBreakdown } from '@/components/sections/SectionBreakdown';
-import { SectionChart } from '@/components/sections/SectionChart';
-import { AnchorButton } from '@/components/ui/AnchorButton';
+import { SectionHeader } from '@/components/sections/SectionHeader';
 import { Checkbox } from '@/components/ui/Checkbox';
 import { KpiRow } from '@/components/ui/KpiCard';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
@@ -15,6 +14,8 @@ import type { ChartControl, DashboardSection as DashboardSectionType, DynamicBun
 import { useFormat, useTranslation } from '@/utils/provider';
 import { useInView } from '@/utils/useInView';
 import { SECTION_DATA_ATTR } from '@/utils/useScrollSpy';
+
+const SectionChart = lazy(() => import('./SectionChart').then((m) => ({ default: m.SectionChart })));
 
 function isBundleResult(res: DynamicViewResult): res is DynamicBundleResult {
   return typeof res === 'object' && res !== null && 'option' in res;
@@ -28,8 +29,6 @@ export interface SectionProps {
   projectSlug: string;
   /** Whether this section is the initial target for deep linking or above-the-fold display. @default false */
   initialInView?: boolean;
-  /** Whether viewport observation is active. When false, ignores intersection events. @default true */
-  enabled?: boolean;
 }
 
 type ControlStateValue = string | number | boolean | readonly [number, number] | [number, number];
@@ -37,11 +36,8 @@ type ControlStateValue = string | number | boolean | readonly [number, number] |
 /** Clean card loader placeholder with normalized height preserving page geometry. */
 function SectionLoader({ id, projectSlug, title }: { id: string; projectSlug?: string; title?: string }) {
   return (
-    <div className="card group min-h-[60vh] flex flex-col justify-between relative">
-      <div className="flex items-start justify-between gap-3 mb-3">
-        <AnchorButton sectionId={id} projectSlug={projectSlug} />
-        {title && <h3 className="text-base sm:text-lg font-bold text-content-primary tracking-tight text-center px-8 sm:px-24">{title}</h3>}
-      </div>
+    <div className="card min-h-[60vh] flex flex-col justify-between relative">
+      <SectionHeader sectionId={id} projectSlug={projectSlug} title={title} />
       <div className="flex-1 flex items-center justify-center min-h-[300px] relative">
         <LoadingSpinner fullscreen={false} size="sm" isVisible={true} />
       </div>
@@ -83,30 +79,6 @@ function SectionLoadedContent({ section, projectSlug }: SectionLoadedContentProp
     });
   };
 
-  const controlsRef = useRef<HTMLDivElement>(null);
-  const [controlsHeight, setControlsHeight] = useState(0);
-
-  useEffect(() => {
-    const el = controlsRef.current;
-    if (!el) return;
-
-    const updateHeight = () => {
-      const isFloating = window.getComputedStyle(el).position === 'absolute';
-      setControlsHeight(isFloating ? el.offsetHeight : 0);
-    };
-
-    updateHeight();
-
-    const resizeObserver = new ResizeObserver(updateHeight);
-    resizeObserver.observe(el);
-    window.addEventListener('resize', updateHeight);
-
-    return () => {
-      resizeObserver.disconnect();
-      window.removeEventListener('resize', updateHeight);
-    };
-  }, []);
-
   const exportName = `${projectSlug}--${sectionId}`;
 
   // Ensure effective control values are always clamped to the current min/max bounds of resolved controls
@@ -131,9 +103,7 @@ function SectionLoadedContent({ section, projectSlug }: SectionLoadedContentProp
   // Extract option and dynamic KPI overrides
   const activeOption: EChartsOption | null = !activeViewResult ? null : isBundleResult(activeViewResult) ? activeViewResult.option : activeViewResult;
 
-  const optTitle = Array.isArray(activeOption?.title) ? activeOption?.title[0] : activeOption?.title;
-  const hasTitle = Boolean(optTitle && optTitle.show !== false && optTitle.text);
-  const chartOffsetTop = controlsHeight > 28 && hasTitle ? controlsHeight - 28 : 0;
+  const activeTitle = activeViewResult && isBundleResult(activeViewResult) && activeViewResult.title ? activeViewResult.title : section.title;
 
   const kpisTop: KpiCardSpec[] = activeViewResult && isBundleResult(activeViewResult) && activeViewResult.kpisTop ? activeViewResult.kpisTop : section.kpisTop || [];
 
@@ -146,89 +116,85 @@ function SectionLoadedContent({ section, projectSlug }: SectionLoadedContentProp
 
   const renderControls = () => {
     if (section.type !== 'chart' || !resolvedControls?.length) return null;
-    return (
-      <div ref={controlsRef} className="flex flex-col items-end gap-2 shrink-0 ml-auto lg:absolute lg:top-4 lg:right-4 lg:z-10 lg:pointer-events-auto">
-        {resolvedControls.map((ctrl: ChartControl) => {
-          switch (ctrl.type) {
-            case 'slider': {
-              const val = Number(effectiveValues[ctrl.id] ?? ctrl.defaultValue);
-              return (
-                <div key={ctrl.id} className="control-panel inline-flex items-center gap-2.5 px-3 h-7 text-xs">
-                  {ctrl.label && (
-                    <span className="text-content-secondary font-medium whitespace-nowrap">
-                      {ctrl.label}: <span className="font-bold text-accent-primary font-mono">{fmt.number(val)}</span>
-                    </span>
-                  )}
-                  <div className="w-20 sm:w-28 flex items-center">
-                    <Slider min={ctrl.min} max={ctrl.max} step={ctrl.step} value={[val]} onValueChange={([v]) => handleControlChange(ctrl.id, v)} />
-                  </div>
-                </div>
-              );
-            }
-            case 'range-slider': {
-              const range = (effectiveValues[ctrl.id] ?? ctrl.defaultValue ?? [ctrl.min, ctrl.max]) as [number, number];
-              return (
-                <div key={ctrl.id} className="control-panel inline-flex items-center gap-2.5 px-3 h-7 text-xs">
-                  {ctrl.label && (
-                    <span className="text-content-secondary font-medium whitespace-nowrap">
-                      {ctrl.label}:{' '}
-                      <span className="font-bold text-accent-primary font-mono">
-                        {range[0]} – {range[1]}
-                      </span>
-                    </span>
-                  )}
-                  <div className="w-24 sm:w-32 flex items-center">
-                    <Slider
-                      min={ctrl.min}
-                      max={ctrl.max}
-                      step={ctrl.step ?? 1}
-                      minStepsBetweenThumbs={ctrl.minStepsBetweenThumbs ?? 0}
-                      value={range}
-                      onValueChange={(val) => handleControlChange(ctrl.id, val as [number, number])}
-                    />
-                  </div>
-                </div>
-              );
-            }
-            case 'toggle': {
-              const val = String(effectiveValues[ctrl.id] ?? ctrl.defaultValue);
-              return (
-                <ToggleGroup
-                  key={ctrl.id}
-                  type="single"
-                  value={val}
-                  onValueChange={(v) => {
-                    if (v) handleControlChange(ctrl.id, v);
-                  }}
-                >
-                  {ctrl.options.map((opt) => (
-                    <ToggleGroupItem key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </ToggleGroupItem>
-                  ))}
-                </ToggleGroup>
-              );
-            }
-            case 'checkbox': {
-              const checked = Boolean(effectiveValues[ctrl.id] ?? ctrl.defaultValue);
-              const controlId = `ctrl-${sectionId}-${ctrl.id}`;
-              return (
-                <div key={ctrl.id} className="control-panel inline-flex items-center gap-2 px-2.5 h-7 text-xs select-none transition-colors hover:bg-surface-elevated">
-                  <Checkbox id={controlId} checked={checked} onCheckedChange={(c) => handleControlChange(ctrl.id, Boolean(c))} />
-                  {ctrl.label && (
-                    <label htmlFor={controlId} className="text-content-secondary font-medium cursor-pointer">
-                      {ctrl.label}
-                    </label>
-                  )}
-                </div>
-              );
-            }
-            default:
-              return null;
-          }
-        })}
-      </div>
-    );
+    return resolvedControls.map((ctrl: ChartControl) => {
+      switch (ctrl.type) {
+        case 'slider': {
+          const val = Number(effectiveValues[ctrl.id] ?? ctrl.defaultValue);
+          return (
+            <div key={ctrl.id} className="control-panel inline-flex items-center gap-2.5 px-3 h-7 text-xs">
+              {ctrl.label && (
+                <span className="text-content-secondary font-medium whitespace-nowrap">
+                  {ctrl.label}: <span className="font-bold text-accent-primary font-mono">{fmt.number(val)}</span>
+                </span>
+              )}
+              <div className="w-28 flex items-center">
+                <Slider min={ctrl.min} max={ctrl.max} step={ctrl.step} value={[val]} onValueChange={([v]) => handleControlChange(ctrl.id, v)} />
+              </div>
+            </div>
+          );
+        }
+        case 'range-slider': {
+          const range = (effectiveValues[ctrl.id] ?? ctrl.defaultValue ?? [ctrl.min, ctrl.max]) as [number, number];
+          return (
+            <div key={ctrl.id} className="control-panel inline-flex items-center gap-2.5 px-3 h-7 text-xs">
+              {ctrl.label && (
+                <span className="text-content-secondary font-medium whitespace-nowrap">
+                  {ctrl.label}:{' '}
+                  <span className="font-bold text-accent-primary font-mono">
+                    {range[0]} – {range[1]}
+                  </span>
+                </span>
+              )}
+              <div className="w-32 flex items-center">
+                <Slider
+                  min={ctrl.min}
+                  max={ctrl.max}
+                  step={ctrl.step ?? 1}
+                  minStepsBetweenThumbs={ctrl.minStepsBetweenThumbs ?? 0}
+                  value={range}
+                  onValueChange={(val) => handleControlChange(ctrl.id, val as [number, number])}
+                />
+              </div>
+            </div>
+          );
+        }
+        case 'toggle': {
+          const val = String(effectiveValues[ctrl.id] ?? ctrl.defaultValue);
+          return (
+            <ToggleGroup
+              key={ctrl.id}
+              type="single"
+              value={val}
+              onValueChange={(v) => {
+                if (v) handleControlChange(ctrl.id, v);
+              }}
+            >
+              {ctrl.options.map((opt) => (
+                <ToggleGroupItem key={opt.value} value={opt.value}>
+                  {opt.label}
+                </ToggleGroupItem>
+              ))}
+            </ToggleGroup>
+          );
+        }
+        case 'checkbox': {
+          const checked = Boolean(effectiveValues[ctrl.id] ?? ctrl.defaultValue);
+          const controlId = `ctrl-${sectionId}-${ctrl.id}`;
+          return (
+            <div key={ctrl.id} className="control-panel inline-flex items-center gap-2 px-2.5 h-7 text-xs select-none transition-colors hover:bg-surface-elevated">
+              <Checkbox id={controlId} checked={checked} onCheckedChange={(c) => handleControlChange(ctrl.id, Boolean(c))} />
+              {ctrl.label && (
+                <label htmlFor={controlId} className="text-content-secondary font-medium cursor-pointer">
+                  {ctrl.label}
+                </label>
+              )}
+            </div>
+          );
+        }
+        default:
+          return null;
+      }
+    });
   };
 
   const renderContent = () => {
@@ -237,26 +203,16 @@ function SectionLoadedContent({ section, projectSlug }: SectionLoadedContentProp
         return <SectionBreakdown spec={section} data={data} projectSlug={projectSlug} />;
       case 'custom':
         return (
-          <div className="flex flex-col gap-3">
-            <div className="relative flex items-center justify-center min-h-8">
-              <div className="absolute left-0 top-1/2 -translate-y-1/2">
-                <AnchorButton sectionId={sectionId} projectSlug={projectSlug} />
-              </div>
-              {section.title && <h3 className="text-base sm:text-lg font-bold text-content-primary tracking-tight text-center px-8 sm:px-24">{section.title}</h3>}
-            </div>
+          <>
+            <SectionHeader sectionId={sectionId} projectSlug={projectSlug} title={section.title} />
             {section.render(data)}
-          </div>
+          </>
         );
       case 'chart':
         return (
           <>
-            <div className="flex items-start justify-between gap-3 mb-3 lg:mb-0 lg:pointer-events-none">
-              <div className="lg:absolute lg:top-4 lg:left-4 lg:z-10 lg:pointer-events-auto">
-                <AnchorButton sectionId={sectionId} projectSlug={projectSlug} />
-              </div>
-              {renderControls()}
-            </div>
-            {activeOption && <SectionChart option={activeOption} id={`chart-${sectionId}`} offsetTop={chartOffsetTop} exportName={exportName} />}
+            <SectionHeader sectionId={sectionId} projectSlug={projectSlug} title={activeTitle} controls={renderControls()} />
+            {activeOption && <SectionChart option={activeOption} id={`chart-${sectionId}`} exportName={exportName} title={activeTitle} />}
           </>
         );
     }
@@ -268,7 +224,7 @@ function SectionLoadedContent({ section, projectSlug }: SectionLoadedContentProp
       {kpisTop.length > 0 && <KpiRow kpis={kpisTop} />}
 
       {/* Unified Section Card Container */}
-      <div className="card group">
+      <div className="card">
         {renderContent()}
 
         {/* Section Sources Footer */}
@@ -300,9 +256,12 @@ function SectionLoadedContent({ section, projectSlug }: SectionLoadedContentProp
 }
 
 /** Universal dashboard section scaffolding coordinating anchor links, generic controls, dynamic KPI rows, and inner visualizers. */
-export const Section: React.FC<SectionProps> = ({ section, projectSlug, initialInView = false, enabled = true }) => {
-  const { ref, hasEnteredView } = useInView<HTMLElement>({ initialInView, enabled, once: true });
-  const shouldLoad = typeof window === 'undefined' || hasEnteredView;
+export const Section: React.FC<SectionProps> = ({ section, projectSlug, initialInView = false }) => {
+  const { ref, hasEnteredView } = useInView<HTMLElement>({
+    id: section.id,
+    initialInView,
+  });
+  const shouldLoad = hasEnteredView;
 
   return (
     <section ref={ref} id={section.id} {...{ [SECTION_DATA_ATTR]: section.id }} className="scroll-mt-20 flex flex-col gap-4">
