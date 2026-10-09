@@ -1,7 +1,11 @@
 import type { LocaleProjectMeta } from '@/types';
 
-export const meta: LocaleProjectMeta = {
+export const meta = {
   title: 'AI Tokens',
   description:
     'Global AI token inference throughput and regional demand across macro-regions (China, US, EU, Asia ex-China, Rest of World) and leading model providers (Doubao, Google, OpenAI, Anthropic, DeepSeek, and others).',
-};
+  sections: {
+    'tokens-by-region': 'Throughput by Region',
+    'tokens-by-company': 'Throughput by Company',
+  },
+} satisfies LocaleProjectMeta;

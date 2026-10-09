@@ -1,5 +1,10 @@
-import type { WorldChartMetricData, WorldDataset } from '@graphs/types';
-import { exportDataset, getPipelineDataPath } from '@/utils/dataset';
+import type { CleanPowerSectionData } from '@graphs/types/world/clean-power';
+import type { ElectricityGenerationSectionData } from '@graphs/types/world/electricity-generation';
+import type { ElectricityPerCapitaSectionData } from '@graphs/types/world/electricity-per-capita';
+import type { GdpPerCapitaPppSectionData } from '@graphs/types/world/gdp-per-capita-ppp';
+import type { GdpPppSectionData } from '@graphs/types/world/gdp-ppp';
+import type { MachineryTurnoverSectionData } from '@graphs/types/world/machinery-turnover';
+import { exportProjectSections, getPipelineDataPath } from '@/utils/dataset';
 import { fileExists, readJson, writeJson } from '@/utils/fs';
 import { fetchHeadMeta, fetchWithRetry, isRemoteMetaEqual, type RemoteFileMeta } from '@/utils/http';
 import { getLogger, isUpdate, isVerbose, runWithLogger } from '@/utils/logger';
@@ -68,7 +73,19 @@ interface WorldPipelineCache {
   macro: MacroData;
   physical: PhysicalData;
   reporters: Record<number, string>;
-  dataset: WorldDataset;
+  sections: {
+    'gdp-ppp': GdpPppSectionData;
+    'gdp-per-capita-ppp': GdpPerCapitaPppSectionData;
+    'machinery-turnover': MachineryTurnoverSectionData;
+    'electricity-generation': ElectricityGenerationSectionData;
+    'electricity-per-capita': ElectricityPerCapitaSectionData;
+    'clean-power': CleanPowerSectionData;
+  };
+}
+
+/** Exports section datasets for world. */
+async function exportWorld(sections: WorldPipelineCache['sections']): Promise<void> {
+  await exportProjectSections('world', sections);
 }
 
 /** Fetches latest WDI database release date from World Bank sources API. */
@@ -407,8 +424,8 @@ function getLatestVal(dict: Record<number | string, number | undefined>, endYear
   return 0;
 }
 
-/** Runs the World ETL Pipeline. Deflates machinery and MVA by US CPI, computes rankings, and exports to site/src/data/world.json. */
-export async function runWorldPipeline(forceUpdate = false, verbose?: boolean): Promise<WorldDataset> {
+/** Runs the World ETL Pipeline. Deflates machinery and MVA by US CPI, computes rankings, and exports section datasets. */
+export async function runWorldPipeline(forceUpdate = false, verbose?: boolean): Promise<void> {
   return runWithLogger(
     'world',
     async () => {
@@ -417,10 +434,10 @@ export async function runWorldPipeline(forceUpdate = false, verbose?: boolean): 
 
       const cache = await loadWorldCache();
       const hasValidDataset =
-        Boolean(cache?.dataset?.years?.length) &&
-        cache?.dataset?.years?.[0] === START_YEAR &&
-        (cache?.dataset?.years?.[cache.dataset.years.length - 1] ?? 0) >= CURRENT_YEAR - 1 &&
-        Boolean(cache?.dataset?.charts?.gdpPpp?.series);
+        Boolean(cache?.sections?.['gdp-ppp']?.years?.length) &&
+        cache?.sections?.['gdp-ppp']?.years?.[0] === START_YEAR &&
+        (cache?.sections?.['gdp-ppp']?.years?.[cache.sections['gdp-ppp'].years.length - 1] ?? 0) >= CURRENT_YEAR - 1 &&
+        Boolean(cache?.sections?.['gdp-ppp']?.series);
 
       let remoteWdiDate: string | null = null;
       let remoteOwidMeta: RemoteFileMeta | null = null;
@@ -435,8 +452,8 @@ export async function runWorldPipeline(forceUpdate = false, verbose?: boolean): 
         const networkFailed = remoteWdiDate === null && remoteOwidMeta === null;
         if (networkFailed) {
           logger.warn('Remote data sources unreachable (offline). Using cached dataset.');
-          await exportDataset('world', cache.dataset);
-          return cache.dataset;
+          await exportWorld(cache.sections);
+          return;
         }
 
         wdiChanged = remoteWdiDate == null || remoteWdiDate !== cache.meta.wdiLastUpdated;
@@ -444,8 +461,8 @@ export async function runWorldPipeline(forceUpdate = false, verbose?: boolean): 
 
         if (!wdiChanged && !owidChanged) {
           logger.info('All source metadata matches remote (WDI release & OWID ETag). Using cached dataset.');
-          await exportDataset('world', cache.dataset);
-          return cache.dataset;
+          await exportWorld(cache.sections);
+          return;
         }
 
         logger.info('Remote sources updated upstream. Refreshing dataset...');
@@ -522,7 +539,7 @@ export async function runWorldPipeline(forceUpdate = false, verbose?: boolean): 
         return true;
       }
 
-      function formatMetric(rawDict: Record<string, Record<number | string, number | undefined>>, scale = 1.0, decimals = 2): WorldChartMetricData {
+      function formatMetric(rawDict: Record<string, Record<number | string, number | undefined>>, scale = 1.0, decimals = 2): { series: Record<string, (number | null)[]> } {
         const entityLatest = new Map<string, number>();
         for (const [code, series] of Object.entries(rawDict)) {
           if (!isCountry(code) && code !== 'EUU') continue;
@@ -564,16 +581,13 @@ export async function runWorldPipeline(forceUpdate = false, verbose?: boolean): 
         };
       }
 
-      const dataset: WorldDataset = {
-        years,
-        charts: {
-          gdpPpp: formatMetric(gdpPppTrillions, 1.0, 2),
-          gdpPerCapitaPpp: formatMetric(macroRaw.gdp_pcap_ppp_kd || {}, 1.0, 0),
-          machineryTurnover: formatMetric(ch84Real, 1.0, 1),
-          electricityGeneration: formatMetric(physicalData.electricity_twh || {}, 1.0, 1),
-          cleanPower: formatMetric(physicalData.solar_wind_twh || {}, 1.0, 1),
-          electricityPerCapita: formatMetric(physicalData.elec_per_capita_kwh || {}, 1.0, 0),
-        },
+      const sections = {
+        'gdp-ppp': { years, series: formatMetric(gdpPppTrillions, 1.0, 2).series },
+        'gdp-per-capita-ppp': { years, series: formatMetric(macroRaw.gdp_pcap_ppp_kd || {}, 1.0, 0).series },
+        'machinery-turnover': { years, series: formatMetric(ch84Real, 1.0, 1).series },
+        'electricity-generation': { years, series: formatMetric(physicalData.electricity_twh || {}, 1.0, 1).series },
+        'clean-power': { years, series: formatMetric(physicalData.solar_wind_twh || {}, 1.0, 1).series },
+        'electricity-per-capita': { years, series: formatMetric(physicalData.elec_per_capita_kwh || {}, 1.0, 0).series },
       };
 
       await writeJson(
@@ -586,13 +600,12 @@ export async function runWorldPipeline(forceUpdate = false, verbose?: boolean): 
           macro: macroRaw,
           physical: physicalData,
           reporters,
-          dataset,
+          sections,
         },
         0,
       );
-      await exportDataset('world', dataset);
-      logger.success(`Exported world dataset (${years.length} years, 6 macroeconomic & industrial charts)`);
-      return dataset;
+      await exportWorld(sections);
+      logger.success(`Exported world section datasets (${years.length} years, 6 macroeconomic & industrial charts)`);
     },
     verbose,
   );

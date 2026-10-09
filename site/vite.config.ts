@@ -5,9 +5,10 @@ import { reactRouter } from '@react-router/dev/vite';
 import tailwindcss from '@tailwindcss/vite';
 import reactCompiler from 'babel-plugin-react-compiler';
 import { defineConfig, type Plugin } from 'vite';
+import { parseChangelogVersions } from './src/utils/version';
 
 const changelog = fs.readFileSync(path.resolve(__dirname, '../CHANGELOG.md'), 'utf-8');
-const siteVersion = changelog.match(/## \[(\d+\.\d+\.\d+)\]/)?.[1] ?? '0.0.0';
+const siteVersion = parseChangelogVersions(changelog)[0] ?? '0.0.0';
 
 function reactCompilerPlugin(): Plugin {
   return {
@@ -30,7 +31,8 @@ function reactCompilerPlugin(): Plugin {
 
       return {
         code: result.code,
-        map: result.map,
+        // biome-ignore lint/suspicious/noExplicitAny: Babel EncodedSourceMap (file?: string | null) is incompatible with Rollup ExistingRawSourceMap (file?: string)
+        map: (result.map ?? undefined) as any,
       };
     },
   };
@@ -41,11 +43,7 @@ const base = rawBase.endsWith('/') ? rawBase : `${rawBase}/`;
 
 export default defineConfig(({ command }) => ({
   base,
-  plugins: [
-    reactCompilerPlugin(),
-    reactRouter(),
-    tailwindcss(),
-  ],
+  plugins: [reactCompilerPlugin(), reactRouter(), tailwindcss()],
   server: {
     port: 3000,
   },
@@ -60,10 +58,11 @@ export default defineConfig(({ command }) => ({
     alias: {
       '@graphs/types': path.resolve(__dirname, '../types'),
       '@': path.resolve(__dirname, './src'),
+      '@data': path.resolve(__dirname, './public/data'),
     },
   },
   build: {
-    chunkSizeWarningLimit: 1500,
+    chunkSizeWarningLimit: 2500,
     rollupOptions: {
       onwarn(warning, defaultHandler) {
         if (warning.code === 'DYNAMIC_IMPORT_WILL_NOT_MOVE' || warning.message?.includes('dynamic import will not move module')) {

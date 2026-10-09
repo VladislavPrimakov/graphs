@@ -1,7 +1,7 @@
 import type { KpiCardSpec, SemanticColor } from '@/types';
 import { cn } from '@/utils/cn';
 import { resolveColor } from '@/utils/color';
-import { useFormat } from '@/utils/locales';
+import { useFormat } from '@/utils/provider';
 
 /** Props for rendering metric KPI summary cards. */
 export interface KpiCardProps {

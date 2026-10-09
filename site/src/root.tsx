@@ -3,14 +3,14 @@ import { Suspense, use } from 'react';
 import { Links, Meta, Outlet, Scripts, ScrollRestoration, useLocation } from 'react-router';
 import { SiteLayout } from '@/components/layout/SiteLayout';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
-import { getLocalizedCatalog } from '@/projects/registry';
+import { loadCatalog } from '@/projects/registry';
 import type { ProjectMeta } from '@/types';
 import type { CldrLocaleUnits } from '@/utils/format';
-import { getLanguageFromPath, type Language, type LocaleCommonDict, LocaleProvider } from '@/utils/locales';
+import { AppProvider, getLanguageFromPath, type Language, type LocaleCommonDict } from '@/utils/provider';
 import './styles/global.css';
 
 const commonLoaders = import.meta.glob<{ LocaleCommon: LocaleCommonDict }>('./locales/common-*.ts');
-const cldrLoaders = import.meta.glob<{ default: CldrLocaleUnits }>('./data/cldr/*.json');
+const cldrLoaders = import.meta.glob<{ default: CldrLocaleUnits }>('../public/data/cldr/*.json');
 
 export interface RootLocaleData {
   common: LocaleCommonDict;
@@ -27,12 +27,12 @@ export function loadRootLocale(lang: Language): Promise<RootLocaleData> {
     if (!commonLoader) {
       throw new Error(`Common locale dictionary missing for lang: ${lang}`);
     }
-    const cldrLoader = cldrLoaders[`./data/cldr/${lang}.json`];
+    const cldrLoader = cldrLoaders[`../public/data/cldr/${lang}.json`];
     if (!cldrLoader) {
       throw new Error(`CLDR units dataset missing for lang: ${lang}`);
     }
 
-    promise = Promise.all([commonLoader(), cldrLoader(), getLocalizedCatalog(lang)]).then(([commonMod, cldrMod, projects]) => ({
+    promise = Promise.all([commonLoader(), cldrLoader(), loadCatalog(lang)]).then(([commonMod, cldrMod, projects]) => ({
       common: commonMod.LocaleCommon,
       cldr: (cldrMod.default ?? cldrMod) as CldrLocaleUnits,
       projects,
@@ -48,7 +48,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const lang = getLanguageFromPath(location.pathname);
 
   return (
-    <html lang={lang} className="dark">
+    <html lang={lang} suppressHydrationWarning>
       <head>
         <meta charSet="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -59,6 +59,12 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <noscript>
           <style>{'.loading-spinner-overlay { display: none !important; }'}</style>
         </noscript>
+        <script
+          // biome-ignore lint/security/noDangerouslySetInnerHtml: synchronous theme initialization script to prevent FOUT
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{const t=localStorage.getItem('theme')||'system';const d=t==='dark'||(t==='system'&&window.matchMedia('(prefers-color-scheme: dark)').matches);if(d){document.documentElement.classList.add('dark')}else{document.documentElement.classList.remove('dark')}}catch(e){}})();`,
+          }}
+        />
         <Meta />
         <Links />
       </head>
@@ -77,12 +83,12 @@ export default function App() {
   const { common, cldr, projects } = use(loadRootLocale(lang));
 
   return (
-    <LocaleProvider key={lang} lang={lang} common={common} cldr={cldr} projects={projects}>
+    <AppProvider key={lang} lang={lang} common={common} cldr={cldr} projects={projects}>
       <SiteLayout>
         <Suspense fallback={<LoadingSpinner />}>
           <Outlet />
         </Suspense>
       </SiteLayout>
-    </LocaleProvider>
+    </AppProvider>
   );
 }

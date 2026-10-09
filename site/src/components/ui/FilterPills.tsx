@@ -1,6 +1,6 @@
 import type React from 'react';
 import { cn } from '@/utils/cn';
-import { useFormat } from '@/utils/locales';
+import { useFormat } from '@/utils/provider';
 
 /** An individual selectable pill item within the filter pill group. */
 export interface FilterPillItem<T extends string | number = string | number> {
@@ -71,10 +71,12 @@ export function FilterPills<T extends string | number = string | number>({ items
 
       {items.map((item) => {
         const isSelected = selected.includes(item.id);
+        const isEmpty = item.count !== undefined && item.count === 0 && !isSelected;
         return (
           <button
             key={String(item.id)}
             type="button"
+            disabled={isEmpty}
             onClick={() => handleToggle(item.id)}
             className={cn(
               'tag-pill transition-all cursor-pointer inline-flex items-center gap-1.5 focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-accent-primary/50',
@@ -82,6 +84,7 @@ export function FilterPills<T extends string | number = string | number>({ items
               isSelected
                 ? 'bg-accent-glow text-accent-primary border-accent-primary/40 font-bold shadow-xs'
                 : 'bg-surface-base/50 text-content-muted border-border-subtle hover:text-content-primary hover:border-border-muted',
+              isEmpty && 'opacity-35 cursor-not-allowed hover:text-content-muted hover:border-border-subtle',
             )}
           >
             {item.icon && <span className="shrink-0 flex items-center leading-none">{item.icon}</span>}

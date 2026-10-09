@@ -1,5 +1,6 @@
 import type { EChartsOption } from 'echarts';
 import type React from 'react';
+import type { ProjectSource } from '@/types/project';
 import type { SemanticColor } from '@/utils/color';
 
 export type { SemanticColor };
@@ -22,6 +23,8 @@ export interface BaseSectionSpec {
   id: string;
   /** Optional primary section title. */
   title?: string;
+  /** Data provider or official agency citation for dataset provenance. */
+  sources?: ProjectSource[];
   /** KPI cards positioned above the section content. */
   kpisTop?: KpiCardSpec[];
   /** KPI cards positioned below the section content. */
@@ -79,7 +82,7 @@ export interface RangeSliderControl extends BaseControl {
   /** Minimum interval between the two thumbs. @default 0 */
   minStepsBetweenThumbs?: number;
   /** Initial range bounds tuple [start, end]. Defaults to full [min, max] range if omitted. */
-  defaultValue?: [number, number];
+  defaultValue?: readonly [number, number] | [number, number];
 }
 
 /** Checkbox toggle control for boolean options (e.g. showLabels). */
@@ -93,20 +96,22 @@ export interface CheckboxControl extends BaseControl {
 /** Discriminated union of all supported interactive chart controls. */
 export type ChartControl = ToggleControl | SliderControl | RangeSliderControl | CheckboxControl;
 
-/** Type map mapping each control type to its emitted value type. */
-export type ControlTypeMap<C> = {
-  slider: number;
-  'range-slider': [number, number];
-  checkbox: boolean;
-  toggle: C extends { options: readonly { value: infer V }[] } ? V : string;
-};
-
 /** Resolves the value type emitted by a given control. */
-export type ControlValue<C extends ChartControl> = ControlTypeMap<C>[C['type']];
+export type ControlValue<C> = C extends { type: 'slider' }
+  ? number
+  : C extends { type: 'range-slider' }
+    ? [number, number]
+    : C extends { type: 'checkbox' }
+      ? boolean
+      : C extends { type: 'toggle'; options: readonly { value: infer V }[] }
+        ? V
+        : C extends { type: 'toggle' }
+          ? string
+          : unknown;
 
 /** Derives strongly-typed values map from a controls tuple. */
 export type ControlsToValues<C extends readonly ChartControl[] | undefined = readonly ChartControl[] | undefined> = C extends readonly ChartControl[]
-  ? { [K in C[number] as K['id']]: ControlValue<K> }
+  ? { [K in C[number] as K['id']]: ControlValue<Extract<C[number], { id: K['id'] }>> }
   : Record<string, never>;
 
 /** Enriched view bundle containing ECharts option and optional section header/KPI overrides. */
@@ -115,6 +120,8 @@ export interface DynamicBundleResult {
   option: EChartsOption;
   /** Optional primary section title override for this view state. */
   title?: string;
+  /** Dynamic data provider citation overrides for this view state. */
+  sources?: ProjectSource[];
   /** Dynamic KPI cards positioned above the chart. */
   kpisTop?: KpiCardSpec[];
   /** Dynamic KPI cards positioned below the chart. */
@@ -125,22 +132,31 @@ export interface DynamicBundleResult {
 export type DynamicViewResult = EChartsOption | DynamicBundleResult;
 
 /** Unified interactive chart section computing Apache ECharts options via reactive or static view builder. */
-export interface ChartSectionSpec<C extends readonly ChartControl[] | undefined = readonly ChartControl[] | undefined> extends BaseSectionSpec {
+export interface ChartSectionSpec<
+  // biome-ignore lint/suspicious/noExplicitAny: generic polymorphic section data payload
+  TData = any,
+  C extends readonly ChartControl[] | undefined = readonly ChartControl[] | undefined,
+> extends BaseSectionSpec {
   /** Optional chart archetype discriminator (injected automatically by chartSection). @default 'chart' */
   type?: 'chart';
-  /** Optional interactive controls rendered in the card header. */
-  controls?: C;
-  /** Builder function producing concrete ECharts options and optional dynamic KPI overrides. */
-  buildView(values: ControlsToValues<C>): DynamicViewResult;
+  /** Optional interactive controls rendered in the card header, statically or computed dynamically from section data. */
+  controls?: C | ((data: TData) => C);
+  /** Builder function producing concrete ECharts options and optional dynamic KPI overrides from section data and controls. */
+  buildView(data: TData, values: ControlsToValues<NoInfer<C>>): DynamicViewResult;
 }
 
 /** Runtime chart section specification with guaranteed 'chart' discriminator. */
-export type ChartSection<C extends readonly ChartControl[] | undefined = readonly ChartControl[] | undefined> = ChartSectionSpec<C> & { type: 'chart' };
+export type ChartSection<
+  // biome-ignore lint/suspicious/noExplicitAny: generic polymorphic section data payload
+  TData = any,
+  C extends readonly ChartControl[] | undefined = readonly ChartControl[] | undefined,
+> = ChartSectionSpec<TData, C> & { type: 'chart' };
 
 /**
  * Type-safe chart section builder inferring reactive values from control definitions.
  */
-export function chartSection<const C extends readonly ChartControl[] | undefined = undefined>(spec: ChartSectionSpec<C>): ChartSection<C> {
+// biome-ignore lint/suspicious/noExplicitAny: generic polymorphic section data payload
+export function chartSection<TData = any, const C extends readonly ChartControl[] | undefined = undefined>(spec: ChartSectionSpec<TData, C>): ChartSection<TData, C> {
   return {
     type: 'chart',
     ...spec,
@@ -182,30 +198,49 @@ export interface BreakdownCategory {
 }
 
 /** Breakdown grid section displaying categorized item comparisons across categories. */
-export interface BreakdownGridSpec extends BaseSectionSpec {
+export interface BreakdownGridSpec<
+  // biome-ignore lint/suspicious/noExplicitAny: generic polymorphic section data payload
+  TData = any,
+> extends BaseSectionSpec {
   /** Section archetype discriminator. */
   type: 'breakdown-grid';
   /** Number of items to show per list before collapsing (defaults to 5). */
   previewLimit?: number;
-  /** Categorized comparison cards. */
-  categories: BreakdownCategory[];
+  /** Categorized comparison cards or function building them from section data. */
+  categories: BreakdownCategory[] | ((data: TData) => BreakdownCategory[]);
+}
+
+/** Type-safe breakdown grid section builder. */
+// biome-ignore lint/suspicious/noExplicitAny: generic polymorphic section data payload
+export function breakdownGridSection<TData = any>(spec: Omit<BreakdownGridSpec<TData>, 'type'>): BreakdownGridSpec<TData> {
+  return {
+    type: 'breakdown-grid',
+    ...spec,
+  };
 }
 
 /** Custom React-rendered section container (e.g. interactive WebGL map). */
-export interface CustomSectionSpec extends BaseSectionSpec {
+export interface CustomSectionSpec<
+  // biome-ignore lint/suspicious/noExplicitAny: generic polymorphic section data payload
+  TData = any,
+> extends BaseSectionSpec {
   /** Section archetype discriminator. */
   type: 'custom';
-  /** Render function returning custom React elements. */
-  render: () => React.ReactNode;
+  /** Render function returning custom React elements from section data. */
+  render: (data: TData) => React.ReactNode;
 }
 
 /** Runtime custom section specification. */
-export type CustomSection = CustomSectionSpec;
+export type CustomSection<
+  // biome-ignore lint/suspicious/noExplicitAny: generic polymorphic section data payload
+  TData = any,
+> = CustomSectionSpec<TData>;
 
 /**
  * Type-safe custom section builder.
  */
-export function customSection(spec: Omit<CustomSectionSpec, 'type'>): CustomSection {
+// biome-ignore lint/suspicious/noExplicitAny: generic polymorphic section data payload
+export function customSection<TData = any>(spec: Omit<CustomSectionSpec<TData>, 'type'>): CustomSection<TData> {
   return {
     type: 'custom',
     ...spec,
@@ -213,4 +248,8 @@ export function customSection(spec: Omit<CustomSectionSpec, 'type'>): CustomSect
 }
 
 /** Union of all dashboard section specifications (charts, breakdown grids, and custom views). */
-export type DashboardSection = ChartSection | BreakdownGridSpec | CustomSection;
+export type DashboardSection<
+  // biome-ignore lint/suspicious/noExplicitAny: generic polymorphic section data payload
+  TData = any,
+  // biome-ignore lint/suspicious/noExplicitAny: generic polymorphic control payload
+> = ChartSection<TData, any> | BreakdownGridSpec<TData> | CustomSection<TData>;

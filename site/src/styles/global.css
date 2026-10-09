@@ -9,78 +9,93 @@
   --font-sans: "Inter", system-ui, -apple-system, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 
-  /* Surface tokens */
+  /* Semantic surface tokens */
+  --color-surface-base: var(--color-surface-base);
+  --color-surface-card: var(--color-surface-card);
+  --color-surface-elevated: var(--color-surface-elevated);
+  --color-surface-overlay: var(--color-surface-overlay);
+
+  /* Semantic border tokens */
+  --color-border-subtle: var(--color-border-subtle);
+  --color-border-muted: var(--color-border-muted);
+  --color-border-active: var(--color-border-active);
+
+  /* Semantic content typography tokens */
+  --color-content-primary: var(--color-content-primary);
+  --color-content-secondary: var(--color-content-secondary);
+  --color-content-muted: var(--color-content-muted);
+  --color-content-dim: var(--color-content-dim);
+
+  /* Semantic accent & brand tokens */
+  --color-accent-primary: var(--color-accent-primary);
+  --color-accent-hover: var(--color-accent-hover);
+  --color-accent-glow: var(--color-accent-glow);
+
+  /* Semantic status tokens */
+  --color-status-success: var(--color-status-success);
+  --color-status-warning: var(--color-status-warning);
+  --color-status-danger: var(--color-status-danger);
+  --color-status-info: var(--color-status-info);
+}
+
+:root {
+  /* Surface tokens (Light) */
+  --color-surface-base: #f8fafc;
+  --color-surface-card: #ffffff;
+  --color-surface-elevated: #f1f5f9;
+  --color-surface-overlay: rgba(255, 255, 255, 0.95);
+
+  /* Border tokens (Light) */
+  --color-border-subtle: #e2e8f0;
+  --color-border-muted: #cbd5e1;
+  --color-border-active: #94a3b8;
+
+  /* Content typography tokens (Light) */
+  --color-content-primary: #0f172a;
+  --color-content-secondary: #334155;
+  --color-content-muted: #64748b;
+  --color-content-dim: #94a3b8;
+
+  /* Accent tokens (Light) */
+  --color-accent-primary: #0284c7;
+  --color-accent-hover: #0369a1;
+  --color-accent-glow: rgba(2, 132, 199, 0.12);
+
+  /* Status tokens (Light) */
+  --color-status-success: #16a34a;
+  --color-status-warning: #d97706;
+  --color-status-danger: #dc2626;
+  --color-status-info: #0284c7;
+}
+
+.dark {
+  /* Surface tokens (Dark) */
   --color-surface-base: #020617;
   --color-surface-card: #0f172a;
   --color-surface-elevated: #1e293b;
   --color-surface-overlay: rgba(15, 23, 42, 0.95);
 
-  /* Border tokens */
+  /* Border tokens (Dark) */
   --color-border-subtle: #1e293b;
   --color-border-muted: #334155;
   --color-border-active: #475569;
 
-  /* Content (text) tokens */
+  /* Content typography tokens (Dark) */
   --color-content-primary: #f8fafc;
   --color-content-secondary: #cbd5e1;
   --color-content-muted: #94a3b8;
   --color-content-dim: #64748b;
 
-  /* Accent tokens */
+  /* Accent tokens (Dark) */
   --color-accent-primary: #38bdf8;
   --color-accent-hover: #7dd3fc;
   --color-accent-glow: rgba(56, 189, 248, 0.15);
-  --color-accent-blue: #3b82f6;
-  --color-accent-blue-light: #93c5fd;
-  --color-accent-indigo: #6366f1;
-  --color-accent-rose: #f43f5e;
-  --color-accent-rose-glow: rgba(244, 63, 94, 0.15);
-  --color-accent-orange: #fb923c;
 
-  /* Status tokens */
+  /* Status tokens (Dark) */
   --color-status-success: #10b981;
-  --color-status-success-light: #34d399;
   --color-status-warning: #f59e0b;
   --color-status-danger: #ef4444;
-  --color-status-danger-light: #fca5a5;
-  --color-status-danger-muted: #f87171;
   --color-status-info: #06b6d4;
-
-  /* Domain tokens: Attacks */
-  --color-attacks-rf-uav: #f43f5e;
-  --color-attacks-rf-ballistic: #f59e0b;
-  --color-attacks-rf-cruise: #ef4444;
-  --color-attacks-ua-uav: #0ea5e9;
-  --color-attacks-ua-ballistic: #818cf8;
-  --color-attacks-ua-cruise: #22d3ee;
-  --color-attacks-uav: #f43f5e;
-  --color-attacks-ballistic: #f59e0b;
-  --color-attacks-cruise: #ef4444;
-
-  /* Domain tokens: Losses */
-  --color-losses-rf: #ef4444;
-  --color-losses-ua: #3b82f6;
-  --color-losses-unk: #7c3aed;
-  --color-losses-rf-light: #fca5a5;
-  --color-losses-ua-light: #93c5fd;
-  --color-losses-unk-light: #c4b5fd;
-
-  /* Domain tokens: Budget */
-  --color-budget-defense: #b91c1c;
-  --color-budget-other-exp: #475569;
-  --color-budget-domestic-rev: #16a34a;
-  --color-budget-grants: #d97706;
-  --color-budget-loans: #facc15;
-  --color-budget-debt: #64748b;
-  --color-budget-gdp: #2563eb;
-
-  /* Domain tokens: Trade */
-  --color-trade-export: #3b82f6;
-  --color-trade-import: #f97316;
-  --color-trade-balance: #38bdf8;
-  --color-trade-export-total: #3b82f6;
-  --color-trade-import-total: #f97316;
-  --color-trade-balance-line: #38bdf8;
 }
 
 @layer base {
@@ -99,8 +114,8 @@
   }
 
   ::selection {
-    background-color: var(--color-accent-blue);
-    color: var(--color-content-primary);
+    background-color: var(--color-accent-primary);
+    color: #ffffff;
   }
 }
 
@@ -118,23 +133,6 @@
 }
 ::-webkit-scrollbar-thumb:hover {
   background-color: var(--color-border-active);
-}
-
-/* Chart loading skeleton placeholder */
-.echart-container:empty {
-  background: linear-gradient(90deg, rgba(30, 41, 59, 0.2) 25%, rgba(51, 65, 85, 0.3) 50%, rgba(30, 41, 59, 0.2) 75%);
-  background-size: 200% 100%;
-  animation: chart-shimmer 2s infinite ease-in-out;
-  border-radius: 0.75rem;
-}
-
-@keyframes chart-shimmer {
-  0% {
-    background-position: 200% 0;
-  }
-  100% {
-    background-position: -200% 0;
-  }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -173,12 +171,12 @@
 
 /* Standard subtle button / control */
 @utility btn-subtle {
-  @apply inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors duration-150 cursor-pointer shadow-sm bg-surface-card border border-border-subtle hover:bg-surface-elevated hover:border-border-muted text-content-secondary hover:text-accent-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-primary/50;
+  @apply inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors duration-150 cursor-pointer shadow-xs bg-surface-card border border-border-subtle hover:bg-surface-elevated hover:border-border-muted text-content-secondary hover:text-accent-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-primary/50;
 }
 
 /* Primary glowing action button / CTA */
 @utility btn-accent {
-  @apply inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors duration-150 cursor-pointer shadow-sm bg-accent-glow text-accent-primary border border-accent-primary/30 hover:bg-accent-glow/80 hover:text-accent-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-primary/50;
+  @apply inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors duration-150 cursor-pointer shadow-xs bg-accent-glow text-accent-primary border border-accent-primary/30 hover:bg-accent-glow/80 hover:text-accent-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-primary/50;
 }
 
 /* Section anchor deep-link button */

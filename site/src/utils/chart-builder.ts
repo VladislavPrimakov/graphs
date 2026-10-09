@@ -1,6 +1,7 @@
 import type {
   BarSeriesOption,
   DefaultLabelFormatterCallbackParams as CallbackDataParams,
+  ECharts,
   EChartsOption,
   GridComponentOption,
   LabelLayoutOptionCallback,
@@ -14,115 +15,167 @@ import type {
   XAXisComponentOption,
   YAXisComponentOption,
 } from 'echarts';
-import { themeColors, themeFonts } from '@/styles/tokens';
+import { type ThemeColors, themeFonts } from '@/styles/tokens';
 import { resolveColor, type SemanticColor } from '@/utils/color';
+import {
+  renderTooltipDot,
+  renderTooltipFooter,
+  renderTooltipHeader,
+  renderTooltipRow,
+  renderTooltipTableStructure,
+  type TooltipColumnSpec as TableColumnSpec,
+  type TooltipTableRowSpec as TableRowSpec,
+  type TooltipFooterSpec,
+  type TooltipRowSpec,
+} from './tooltip-builder';
+
+export type { TableColumnSpec, TableRowSpec, TooltipFooterSpec, TooltipRowSpec };
 
 /* -------------------------------------------------------------------------- */
 /* 1. Canvas Theme Invariants & Styling Presets                               */
 /* -------------------------------------------------------------------------- */
 
-/** Always-on theme invariants providing dark theme typography, borders, and grid boundaries across all charts. */
-const CANVAS_INVARIANTS = {
-  fontFamily: themeFonts.sansFamily,
-  legend: {
-    left: 'center',
-    textStyle: {
-      color: themeColors.text.secondary,
-      fontSize: 12,
-      fontFamily: themeFonts.sansFamily,
-    },
-    itemGap: 12,
-  } satisfies LegendComponentOption,
-  grid: {
-    left: 4,
-    right: 4,
-    bottom: 0,
-    top: 0,
-    outerBounds: {
-      left: 4,
-      right: 4,
+/** Geometric layout metrics and tolerance thresholds shared across options and runtime adjustments. */
+const CANVAS_LAYOUT = {
+  /** Reserved clearance in pixels for top card controls (floating anchor copy button and filter pills). @default 28 */
+  cardControlsHeight: 28,
+  /** Default vertical spacing in pixels between card header and chart components (legend / Y-axis). @default 12 */
+  layoutGap: 12,
+} as const;
+
+/** Resolves theme invariants providing typography, borders, and grid boundaries for a concrete theme palette. */
+function getCanvasInvariants(tokens: ThemeColors) {
+  return {
+    fontFamily: themeFonts.sansFamily,
+    layout: CANVAS_LAYOUT,
+    legend: {
+      left: 'center',
+      padding: 0,
+      itemHeight: 12,
+      itemWidth: 20,
+      itemGap: 4,
+      textStyle: {
+        color: tokens.text.secondary,
+        fontSize: 12,
+        lineHeight: 12,
+        fontFamily: themeFonts.sansFamily,
+      },
+    } satisfies LegendComponentOption,
+    grid: {
+      left: 0,
+      right: 0,
       bottom: 0,
       top: 0,
-    },
-    outerBoundsContain: 'all',
-  } satisfies GridComponentOption,
-  xAxis: {
-    axisLabel: {
-      color: themeColors.text.secondary,
-      fontSize: 12,
-    },
-    axisLine: {
-      lineStyle: { color: themeColors.border.muted },
-    },
-  } satisfies XAXisComponentOption,
-  yAxis: {
-    nameLocation: 'end',
-    nameGap: 12,
-    nameTextStyle: {
-      color: themeColors.text.muted,
-      fontSize: 12,
-      align: 'right',
-    },
-    splitLine: {
-      lineStyle: {
-        color: themeColors.border.subtle,
-        type: 'dashed',
+      outerBounds: {
+        left: 0,
+        right: 0,
+        bottom: 0,
+        top: 0,
       },
+      outerBoundsContain: 'all',
+    } satisfies GridComponentOption,
+    xAxis: {
+      axisLabel: {
+        color: tokens.text.secondary,
+        fontSize: 12,
+      },
+      axisLine: {
+        lineStyle: { color: tokens.border.muted },
+      },
+    } satisfies XAXisComponentOption,
+    yAxis: {
+      nameLocation: 'end',
+      nameGap: 12,
+      nameTextStyle: {
+        color: tokens.text.muted,
+        fontSize: 12,
+        lineHeight: 12,
+        align: 'right',
+      },
+      splitLine: {
+        lineStyle: {
+          color: tokens.border.subtle,
+          type: 'dashed',
+        },
+      },
+      axisLabel: {
+        color: tokens.text.muted,
+      },
+    } satisfies YAXisComponentOption,
+    toolbox: {
+      right: 12,
+      itemSize: 12,
+      itemGap: 8,
+      padding: 0,
     },
-    axisLabel: {
-      color: themeColors.text.muted,
-    },
-  } satisfies YAXisComponentOption,
-  tooltip: {
-    confine: true,
-    extraCssText: [
-      `background: ${themeColors.surface.overlay}`,
-      `border: 1px solid ${themeColors.border.muted}`,
-      'border-radius: 8px',
-      'padding: 10px 14px',
-      `color: ${themeColors.text.primary}`,
-      `font-family: ${themeFonts.sansFamily}`,
-      'box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5)',
-      'backdrop-filter: blur(8px)',
-      'pointer-events: none',
-    ].join('; '),
-  } satisfies TooltipComponentOption,
-};
+    tooltip: {
+      confine: true,
+      extraCssText: [
+        `background: ${tokens.surface.overlay}`,
+        `border: 1px solid ${tokens.border.muted}`,
+        'border-radius: 8px',
+        'padding: 10px 14px',
+        `color: ${tokens.text.primary}`,
+        `font-family: ${themeFonts.sansFamily}`,
+        'box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.35)',
+        'backdrop-filter: blur(8px)',
+        'pointer-events: none',
+      ].join('; '),
+    } satisfies TooltipComponentOption,
+  };
+}
 
-/** Opt-in feature templates applied only when explicitly declared in the user option. */
-const OPT_IN_TEMPLATES = {
-  title: {
-    left: 'center',
-    textStyle: {
-      color: themeColors.text.primary,
-      fontSize: 16,
-      fontFamily: themeFonts.sansFamily,
-    },
-    subtextStyle: {
-      color: themeColors.text.muted,
-      fontSize: 12,
-      fontFamily: themeFonts.sansFamily,
-    },
-    itemGap: 4,
-  } satisfies TitleComponentOption,
-  dataZoom: {
-    bottom: 4,
-    height: 22,
-    borderColor: themeColors.border.muted,
-    fillerColor: themeColors.accent.glow,
-    handleStyle: { color: themeColors.accent.primary },
-    textStyle: { color: themeColors.text.muted },
-  } satisfies SliderDataZoomComponentOption,
-};
+/** Resolves opt-in feature templates applied only when explicitly declared in the user option. */
+function getOptInTemplates(tokens: ThemeColors) {
+  return {
+    title: {
+      left: 'center',
+      top: 0,
+      padding: 0,
+      textStyle: {
+        color: tokens.text.primary,
+        fontSize: 16,
+        lineHeight: 28,
+        fontFamily: themeFonts.sansFamily,
+      },
+      subtextStyle: {
+        color: tokens.text.muted,
+        fontSize: 12,
+        lineHeight: 14,
+        fontFamily: themeFonts.sansFamily,
+      },
+      itemGap: 4,
+    } satisfies TitleComponentOption,
+    dataZoom: {
+      bottom: 4,
+      height: 22,
+      borderColor: tokens.border.muted,
+      fillerColor: tokens.accent.glow,
+      handleStyle: { color: tokens.accent.primary },
+      textStyle: { color: tokens.text.muted },
+    } satisfies SliderDataZoomComponentOption,
+  };
+}
 
-/** Default contrast outline stroke and bold typography applied to data labels across charts. */
-const DEFAULT_LABEL_STYLE = {
-  fontFamily: themeFonts.sansFamily,
-  fontWeight: 'bold',
-  color: themeColors.text.primary,
-  textBorderColor: themeColors.surface.card,
-  textBorderWidth: 2,
-};
+/** Resolves default contrast outline stroke and bold typography applied to data labels across charts. */
+/** Default series label typography and outline styling contract. */
+export interface SeriesLabelStyle {
+  fontFamily: string;
+  fontWeight: string;
+  color: string;
+  textBorderColor: string;
+  textBorderWidth: number;
+}
+
+function getDefaultLabelStyle(tokens: ThemeColors): SeriesLabelStyle {
+  return {
+    fontFamily: themeFonts.sansFamily,
+    fontWeight: 'bold',
+    color: tokens.text.primary,
+    textBorderColor: tokens.surface.card,
+    textBorderWidth: 2,
+  };
+}
 
 /** Default styling for line series end labels (e.g. world economic indicators). */
 const DEFAULT_END_LABEL_STYLE = {
@@ -211,9 +264,16 @@ function resolveBarBorderRadius(seriesList: SeriesOption[]): void {
         s.itemStyle = { ...s.itemStyle, borderRadius: hasNegative && !hasPositive ? [0, 0, 4, 4] : [4, 4, 0, 0] };
       }
     } else {
-      // Stacked bar groups
-      const pos = group.filter((s) => getSeriesSign(s.data).hasPositive);
-      const neg = group.filter((s) => getSeriesSign(s.data).hasNegative);
+      // Stacked bar groups: pre-compute series signs once to eliminate duplicate data scans
+      const pos: BarSeriesOption[] = [];
+      const neg: BarSeriesOption[] = [];
+
+      for (const s of group) {
+        const sign = getSeriesSign(s.data);
+        if (sign.hasPositive) pos.push(s);
+        if (sign.hasNegative) neg.push(s);
+      }
+
       const topPos = pos[pos.length - 1];
       const botNeg = neg[neg.length - 1];
 
@@ -254,13 +314,13 @@ function smartMerge(base: any, override: any): any {
 }
 
 /** Applies default geometric presets and text contrast styling to a single series and its itemized labels. */
-function enhanceSingleSeries(series: SeriesOption): SeriesOption {
+function enhanceSingleSeries(series: SeriesOption, labelStyle: SeriesLabelStyle): SeriesOption {
   if (!series) return series;
 
   const enhanced: SeriesOption = series.type === 'line' ? smartMerge(THEME_LINE, series) : { ...series };
 
   if ('label' in enhanced && enhanced.label) {
-    enhanced.label = smartMerge(DEFAULT_LABEL_STYLE, enhanced.label);
+    enhanced.label = smartMerge(labelStyle, enhanced.label);
   }
 
   if ('endLabel' in enhanced && enhanced.endLabel) {
@@ -268,57 +328,61 @@ function enhanceSingleSeries(series: SeriesOption): SeriesOption {
   }
 
   if (Array.isArray(enhanced.data) && enhanced.data.some((item) => item && typeof item === 'object' && 'label' in item && item.label)) {
-    enhanced.data = enhanced.data.map((item) => (item && typeof item === 'object' && 'label' in item && item.label ? { ...item, label: smartMerge(DEFAULT_LABEL_STYLE, item.label) } : item));
+    enhanced.data = enhanced.data.map((item) => (item && typeof item === 'object' && 'label' in item && item.label ? { ...item, label: smartMerge(labelStyle, item.label) } : item));
   }
 
   // Handle labelLayout collision resolution & optional bar overflow auto-hiding
-  const isBar = enhanced.type === 'bar';
-  const rawHideIfOverflow = (enhanced as { hideIfOverflowBar?: boolean }).hideIfOverflowBar;
-  // Opt-out via explicit false; defaults to true for bar series
-  const hideIfOverflow = isBar ? rawHideIfOverflow !== false : false;
-
-  const labelObj = 'label' in enhanced && enhanced.label ? (enhanced.label as { position?: unknown }) : undefined;
-  const labelPos = typeof labelObj?.position === 'string' ? labelObj.position : undefined;
-  const isInsideLabel = !labelPos || labelPos.startsWith('inside');
-
+  const labelObj = 'label' in enhanced && enhanced.label ? (enhanced.label as { show?: boolean; position?: unknown }) : undefined;
+  const hasVisibleLabel = Boolean(labelObj && labelObj.show !== false);
   const userFn = typeof enhanced.labelLayout === 'function' ? (enhanced.labelLayout as LabelLayoutOptionCallback) : undefined;
   const userLayoutObj = typeof enhanced.labelLayout === 'object' && enhanced.labelLayout !== null ? (enhanced.labelLayout as ReturnType<LabelLayoutOptionCallback>) : undefined;
 
-  enhanced.labelLayout = (params: LabelLayoutOptionCallbackParams) => {
-    const userRes = userFn ? userFn(params) : userLayoutObj;
+  // Only attach labelLayout hook if labels are active or custom layout callback is defined
+  if (hasVisibleLabel || userFn || userLayoutObj) {
+    const isBar = enhanced.type === 'bar';
+    const rawHideIfOverflow = (enhanced as { hideIfOverflowBar?: boolean }).hideIfOverflowBar;
+    const hideIfOverflow = isBar ? rawHideIfOverflow !== false : false;
+    const rawHideOverlap = (enhanced as { hideOverlap?: boolean }).hideOverlap;
+    const hideOverlap = rawHideOverlap !== undefined ? rawHideOverlap : true;
+    const labelPos = typeof labelObj?.position === 'string' ? labelObj.position : undefined;
+    const isInsideLabel = !labelPos || labelPos.startsWith('inside');
 
-    if (hideIfOverflow && isInsideLabel && params.rect && params.labelRect) {
-      const barWidth = Math.abs(params.rect.width);
-      const barHeight = Math.abs(params.rect.height);
-      const labelWidth = Math.abs(params.labelRect.width);
-      const labelHeight = Math.abs(params.labelRect.height);
+    enhanced.labelLayout = (params: LabelLayoutOptionCallbackParams) => {
+      const userRes = userFn ? userFn(params) : userLayoutObj;
 
-      if (labelHeight > 0 && labelWidth > 0) {
-        const isOverflow = barWidth + 1 < labelWidth || barHeight + 1 < labelHeight;
+      if (hideIfOverflow && isInsideLabel && params.rect && params.labelRect) {
+        const barWidth = Math.abs(params.rect.width);
+        const barHeight = Math.abs(params.rect.height);
+        const labelWidth = Math.abs(params.labelRect.width);
+        const labelHeight = Math.abs(params.labelRect.height);
 
-        if (isOverflow) {
-          return {
-            hideOverlap: true,
-            ...userRes,
-            fontSize: 0,
-          };
+        if (labelHeight > 0 && labelWidth > 0) {
+          const isOverflow = barWidth + 1 < labelWidth || barHeight + 1 < labelHeight;
+
+          if (isOverflow) {
+            return {
+              hideOverlap,
+              ...userRes,
+              fontSize: 0,
+            };
+          }
         }
       }
-    }
 
-    return {
-      hideOverlap: true,
-      ...userRes,
+      return {
+        hideOverlap,
+        ...userRes,
+      };
     };
-  };
+  }
 
   return enhanced;
 }
 
 /** Processes all chart series through series-specific style enhancements and resolves stack geometry. */
-function enhanceSeries(series: EChartsOption['series']): EChartsOption['series'] {
+function enhanceSeries(series: EChartsOption['series'], labelStyle: SeriesLabelStyle): EChartsOption['series'] {
   if (!series) return series;
-  const list = Array.isArray(series) ? series.map(enhanceSingleSeries) : [enhanceSingleSeries(series)];
+  const list = Array.isArray(series) ? series.map((s) => enhanceSingleSeries(s, labelStyle)) : [enhanceSingleSeries(series, labelStyle)];
   resolveBarBorderRadius(list);
   return Array.isArray(series) ? list : list[0];
 }
@@ -328,13 +392,14 @@ function computeLayoutOffsets(option: EChartsOption, controlsHeight = 0) {
   const optTitle = Array.isArray(option.title) ? option.title[0] : option.title;
   const hasTitle = Boolean(optTitle && optTitle.show !== false && optTitle.text);
   const titleHeight = hasTitle ? (optTitle?.subtext ? 42 : 26) : 0;
-  const headerClearance = Math.max(titleHeight, controlsHeight);
+  const headerClearance = Math.max(titleHeight, controlsHeight || CANVAS_LAYOUT.cardControlsHeight);
 
   const optLegend = Array.isArray(option.legend) ? option.legend[0] : option.legend;
   const isShowLegend = optLegend?.show !== false;
 
-  const legendTop = headerClearance > 0 ? headerClearance + 12 : 0;
-  const initialOuterTop = isShowLegend ? legendTop + 36 : headerClearance > 0 ? headerClearance + 12 : 8;
+  const layoutGap = CANVAS_LAYOUT.layoutGap;
+  const legendTop = headerClearance + layoutGap;
+  const initialOuterTop = legendTop;
 
   return {
     legendTop,
@@ -353,67 +418,143 @@ export interface ToolboxLabels {
 }
 
 let measureCtx: CanvasRenderingContext2D | null = null;
+const textWidthCache = new Map<string, number>();
 
-/** Measures pixel width of a rendered text string using a shared offscreen canvas context. */
+/** Measures pixel width of a rendered text string using a shared offscreen canvas context with LRU-bounded cache. */
 function measureTextWidth(text: string, font = `bold 12px ${themeFonts.sansFamily}`): number {
+  const cacheKey = `${font}:${text}`;
+  const cached = textWidthCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
+  let width = text.length * 8;
   if (typeof document !== 'undefined') {
     if (!measureCtx) {
       const canvas = document.createElement('canvas');
       measureCtx = canvas.getContext('2d');
     }
     if (measureCtx) {
-      measureCtx.font = font;
-      return measureCtx.measureText(text).width;
+      if (measureCtx.font !== font) {
+        measureCtx.font = font;
+      }
+      width = measureCtx.measureText(text).width;
     }
   }
-  return text.length * 8;
+
+  if (textWidthCache.size > 500) textWidthCache.clear();
+  textWidthCache.set(cacheKey, width);
+  return width;
 }
 
-/** Computes dynamic right clearance in pixels required to render line series end labels without canvas clipping. */
+/** Resolves the last valid data point index and formatted endLabel text of a line series. */
+// biome-ignore lint/suspicious/noExplicitAny: polymorphic ECharts series inspection
+function resolveLastEndLabel(item: any): { text: string; lastIndex: number } | null {
+  if (!item?.endLabel || item.endLabel.show === false) return null;
+  const data = Array.isArray(item.data) ? item.data : [];
+  let lastVal: unknown;
+  let lastIndex = -1;
+
+  for (let i = data.length - 1; i >= 0; i--) {
+    const rawPoint = data[i];
+    const val = typeof rawPoint === 'object' && rawPoint !== null && 'value' in rawPoint ? rawPoint.value : rawPoint;
+    if (val !== null && val !== undefined && (typeof val !== 'number' || !Number.isNaN(val))) {
+      lastVal = val;
+      lastIndex = i;
+      break;
+    }
+  }
+  if (lastVal === undefined || lastIndex === -1) return null;
+
+  const seriesName = typeof item.name === 'string' ? item.name : '';
+  let text = '';
+  if (typeof item.endLabel.formatter === 'function') {
+    text = String(item.endLabel.formatter({ value: lastVal, seriesName, dataIndex: lastIndex }) ?? '');
+  } else if (typeof item.endLabel.formatter === 'string') {
+    text = item.endLabel.formatter.replace('{a}', seriesName).replace('{c}', String(lastVal));
+  } else {
+    text = seriesName ? `${seriesName}: ${lastVal}` : String(lastVal);
+  }
+
+  return text ? { text, lastIndex } : null;
+}
+
+/** Computes static right clearance in pixels required to render line series end labels without canvas clipping. */
 function computeEndLabelClearance(series: EChartsOption['series']): number {
-  if (!series) return 4;
+  if (!series) return 0;
   const list = Array.isArray(series) ? series : [series];
   let maxWidth = 0;
 
   for (const s of list) {
-    if (!s || typeof s !== 'object') continue;
-    // biome-ignore lint/suspicious/noExplicitAny: polymorphic ECharts series inspection
-    const item = s as any;
-    if (item.type === 'line' && item.endLabel && item.endLabel.show !== false) {
-      const data = Array.isArray(item.data) ? item.data : [];
-      let lastVal: unknown;
-      for (let i = data.length - 1; i >= 0; i--) {
-        const rawPoint = data[i];
-        const val = typeof rawPoint === 'object' && rawPoint !== null && 'value' in rawPoint ? rawPoint.value : rawPoint;
-        if (val !== null && val !== undefined && (typeof val !== 'number' || !Number.isNaN(val))) {
-          lastVal = val;
-          break;
-        }
-      }
-      if (lastVal === undefined) continue;
-
-      const seriesName = typeof item.name === 'string' ? item.name : '';
-      let text = '';
-      if (typeof item.endLabel.formatter === 'function') {
-        text = String(item.endLabel.formatter({ value: lastVal, seriesName }) ?? '');
-      } else if (typeof item.endLabel.formatter === 'string') {
-        text = item.endLabel.formatter.replace('{a}', seriesName).replace('{c}', String(lastVal));
-      } else {
-        text = seriesName ? `${seriesName}: ${lastVal}` : String(lastVal);
-      }
-
-      if (text) {
-        const w = measureTextWidth(text);
-        if (w > maxWidth) maxWidth = w;
-      }
+    if (!s || typeof s !== 'object' || (s as { type?: string }).type !== 'line') continue;
+    const resolved = resolveLastEndLabel(s);
+    if (resolved) {
+      const w = measureTextWidth(resolved.text);
+      if (w > maxWidth) maxWidth = w;
     }
   }
 
-  return maxWidth > 0 ? Math.ceil(maxWidth) : 4;
+  return maxWidth > 0 ? Math.ceil(maxWidth) : 0;
 }
 
-/** Merges user-specified native ECharts option with dark theme defaults, fonts, and localized export controls. */
-export function enhanceOption(option: EChartsOption, labels: ToolboxLabels, exportName: string, controlsHeight = 0): EChartsOption {
+/**
+ * Computes dynamic right clearance in pixels required to render line series end labels without canvas clipping.
+ * Dynamically factors in the horizontal distance between the series last valid data point and the end of the X-axis.
+ */
+function computeDynamicEndLabelClearance(
+  // biome-ignore lint/suspicious/noExplicitAny: ECharts internal model inspection
+  seriesModels: any[],
+  // biome-ignore lint/suspicious/noExplicitAny: ECharts internal model inspection
+  xAxisOption: any,
+  gridWidth: number,
+): number {
+  if (!seriesModels?.length) return 0;
+
+  const endLabelSeries = seriesModels.filter((s) => s?.subType === 'line' && s?.option?.endLabel && s.option.endLabel.show !== false);
+  if (!endLabelSeries.length) return 0;
+
+  const xAxisData = xAxisOption && 'data' in xAxisOption && Array.isArray(xAxisOption.data) ? xAxisOption.data : undefined;
+  let totalPoints = xAxisData?.length ?? 0;
+  if (!totalPoints) {
+    for (const s of endLabelSeries) {
+      const len = Array.isArray(s.option?.data) ? s.option.data.length : 0;
+      if (len > totalPoints) totalPoints = len;
+    }
+  }
+
+  const isBoundaryGap = Boolean(xAxisOption?.boundaryGap === true);
+  const tickStep = gridWidth > 0 && totalPoints > (isBoundaryGap ? 0 : 1) ? gridWidth / (isBoundaryGap ? totalPoints : totalPoints - 1) : 0;
+
+  let maxOverhang = 0;
+
+  for (const s of endLabelSeries) {
+    const item = s.option;
+    const resolved = resolveLastEndLabel(item);
+    if (!resolved) continue;
+
+    const distance = typeof item.endLabel.distance === 'number' ? item.endLabel.distance : DEFAULT_END_LABEL_STYLE.distance;
+    const totalLabelSpan = measureTextWidth(resolved.text) + distance;
+    const distToRight = tickStep > 0 ? (totalPoints - 1 - resolved.lastIndex + (isBoundaryGap ? 0.5 : 0)) * tickStep : 0;
+
+    const overhang = totalLabelSpan - distToRight;
+    if (overhang > maxOverhang) {
+      maxOverhang = overhang;
+    }
+  }
+
+  return maxOverhang > 0 ? Math.ceil(maxOverhang) : 0;
+}
+
+/** Recursively enhances an axis definition (or array of axes) with canvas theme invariants. */
+function enhanceAxis<T extends XAXisComponentOption | YAXisComponentOption>(axis: T | T[] | undefined, invariants: T): T | T[] | undefined {
+  if (!axis) return invariants;
+  const enhanceSingle = (ax: T): T => smartMerge(invariants, ax);
+  return Array.isArray(axis) ? (axis.map(enhanceSingle) as T[]) : enhanceSingle(axis);
+}
+
+/** Merges user-specified native ECharts option with theme defaults, fonts, and localized export controls. */
+export function enhanceOption(option: EChartsOption, labels: ToolboxLabels, exportName: string, tokens: ThemeColors, controlsHeight = 0): EChartsOption {
+  const invariants = getCanvasInvariants(tokens);
+  const optInTemplates = getOptInTemplates(tokens);
+  const defaultLabelStyle = getDefaultLabelStyle(tokens);
   const layout = computeLayoutOffsets(option, controlsHeight);
   const dataZoomArr = Array.isArray(option.dataZoom) ? option.dataZoom : option.dataZoom ? [option.dataZoom] : [];
   const hasDataZoom = dataZoomArr.some((dz) => dz && typeof dz === 'object' && ('show' in dz ? dz.show !== false : 'disabled' in dz ? !dz.disabled : true));
@@ -421,37 +562,37 @@ export function enhanceOption(option: EChartsOption, labels: ToolboxLabels, expo
   const endLabelClearance = computeEndLabelClearance(option.series);
 
   const toolboxDefaults = {
-    right: 12,
+    right: invariants.toolbox.right,
     top: layout.initialToolboxTop,
-    itemSize: 12,
-    itemGap: 8,
-    padding: 0,
-    iconStyle: { borderColor: themeColors.text.muted },
-    emphasis: { iconStyle: { borderColor: themeColors.accent.primary } },
+    itemSize: invariants.toolbox.itemSize,
+    itemGap: invariants.toolbox.itemGap,
+    padding: invariants.toolbox.padding,
+    iconStyle: { borderColor: tokens.text.muted },
+    emphasis: { iconStyle: { borderColor: tokens.accent.primary } },
     feature: {
       ...(hasDataZoom ? { restore: { title: labels.restore ?? 'Restore' } } : {}),
       saveAsImage: {
         name: exportName,
         title: labels.exportPng ?? 'Export PNG',
         pixelRatio: 2,
-        backgroundColor: themeColors.surface.card,
+        backgroundColor: tokens.surface.card,
       },
     },
   };
 
   return {
     backgroundColor: 'transparent',
-    textStyle: { fontFamily: CANVAS_INVARIANTS.fontFamily, ...option.textStyle },
-    title: option.title ? smartMerge(OPT_IN_TEMPLATES.title, option.title) : undefined,
-    legend: layout.isShowLegend ? smartMerge({ ...CANVAS_INVARIANTS.legend, top: layout.legendTop }, option.legend || {}) : { show: false },
+    textStyle: { fontFamily: invariants.fontFamily, ...option.textStyle },
+    title: option.title ? smartMerge(optInTemplates.title, option.title) : undefined,
+    legend: layout.isShowLegend ? smartMerge({ ...invariants.legend, top: layout.legendTop }, option.legend || {}) : { show: false },
     grid: smartMerge(
       {
-        ...CANVAS_INVARIANTS.grid,
+        ...invariants.grid,
         top: 0,
         right: endLabelClearance,
         bottom: hasDataZoom ? 40 : 0,
         outerBounds: {
-          ...CANVAS_INVARIANTS.grid.outerBounds,
+          ...invariants.grid.outerBounds,
           top: layout.initialOuterTop,
           right: endLabelClearance,
           bottom: hasDataZoom ? 40 : 0,
@@ -459,13 +600,160 @@ export function enhanceOption(option: EChartsOption, labels: ToolboxLabels, expo
       },
       option.grid || {},
     ),
-    xAxis: smartMerge(CANVAS_INVARIANTS.xAxis, option.xAxis),
-    yAxis: smartMerge(CANVAS_INVARIANTS.yAxis, option.yAxis),
-    series: enhanceSeries(option.series),
-    dataZoom: option.dataZoom ? smartMerge(OPT_IN_TEMPLATES.dataZoom, option.dataZoom) : undefined,
-    tooltip: optTooltip?.show === false ? { show: false } : smartMerge(CANVAS_INVARIANTS.tooltip, option.tooltip || {}),
+    xAxis: enhanceAxis(option.xAxis, invariants.xAxis),
+    yAxis: enhanceAxis(option.yAxis, invariants.yAxis),
+    series: enhanceSeries(option.series, defaultLabelStyle),
+    dataZoom: option.dataZoom ? smartMerge(optInTemplates.dataZoom, option.dataZoom) : undefined,
+    tooltip: optTooltip?.show === false ? { show: false } : smartMerge(invariants.tooltip, option.tooltip || {}),
     toolbox: smartMerge(toolboxDefaults, option.toolbox || {}),
   };
+}
+
+/** Dynamically adjusts ECharts grid offsets (top for multi-line legends, right for endLabels) based on actual canvas dimensions. */
+export function adjustChartLayout(chart: ECharts, hasEndLabel?: boolean): void {
+  try {
+    if (!chart || chart.isDisposed()) return;
+
+    // 1. Inspect internal ECharts global model
+    // biome-ignore lint/suspicious/noExplicitAny: ECharts internal model inspection for dynamic layout calculations
+    const model = (chart as any).getModel?.();
+    if (!model) return;
+
+    const gridModel = model.getComponent('grid');
+    const currentGrid = gridModel?.option;
+    const legendModel = model.getComponent('legend');
+    const toolboxModel = model.getComponent('toolbox');
+
+    // 2. Baseline vertical alignment established in enhanceOption (all 3 elements share baseTop)
+    const baseTop = Number(legendModel?.get('top') ?? currentGrid?.outerBounds?.top ?? 0);
+    let outerTop = baseTop;
+    let legendUpdate: Record<string, unknown> | null = null;
+
+    // 3. Resolve horizontal boundaries and multi-line wrapping clearance for legend
+    if (legendModel && legendModel.get('show') !== false) {
+      // biome-ignore lint/suspicious/noExplicitAny: internal zrender bounding box retrieval
+      const legendGroup = (chart as any).getViewOfComponentModel?.(legendModel)?.group;
+      if (legendGroup) {
+        const gridCoord = gridModel?.coordinateSystem;
+        const gridRect = gridCoord?.getRect?.();
+        const yAxisLeft = gridRect?.x ?? 0;
+        const yAxisModel = model.getComponent('yAxis');
+        const componentGap = Number(yAxisModel?.get('nameGap') ?? 0);
+        const minLegendLeft = yAxisLeft > 0 ? yAxisLeft + componentGap : 0;
+
+        const dataZoomModel = model.getComponent('dataZoom');
+        const hasDataZoom = Boolean(dataZoomModel && dataZoomModel.get('show') !== false);
+
+        const isToolboxDisabled = !toolboxModel || toolboxModel.get('show') === false;
+        const toolboxItemSize = Number(toolboxModel?.get('itemSize') ?? 0);
+        const toolboxItemGap = Number(toolboxModel?.get('itemGap') ?? 0);
+        const toolboxRight = Number(toolboxModel?.get('right') ?? 0);
+        const toolboxButtons = hasDataZoom ? 2 : 1;
+        const toolboxWidth = toolboxRight + toolboxButtons * toolboxItemSize + (toolboxButtons - 1) * toolboxItemGap;
+        const toolboxPaddingRight = isToolboxDisabled ? 0 : toolboxWidth + componentGap;
+
+        const targetPadding = [0, toolboxPaddingRight, 0, minLegendLeft];
+
+        const itemHeight = Number(legendModel.get('itemHeight') ?? 0);
+        const legendHeight = legendGroup.getBoundingRect?.()?.height || itemHeight;
+
+        // Expand top clearance for the grid only when legend wraps into multiple lines
+        if (legendHeight > itemHeight) {
+          outerTop = baseTop + (legendHeight - itemHeight);
+        }
+
+        const currentLegend = legendModel.option;
+        const curPad = currentLegend?.padding;
+        const curPadL = Array.isArray(curPad) ? curPad[3] : 0;
+        const curPadR = Array.isArray(curPad) ? curPad[1] : 0;
+
+        if (currentLegend?.left !== 'center' || currentLegend?.width !== undefined || currentLegend?.top !== baseTop || curPadL !== minLegendLeft || curPadR !== toolboxPaddingRight) {
+          legendUpdate = {
+            top: baseTop,
+            left: 'center',
+            width: undefined,
+            padding: targetPadding,
+          };
+        }
+      }
+    }
+
+    // 4. Resolve dynamic right clearance only for line charts with endLabels
+    const seriesModels = model.getSeries?.();
+    const shouldCheckEndLabel =
+      hasEndLabel ??
+      Boolean(
+        seriesModels &&
+          Array.isArray(seriesModels) &&
+          // biome-ignore lint/suspicious/noExplicitAny: internal series model inspection
+          seriesModels.some((s: any) => s?.subType === 'line' && s?.option?.endLabel && s.option.endLabel.show !== false),
+      );
+
+    const currentRight = typeof currentGrid?.right === 'number' ? currentGrid.right : 0;
+    const gridWidth = gridModel?.coordinateSystem?.getRect?.()?.width;
+    const dynamicRight = gridWidth && shouldCheckEndLabel ? computeDynamicEndLabelClearance(seriesModels, model.getComponent('xAxis')?.option, gridWidth) : undefined;
+
+    const itemHeight = Number(legendModel?.get('itemHeight') ?? 12);
+    // biome-ignore lint/suspicious/noExplicitAny: internal zrender bounding box retrieval
+    const tbView = toolboxModel ? (chart as any).getViewOfComponentModel?.(toolboxModel) : null;
+    const toolboxHeight = tbView?.group?.getBoundingRect?.()?.height || itemHeight;
+    const targetToolboxTop = Math.round(baseTop + (itemHeight - toolboxHeight) / 2);
+
+    const needsTopUpdate = currentGrid?.outerBounds?.top !== outerTop || toolboxModel?.option?.top !== targetToolboxTop;
+    const needsRightUpdate = dynamicRight !== undefined && Math.abs(currentRight - dynamicRight) >= 1;
+
+    // 5. Atomically apply layout updates only when coordinates have drifted
+    if (currentGrid && (legendUpdate || needsTopUpdate || needsRightUpdate)) {
+      const targetRight = needsRightUpdate ? dynamicRight : currentRight;
+      chart.setOption({
+        ...(legendUpdate ? { legend: legendUpdate } : {}),
+        ...(needsTopUpdate || needsRightUpdate
+          ? {
+              grid: {
+                top: 0,
+                ...(needsRightUpdate ? { right: targetRight } : {}),
+                outerBounds: {
+                  top: outerTop,
+                  ...(needsRightUpdate ? { right: targetRight } : {}),
+                },
+              },
+              toolbox: { top: targetToolboxTop },
+            }
+          : {}),
+      });
+    }
+  } catch {
+    // Fail-safe silently falls back to standard theme defaults
+  }
+}
+
+/** Resizes the ECharts canvas instance and synchronizes responsive grid offsets and label clearance. */
+export function resizeChart(chart: ECharts | null | undefined): void {
+  if (!chart || chart.isDisposed()) return;
+  chart.resize();
+  adjustChartLayout(chart);
+}
+
+/**
+ * Applies enhanced ECharts options to the canvas instance with automatic two-pass layout adjustment.
+ * Executes immediate layout pass followed by post-paint settling in requestAnimationFrame.
+ */
+export function renderChart(chart: ECharts | null | undefined, option: EChartsOption, onSettled?: () => void): void {
+  if (!chart || chart.isDisposed()) return;
+  chart.setOption(option, true);
+  adjustChartLayout(chart);
+
+  requestAnimationFrame(() => {
+    if (chart.isDisposed()) return;
+    adjustChartLayout(chart);
+    onSettled?.();
+  });
+}
+
+/** Registers standard event listeners on the ECharts canvas instance (e.g. view restore layout recalculation). */
+export function bindChartEvents(chart: ECharts | null | undefined): void {
+  if (!chart || chart.isDisposed()) return;
+  chart.on('restore', () => adjustChartLayout(chart));
 }
 
 /* -------------------------------------------------------------------------- */
@@ -527,16 +815,19 @@ export type BarSeriesOptions<T = unknown> = Omit<BarSeriesOption, 'data'> & {
   formatLabel?: (ctx: BarLabelContext<T>) => string | undefined;
   /** Automatically hides inside labels that overflow the bar geometry. @default true */
   hideIfOverflowBar?: boolean;
+  /** Automatically hides labels that overlap with neighboring series or bars. @default true */
+  hideOverlap?: boolean;
 };
 
 /**
  * Creates a configured ECharts bar series for standalone, clustered, or stacked columns.
  * Supports automated item label formatting while preserving arbitrary point object metadata.
  */
-export function createBarSeries<T = unknown>({ formatLabel, label, hideIfOverflowBar, ...series }: BarSeriesOptions<T>): BarSeriesOption & { data?: readonly T[] } {
+export function createBarSeries<T = unknown>({ formatLabel, label, hideIfOverflowBar, hideOverlap, ...series }: BarSeriesOptions<T>): BarSeriesOption & { data?: readonly T[] } {
   const base = {
     type: 'bar' as const,
     ...(hideIfOverflowBar !== undefined ? { hideIfOverflowBar } : {}),
+    ...(hideOverlap !== undefined ? { hideOverlap } : {}),
     ...series,
   };
 
@@ -575,20 +866,22 @@ export type StackTotalSeriesOptions<T = unknown> = Omit<BarSeriesOption, 'data'>
   data?: readonly T[];
   /** Formats the aggregate total label atop the stack. Return empty string or undefined to hide. */
   formatTotal: (ctx: StackTotalContext<T>) => string | undefined;
+  /** Automatically hides labels that overlap with neighboring series or bars. @default true */
+  hideOverlap?: boolean;
 };
 
 /**
  * Creates an invisible zero-height bar series that anchors an aggregate total label
  * directly atop a stacked bar column without altering bar geometry or mouse interactions.
  */
-export function createStackTotalSeries<T = unknown>({ formatTotal, label, ...series }: StackTotalSeriesOptions<T>): BarSeriesOption {
+export function createStackTotalSeries<T = unknown>({ formatTotal, label, hideOverlap, ...series }: StackTotalSeriesOptions<T>): BarSeriesOption {
   const rawData = Array.isArray(series.data) ? series.data : [];
-  const color = typeof series.color === 'string' ? series.color : themeColors.text.primary;
+  const color = typeof series.color === 'string' ? series.color : 'inherit';
   return {
     type: 'bar',
-    name: series.name ?? `${series.stack ?? 'Stack'} Total`,
     silent: true,
     tooltip: { show: false },
+    ...(hideOverlap !== undefined ? { hideOverlap } : {}),
     ...series,
     color,
     label: {
@@ -641,30 +934,6 @@ export interface TooltipRowContext<TData = Record<string, unknown>> extends Base
   color: string;
   /** Custom point metadata (guaranteed object). */
   data: TData;
-}
-
-/** Formatted specification for a single row in an axis or dual tooltip. */
-export interface TooltipRowSpec {
-  /** Row label. Defaults to seriesName if omitted. */
-  label?: string;
-  /** Explicitly formatted value string or number. */
-  value: string | number;
-  /** Optional secondary detail formatted string, e.g. percent share '(24%)'. */
-  subValue?: string | number;
-  /** Marker dot color. Defaults to series/point color. If false, marker dot is hidden. */
-  dotColor?: string | false;
-  /** Value text color: semantic color variant, Tailwind class, or arbitrary hex/rgb color. */
-  color?: SemanticColor | (string & {});
-}
-
-/** Summary footer specification for chart tooltips. */
-export interface TooltipFooterSpec {
-  /** Summary row label. */
-  label: string;
-  /** Summary formatted value string or number. */
-  value: string | number;
-  /** Value text color: semantic color variant, Tailwind class, or arbitrary hex/rgb color. */
-  color?: SemanticColor | (string & {});
 }
 
 /** Preset configuration for automatic ratio footer. */
@@ -765,26 +1034,6 @@ export interface DualTooltipSpec<TData = Record<string, unknown>> {
   axisPointer?: TooltipComponentOption['axisPointer'];
 }
 
-/** Column definition contract for multi-column tabular tooltips. */
-export interface TableColumnSpec {
-  /** Column header label text. */
-  label: string;
-  /** Column alignment. @default 'left' for first column, 'right' for remaining */
-  align?: 'left' | 'right' | 'center';
-  /** Optional text color token or class for the column header. */
-  color?: SemanticColor | (string & {});
-}
-
-/** Single row definition for multi-column tabular tooltips. */
-export interface TableRowSpec {
-  /** Formatted text values for each table column cell. */
-  cells: (string | number)[];
-  /** Optional text color tokens or classes corresponding to each column cell. */
-  colors?: (SemanticColor | (string & {}) | undefined)[];
-  /** Optional icon or silhouette SVG markup string displayed before the first column label. */
-  icon?: string;
-}
-
 /** Declarative configuration contract for multi-column tabular tooltips. */
 export interface TableTooltipSpec<TData = Record<string, unknown>> {
   /** Tooltip visualization strategy. */
@@ -818,28 +1067,10 @@ export interface SmartChartOption<S extends readonly SeriesOption[] | SeriesOpti
 
 /** Cohesive engine encapsulating all tooltip DOM rendering and formatting methods. */
 const tooltipEngine = {
-  renderDot: (color: string, size = 8) => `<span class="inline-block rounded-full mr-1.5 shrink-0" style="width:${size}px;height:${size}px;background-color:${color}"></span>`,
-
-  renderHeader: (title: string, withBorder = false, size: 'xs' | 'sm' = 'xs', icon?: string) => {
-    const iconHtml = icon ? `<span class="shrink-0 flex items-center leading-none text-accent-primary">${icon}</span>` : '';
-    const borderCls = withBorder || icon ? ' pb-1 border-b border-border-subtle/80' : '';
-    const sizeCls = size === 'sm' || icon ? 'text-sm' : 'text-xs';
-    return `<div class="font-bold text-accent-primary flex items-center gap-2 mb-2 ${sizeCls}${borderCls}">${iconHtml}<span class="truncate">${title}</span></div>`;
-  },
-
-  renderRow(row: TooltipRowSpec, fallbackName = '', fallbackColor = '#60a5fa'): string {
-    const dot = row.dotColor !== false ? this.renderDot(row.dotColor ?? fallbackColor) : '';
-    const { className, styleAttr } = resolveColor(row.color);
-    const label = row.label ?? fallbackName;
-    const sub = row.subValue !== undefined && row.subValue !== '' ? ` <span class="text-content-muted font-normal ml-1">(${row.subValue})</span>` : '';
-    return `<div class="flex items-center justify-between text-xs gap-4"><span class="text-content-secondary flex items-center min-w-0">${dot}<span class="truncate">${label}</span></span><span class="font-semibold shrink-0 ${className}"${styleAttr}>${row.value}${sub}</span></div>`;
-  },
-
-  renderFooter(footer?: TooltipFooterSpec): string {
-    if (!footer) return '';
-    const { className, styleAttr } = resolveColor(footer.color, 'primary');
-    return `<div class="mt-2 pt-1.5 border-t border-border-subtle/80 flex justify-between items-center text-xs font-bold"><span class="text-content-secondary">${footer.label}:</span><span class="${className}"${styleAttr}>${footer.value}</span></div>`;
-  },
+  renderDot: renderTooltipDot,
+  renderHeader: (title: string, withBorder = false, size: 'xs' | 'sm' = 'xs', icon?: string) => renderTooltipHeader({ title, withBorder, size, icon }),
+  renderRow: renderTooltipRow,
+  renderFooter: renderTooltipFooter,
 
   resolveDualFooter<TData>(footer: DualTooltipFooter<TData> | undefined, ctx: DualTooltipFooterContext<TData>): TooltipFooterSpec | undefined {
     if (!footer) return undefined;
@@ -982,31 +1213,13 @@ const tooltipEngine = {
       const rowSpecs = config.rows(tick.ctx);
       if (!rowSpecs.length) return '';
 
-      const renderCells = (cells: (string | number)[], tag: 'th' | 'td', colors?: (SemanticColor | (string & {}) | undefined)[], isBold = false, icon?: string) =>
-        config.columns
-          .map((col, i) => {
-            const { className, styleAttr } = resolveColor(colors?.[i] ?? col.color, tag === 'th' ? 'muted' : undefined);
-            const align = this.getColumnAlign(col.align, i);
-            const pad = i === 0 ? 'pr-3' : 'px-2';
-            const cls = `${pad} ${align} ${tag === 'th' ? 'pb-1 font-medium' : isBold ? 'pt-2 tabular-nums font-bold' : 'py-0.5 tabular-nums'} ${className}`;
-            const cellValue = cells[i] ?? '';
-            const content =
-              i === 0 && icon && tag === 'td'
-                ? `<span class="inline-flex items-center gap-1.5"><span class="shrink-0 flex items-center leading-none text-accent-primary">${icon}</span><span class="truncate">${cellValue}</span></span>`
-                : cellValue;
-            return `<${tag} class="${cls}"${styleAttr}>${content}</${tag}>`;
-          })
-          .join('');
+      const tableHtml = renderTooltipTableStructure({
+        columns: config.columns,
+        rows: rowSpecs,
+        footer: config.footer?.(tick.ctx),
+      });
 
-      const ths = renderCells(
-        config.columns.map((c) => c.label),
-        'th',
-      );
-      const body = rowSpecs.map((r) => `<tr class="border-b border-border-subtle/40">${renderCells(r.cells, 'td', r.colors, false, r.icon)}</tr>`).join('');
-      const foot = config.footer?.(tick.ctx);
-      const tfoot = foot ? `<tfoot><tr class="border-t border-border-muted font-bold">${renderCells(foot.cells, 'td', foot.colors, true, foot.icon)}</tr></tfoot>` : '';
-
-      return `<div class="text-xs min-w-60 p-0.5">${this.renderHeader(tick.title, true, 'sm', tick.icon)}<table class="w-full border-collapse text-[11px]"><thead><tr class="border-b border-border-subtle/80">${ths}</tr></thead><tbody>${body}</tbody>${tfoot}</table></div>`;
+      return `<div class="text-xs min-w-60 p-0.5">${this.renderHeader(tick.title, true, 'sm', tick.icon)}${tableHtml}</div>`;
     };
   },
 

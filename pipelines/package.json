@@ -3,18 +3,16 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "build": "bun run --silent check:knip && bun run --silent check && bun run --silent type-check && bun src/run-all.ts",
-    "check": "biome check --write src",
-    "check:knip": "knip --directory .. --workspace @graphs/pipelines",
+    "build": "bun run --silent knip && bun run --silent check && bun run --silent type-check && bun src/run-all.ts",
+    "check": "biome check --write",
+    "knip": "knip --directory .. --workspace @graphs/pipelines",
     "type-check": "tsc --noEmit",
     "test": "bun test",
-    "test:watch": "bun test --watch",
-    "ai-tokens": "bun src/ai-tokens/index.ts",
-    "space-launches": "bun src/space-launches/index.ts",
-    "world": "bun src/world/index.ts",
-    "ukraine": "bun src/ukraine/index.ts",
-    "war-losses": "bun src/war-rf-ua-losses/index.ts",
-    "war-attacks": "bun src/war-rf-ua-attacks/index.ts"
+    "run:ai-tokens": "bun src/ai-tokens/index.ts",
+    "run:space-launches": "bun src/space-launches/index.ts",
+    "run:world": "bun src/world/index.ts",
+    "run:ukraine": "bun src/ukraine/index.ts",
+    "run:war-rf-ua": "bun src/war-rf-ua/index.ts"
   },
   "dependencies": {
     "@graphs/types": "workspace:*",
@@ -22,6 +20,7 @@
     "consola": "^3.4.2",
     "fast-xml-parser": "^5.4.1",
     "i18n-iso-countries": "^7.14.0",
+    "polygon-clipping": "^0.15.7",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {

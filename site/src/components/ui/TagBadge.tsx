@@ -1,7 +1,7 @@
 import type React from 'react';
 import type { ProjectTag } from '@/types';
 import { cn } from '@/utils/cn';
-import { useTranslation } from '@/utils/locales';
+import { useTranslation } from '@/utils/provider';
 
 /** Props for the TagBadge component. */
 export interface TagBadgeProps {

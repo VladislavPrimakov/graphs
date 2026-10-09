@@ -1,50 +1,50 @@
+import type { WorldMetricSectionData } from '@graphs/types/world/metric';
 import type { LineSeriesOption } from 'echarts';
-import { type BuildSectionsContext, type ChartSection, chartSection } from '@/types';
+import { type BuildSectionContext, chartSection, type DashboardSection, type ProjectSource } from '@/types';
 import { chartOption } from '@/utils/chart-builder';
 import type { dict } from './locales/dict-en';
 
 interface WorldMetricConfig {
   id: string;
   title: string;
-  chartData: { series: Record<string, (number | null)[]> };
   unit: string;
+  sources?: ProjectSource[];
 }
 
 /** Shared builder for world economic and energy line chart sections. */
-export const createWorldMetricSection = ({ data, t, fmt }: BuildSectionsContext<'world', typeof dict>, config: WorldMetricConfig): ChartSection => {
-  const { years } = data;
-  const yearsStr = years.map(String);
-  const minYear = Math.min(...years);
-  const maxYear = Math.max(...years);
-
+export const createWorldMetricSection = ({ t, fmt }: BuildSectionContext<typeof dict>, config: WorldMetricConfig): DashboardSection<WorldMetricSectionData> => {
   const formatValue = (val: number) => fmt.number(val, val >= 100 ? { maximumFractionDigits: 0 } : undefined);
-  const totalEntities = Object.keys(config.chartData.series).length;
 
   return chartSection({
     id: config.id,
     title: config.title,
-    controls: [
-      {
-        id: 'topN',
-        type: 'slider',
-        min: Math.min(3, totalEntities),
-        max: Math.min(15, totalEntities),
-        defaultValue: Math.min(7, totalEntities),
-        label: t.common.top,
-      },
-      {
-        id: 'years',
-        type: 'range-slider',
-        min: minYear,
-        max: maxYear,
-        label: t.common.period,
-      },
-    ],
-    buildView: (values) => {
+    sources: config.sources,
+    controls: (data) =>
+      [
+        {
+          id: 'topN',
+          type: 'slider',
+          min: 3,
+          max: Math.min(15, Object.keys(data.series).length || 15),
+          defaultValue: 7,
+          label: t.common.top,
+        },
+        {
+          id: 'years',
+          type: 'range-slider',
+          min: data.years[0],
+          max: data.years[data.years.length - 1],
+          defaultValue: [Math.max(data.years[0], 2000), data.years[data.years.length - 1]],
+          label: t.common.period,
+        },
+      ] as const,
+    buildView: (data, values) => {
+      const { years, series: chartSeries } = data;
+      const yearsStr = years.map(String);
       const topN = values.topN;
       const [startYear, endYear] = values.years;
-      const startIdx = years.indexOf(startYear);
-      const endIdx = years.indexOf(endYear) + 1;
+      const startIdx = Math.max(0, years.indexOf(startYear));
+      const endIdx = years.indexOf(endYear) !== -1 ? years.indexOf(endYear) + 1 : years.length;
       const targetIdx = endIdx - 1;
 
       const visibleYears = yearsStr.slice(startIdx, endIdx);
@@ -57,14 +57,14 @@ export const createWorldMetricSection = ({ data, t, fmt }: BuildSectionsContext<
         return 0;
       };
 
-      const activeCodes = Object.keys(config.chartData.series)
-        .sort((a, b) => getRankingValue(config.chartData.series[b]) - getRankingValue(config.chartData.series[a]))
+      const activeCodes = Object.keys(chartSeries)
+        .sort((a, b) => getRankingValue(chartSeries[b]) - getRankingValue(chartSeries[a]))
         .slice(0, topN);
 
       const series = activeCodes
-        .filter((entityCode) => config.chartData.series[entityCode] != null)
+        .filter((entityCode) => chartSeries[entityCode] != null)
         .map((entityCode): LineSeriesOption => {
-          const values = config.chartData.series[entityCode];
+          const values = chartSeries[entityCode];
           const regionCode = entityCode;
           const name = fmt.region(regionCode);
           const color = fmt.regionColor(regionCode);

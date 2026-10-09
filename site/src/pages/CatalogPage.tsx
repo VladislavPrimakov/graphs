@@ -1,18 +1,18 @@
-import { useState } from 'react';
+import metadata from '@data/metadata.json';
+import { startTransition, useState } from 'react';
 import { Link } from 'react-router';
 import { ArrowRightIcon, ClockIcon, FilterIcon } from '@/components/icons';
 import { FilterPills } from '@/components/ui/FilterPills';
 import { TagBadge } from '@/components/ui/TagBadge';
-import metadata from '@/data/metadata.json';
 import { ALL_UNIQUE_TAGS } from '@/projects/registry';
 import type { ProjectTag } from '@/types';
 import { cn } from '@/utils/cn';
-import { useCatalog, useFormat, useLanguage, useTranslation } from '@/utils/locales';
+import { useCatalog, useFormat, usePath, useTranslation } from '@/utils/provider';
 
 /** Overview catalog homepage presenting hero banner and tag-filterable project cards. */
 export default function CatalogPage() {
   const projects = useCatalog();
-  const { getPath } = useLanguage();
+  const { getPath } = usePath();
   const [selectedTags, setSelectedTags] = useState<ProjectTag[]>([]);
   const { t, getTagLabel } = useTranslation();
   const fmt = useFormat();
@@ -20,7 +20,9 @@ export default function CatalogPage() {
   const isAllActive = selectedTags.length === 0;
 
   const handleToggleTag = (tag: ProjectTag) => {
-    setSelectedTags((prev) => (prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]));
+    startTransition(() => {
+      setSelectedTags((prev) => (prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]));
+    });
   };
 
   const filteredProjects = projects.filter((proj) => {
@@ -114,19 +116,30 @@ export default function CatalogPage() {
                       <p className="mt-2.5 text-sm text-content-muted leading-relaxed">{proj.description}</p>
                     </div>
 
-                    {/* Footer: Sources & Link */}
+                    {/* Footer: Sections & Dashboard Link */}
                     <div className="mt-6 pt-4 border-t border-border-subtle/80 space-y-3 text-xs">
-                      <div className="flex flex-wrap items-center gap-1.5 text-content-muted">
-                        <span className="font-semibold text-content-dim">{t.common.sources}:</span>
-                        {proj.sources.map((s, idx) => (
-                          <span key={s.url || s.name}>
-                            <a href={s.url} target="_blank" rel="noopener noreferrer" className="text-content-muted hover:text-accent-hover underline underline-offset-2 transition-colors">
-                              {s.name}
-                            </a>
-                            {idx < proj.sources.length - 1 && <span className="text-content-dim ml-1">•</span>}
+                      {proj.sections.length > 0 && (
+                        <div className="space-y-1.5">
+                          <span className="text-[11px] font-semibold uppercase tracking-wider text-content-dim block">
+                            {proj.sections.length} {t.common.sections}:
                           </span>
-                        ))}
-                      </div>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {proj.sections.map((sectionId) => {
+                              const sectionTitle = proj.sectionTitles?.[sectionId] ?? sectionId;
+                              const sectionPath = getPath(`/${proj.id}/${sectionId}`);
+                              return (
+                                <Link
+                                  key={sectionId}
+                                  to={sectionPath}
+                                  className="btn-subtle px-2 py-0.5 text-xs text-content-secondary hover:text-accent-primary hover:border-accent-primary/40 transition-colors"
+                                >
+                                  {sectionTitle}
+                                </Link>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
 
                       <div className="flex justify-end pt-1">
                         <Link to={projectPath} className="btn-accent">

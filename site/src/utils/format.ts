@@ -1,5 +1,5 @@
 import stringHash from 'string-hash';
-import type { Language } from './locales';
+import type { Language } from './provider';
 
 /* -------------------------------------------------------------------------- */
 /* 1. Measurement Units & CLDR Schemas                                        */

@@ -6,6 +6,7 @@ export const PROJECT_TAGS = [
   'ua',
   'rf',
   'war',
+  'frontline',
   'air-defense',
   'missiles',
   'uav',

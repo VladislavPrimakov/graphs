@@ -34,220 +34,11 @@ echarts.use([
 const init = echarts.init;
 
 import type React from 'react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useEffectEvent, useRef, useState } from 'react';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
-import { themeFonts } from '@/styles/tokens';
-import { enhanceOption } from '@/utils/chart-builder';
-import { useTranslation } from '@/utils/locales';
-
-let measureCtx: CanvasRenderingContext2D | null = null;
-const textWidthCache = new Map<string, number>();
-
-function measureTextWidth(text: string, font = `bold 12px ${themeFonts.sansFamily}`): number {
-  const cached = textWidthCache.get(text);
-  if (cached !== undefined) return cached;
-
-  let width = text.length * 8;
-  if (typeof document !== 'undefined') {
-    if (!measureCtx) {
-      const canvas = document.createElement('canvas');
-      measureCtx = canvas.getContext('2d');
-    }
-    if (measureCtx) {
-      if (measureCtx.font !== font) {
-        measureCtx.font = font;
-      }
-      width = measureCtx.measureText(text).width;
-    }
-  }
-
-  if (textWidthCache.size > 500) textWidthCache.clear();
-  textWidthCache.set(text, width);
-  return width;
-}
-
-/**
- * Computes dynamic right clearance in pixels required to render line series end labels without canvas clipping.
- * Dynamically factors in the horizontal distance between the series last valid data point and the end of the X-axis.
- */
-function computeEndLabelClearance(
-  // biome-ignore lint/suspicious/noExplicitAny: ECharts internal model inspection
-  seriesModels: any[],
-  // biome-ignore lint/suspicious/noExplicitAny: ECharts internal model inspection
-  xAxisOption: any,
-  gridWidth: number,
-): number {
-  if (!seriesModels?.length) return 4;
-
-  // Fast path: find series that actually have endLabel enabled (skips 95% of charts immediately)
-  const endLabelSeries = seriesModels.filter((s) => s?.subType === 'line' && s?.option?.endLabel && s.option.endLabel.show !== false);
-  if (!endLabelSeries.length) return 4;
-
-  const xAxisData = xAxisOption && 'data' in xAxisOption && Array.isArray(xAxisOption.data) ? xAxisOption.data : undefined;
-  let totalPoints = xAxisData?.length ?? 0;
-  if (!totalPoints) {
-    for (const s of endLabelSeries) {
-      const len = Array.isArray(s.option?.data) ? s.option.data.length : 0;
-      if (len > totalPoints) totalPoints = len;
-    }
-  }
-
-  const isBoundaryGap = Boolean(xAxisOption?.boundaryGap === true);
-  const tickStep = gridWidth > 0 && totalPoints > (isBoundaryGap ? 0 : 1) ? gridWidth / (isBoundaryGap ? totalPoints : totalPoints - 1) : 0;
-
-  let maxOverhang = 0;
-
-  for (const s of endLabelSeries) {
-    const item = s.option;
-    const data = Array.isArray(item.data) ? item.data : [];
-    let lastVal: unknown;
-    let lastIndex = -1;
-
-    for (let i = data.length - 1; i >= 0; i--) {
-      const rawPoint = data[i];
-      const val = typeof rawPoint === 'object' && rawPoint !== null && 'value' in rawPoint ? rawPoint.value : rawPoint;
-      if (val !== null && val !== undefined && (typeof val !== 'number' || !Number.isNaN(val))) {
-        lastVal = val;
-        lastIndex = i;
-        break;
-      }
-    }
-    if (lastVal === undefined || lastIndex === -1) continue;
-
-    const seriesName = typeof item.name === 'string' ? item.name : '';
-    let text = '';
-    if (typeof item.endLabel.formatter === 'function') {
-      text = String(item.endLabel.formatter({ value: lastVal, seriesName, dataIndex: lastIndex }) ?? '');
-    } else if (typeof item.endLabel.formatter === 'string') {
-      text = item.endLabel.formatter.replace('{a}', seriesName).replace('{c}', String(lastVal));
-    } else {
-      text = seriesName ? `${seriesName}: ${lastVal}` : String(lastVal);
-    }
-
-    if (text) {
-      const w = measureTextWidth(text);
-      const distance = typeof item.endLabel.distance === 'number' ? item.endLabel.distance : 4;
-      const totalLabelSpan = w + distance;
-
-      // Compute distance from last valid data point to right edge of the grid
-      const distToRight = tickStep > 0 ? (totalPoints - 1 - lastIndex + (isBoundaryGap ? 0.5 : 0)) * tickStep : 0;
-
-      const overhang = totalLabelSpan - distToRight;
-      if (overhang > maxOverhang) {
-        maxOverhang = overhang;
-      }
-    }
-  }
-
-  return maxOverhang > 0 ? Math.ceil(maxOverhang) + 4 : 4;
-}
-
-/** Dynamically adjusts ECharts grid offsets (top for multi-line legends, right for endLabels) based on actual canvas dimensions. */
-function adjustChartLayout(chart: ECharts, hasEndLabel = false): void {
-  try {
-    // biome-ignore lint/suspicious/noExplicitAny: ECharts internal model inspection for dynamic layout calculations
-    const model = (chart as any).getModel?.();
-    if (!model) return;
-
-    const titleModel = model.getComponent('title');
-    const hasTitle = Boolean(titleModel && titleModel.get('show') !== false && titleModel.get('text'));
-    // biome-ignore lint/suspicious/noExplicitAny: internal zrender bounding box retrieval
-    const titleView = hasTitle ? (chart as any).getViewOfComponentModel?.(titleModel) : null;
-    const titleHeight = hasTitle ? Math.round(titleView?.group?.getBoundingRect?.()?.height || 28) : 0;
-    const headerClearance = Math.max(titleHeight, 28);
-
-    const legendModel = model.getComponent('legend');
-    const isLegendDisabled = !legendModel || legendModel.get('show') === false;
-    const legendItemGap = legendModel ? (legendModel.get('itemGap') ?? 0) : 0;
-    const yAxisModel = model.getComponent('yAxis');
-    const layoutGap = legendItemGap > 0 ? legendItemGap : (yAxisModel?.get('nameGap') ?? 6);
-    const legendTop = headerClearance + layoutGap;
-
-    const gridCoord = model.getComponent('grid')?.coordinateSystem;
-    const gridRect = gridCoord?.getRect?.();
-    const yAxisLeft = gridRect?.x ?? 0;
-    const gridWidth = gridRect?.width;
-
-    let outerTop = legendTop;
-    let legendUpdate: Record<string, unknown> | null = null;
-
-    if (!isLegendDisabled) {
-      // biome-ignore lint/suspicious/noExplicitAny: internal zrender bounding box retrieval
-      const legendGroup = (chart as any).getViewOfComponentModel?.(legendModel)?.group;
-      if (legendGroup) {
-        const minLegendLeft = yAxisLeft > 0 ? yAxisLeft + layoutGap : 0;
-
-        const dataZoomModel = model.getComponent('dataZoom');
-        const hasDataZoom = Boolean(dataZoomModel && dataZoomModel.get('show') !== false);
-
-        const toolboxModel = model.getComponent('toolbox');
-        const isToolboxDisabled = !toolboxModel || toolboxModel.get('show') === false;
-        const toolboxItemSize = toolboxModel ? (toolboxModel.get('itemSize') ?? 12) : 12;
-        const toolboxItemGap = toolboxModel ? (toolboxModel.get('itemGap') ?? 2) : 2;
-        const toolboxPaddingRight = isToolboxDisabled ? 0 : (toolboxItemSize + toolboxItemGap) * (hasDataZoom ? 2 : 1);
-
-        const chartWidth = chart.getWidth();
-        const legendWidth = legendGroup.getBoundingRect?.()?.width || 0;
-        const centerLeft = (chartWidth - legendWidth) / 2;
-
-        const legendItemHeight = legendModel.get('itemHeight') ?? legendModel.get('textStyle.fontSize') ?? 12;
-        const legendHeight = legendGroup.getBoundingRect?.()?.height || legendItemHeight;
-        const rightClearance = chartWidth - toolboxPaddingRight;
-        const shouldConstrainLeft = minLegendLeft > 0 && (centerLeft < minLegendLeft || centerLeft + legendWidth > rightClearance);
-
-        const targetLegendLeft = shouldConstrainLeft ? minLegendLeft : 'center';
-        const targetLegendWidth = shouldConstrainLeft ? Math.max(0, chartWidth - minLegendLeft - toolboxPaddingRight) : undefined;
-        const targetPadding = shouldConstrainLeft ? 0 : [0, toolboxPaddingRight, 0, 0];
-
-        outerTop = legendTop + Math.max(0, legendHeight - legendItemHeight);
-
-        const currentLegend = legendModel.option;
-        if (currentLegend?.left !== targetLegendLeft || currentLegend?.width !== targetLegendWidth || currentLegend?.top !== legendTop) {
-          legendUpdate = {
-            top: legendTop,
-            left: targetLegendLeft,
-            width: targetLegendWidth,
-            padding: targetPadding,
-          };
-        }
-      }
-    }
-
-    const gridModel = model.getComponent('grid');
-    const currentGrid = gridModel?.option;
-    const toolboxModel = model.getComponent('toolbox');
-    const currentToolbox = toolboxModel?.option;
-    const currentOuterTop = currentGrid?.outerBounds?.top;
-
-    // Dynamically calculate exact right clearance only when chart has active endLabels
-    const dynamicRight = gridWidth && hasEndLabel ? computeEndLabelClearance(model.getSeries(), model.getComponent('xAxis')?.option, gridWidth) : undefined;
-    const currentRight = typeof currentGrid?.right === 'number' ? currentGrid.right : 4;
-    const needsRightUpdate = dynamicRight !== undefined && Math.abs(currentRight - dynamicRight) > 2;
-
-    const needsLayoutUpdate = currentGrid && (currentOuterTop !== outerTop || currentToolbox?.top !== outerTop || needsRightUpdate);
-    if (legendUpdate || needsLayoutUpdate) {
-      const targetRight = needsRightUpdate ? dynamicRight : currentRight;
-      chart.setOption({
-        ...(legendUpdate ? { legend: legendUpdate } : {}),
-        ...(needsLayoutUpdate
-          ? {
-              grid: {
-                top: 0,
-                ...(needsRightUpdate ? { right: targetRight } : {}),
-                outerBounds: {
-                  top: outerTop,
-                  ...(needsRightUpdate ? { right: targetRight } : {}),
-                },
-              },
-              toolbox: { top: outerTop },
-            }
-          : {}),
-      });
-    }
-  } catch {
-    // Fail-safe silently falls back to standard theme defaults
-  }
-}
+import { bindChartEvents, enhanceOption, renderChart, resizeChart } from '@/utils/chart-builder';
+import { useTheme, useTranslation } from '@/utils/provider';
+import { useInView } from '@/utils/useInView';
 
 /** Props for the ECharts canvas SectionChart visualizer component. */
 export interface SectionChartProps {
@@ -265,39 +56,76 @@ export interface SectionChartProps {
   onReady?: () => void;
 }
 
-/** Interactive ECharts canvas visualizer component handling canvas initialization, reactive option updates, and responsive resizing. */
+/**
+ * Interactive ECharts canvas visualizer component handling lazy viewport initialization,
+ * theme switching, reactive option updates, responsive resizing, and viewport-aware resize observer decoupling.
+ */
 export const SectionChart: React.FC<SectionChartProps> = ({ option: rawOption, exportName, id, className = 'w-full h-[60dvh]', offsetTop = 0, onReady }) => {
   const { t } = useTranslation();
-  const option = enhanceOption(rawOption, t.common, exportName);
+  const { resolvedTheme, tokens } = useTheme();
+  const option = enhanceOption(rawOption, t.common, exportName, tokens);
 
-  const seriesList = Array.isArray(option.series) ? option.series : option.series ? [option.series] : [];
-  // biome-ignore lint/suspicious/noExplicitAny: polymorphic ECharts series inspection
-  const hasEndLabel = seriesList.some((s) => s && typeof s === 'object' && (s as any).type === 'line' && (s as any).endLabel?.show !== false && (s as any).endLabel != null);
-
+  const { ref: containerRef, hasEnteredView, isIntersecting } = useInView<HTMLDivElement>();
   const chartRef = useRef<HTMLDivElement>(null);
   const chartInstance = useRef<ECharts | null>(null);
-  const hasEndLabelRef = useRef(hasEndLabel);
-  hasEndLabelRef.current = hasEndLabel;
   const optionRef = useRef(option);
   optionRef.current = option;
+  const resolvedThemeRef = useRef(resolvedTheme);
+  resolvedThemeRef.current = resolvedTheme;
   const dprRef = useRef(typeof window !== 'undefined' ? window.devicePixelRatio : 1);
+  const isIntersectingRef = useRef(isIntersecting);
+  isIntersectingRef.current = isIntersecting;
+  const needsResizeRef = useRef(false);
+  const lastWidthRef = useRef(0);
+  const lastHeightRef = useRef(0);
   const [isRendered, setIsRendered] = useState(false);
   const hasNotifiedReady = useRef(false);
 
-  // Initialize ECharts instance on mount and coordinate responsive layout
+  const rawOptionRef = useRef(rawOption);
+  rawOptionRef.current = rawOption;
+  const rawOptionJsonRef = useRef<string>('');
+
+  const notifyReady = useEffectEvent(() => {
+    if (onReady && !hasNotifiedReady.current) {
+      hasNotifiedReady.current = true;
+      onReady();
+    }
+  });
+
+  // Initialize ECharts instance on demand once the section enters the viewport proximity
   useEffect(() => {
-    if (!chartRef.current) return;
+    if (!hasEnteredView || !chartRef.current) return;
 
     const initialDpr = typeof window !== 'undefined' ? window.devicePixelRatio : 1;
     dprRef.current = initialDpr;
-    const chart = init(chartRef.current, 'dark', {
+    const chart = init(chartRef.current, resolvedTheme === 'dark' ? 'dark' : undefined, {
       renderer: 'canvas',
       devicePixelRatio: initialDpr,
     });
+    bindChartEvents(chart);
     chartInstance.current = chart;
+
+    const rect = chartRef.current.getBoundingClientRect();
+    lastWidthRef.current = rect.width;
+    lastHeightRef.current = rect.height;
+    rawOptionJsonRef.current = JSON.stringify(rawOptionRef.current);
 
     let resizeRaf: number | null = null;
     const handleLayout = () => {
+      if (!chartRef.current) return;
+      const r = chartRef.current.getBoundingClientRect();
+      const hasSizeChanged = Math.abs(r.width - lastWidthRef.current) >= 1 || Math.abs(r.height - lastHeightRef.current) >= 1;
+      if (!hasSizeChanged) return;
+
+      // Pause layout calculations when chart is scrolled outside viewport
+      if (!isIntersectingRef.current) {
+        needsResizeRef.current = true;
+        return;
+      }
+
+      lastWidthRef.current = r.width;
+      lastHeightRef.current = r.height;
+
       if (resizeRaf !== null) cancelAnimationFrame(resizeRaf);
       resizeRaf = requestAnimationFrame(() => {
         const currentChart = chartInstance.current;
@@ -307,23 +135,19 @@ export const SectionChart: React.FC<SectionChartProps> = ({ option: rawOption, e
         if (newDpr !== dprRef.current) {
           dprRef.current = newDpr;
           currentChart.dispose();
-          const nextChart = init(chartRef.current, 'dark', {
+          const nextChart = init(chartRef.current, resolvedThemeRef.current === 'dark' ? 'dark' : undefined, {
             renderer: 'canvas',
             devicePixelRatio: newDpr,
           });
+          bindChartEvents(nextChart);
           chartInstance.current = nextChart;
-          nextChart.on('restore', () => adjustChartLayout(nextChart, hasEndLabelRef.current));
-          nextChart.setOption(optionRef.current, true);
-          adjustChartLayout(nextChart, hasEndLabelRef.current);
+          renderChart(nextChart, optionRef.current);
           return;
         }
 
-        currentChart.resize();
-        adjustChartLayout(currentChart, hasEndLabelRef.current);
+        resizeChart(currentChart);
       });
     };
-
-    chart.on('restore', () => adjustChartLayout(chart, hasEndLabelRef.current));
 
     const resizeObserver = new ResizeObserver(handleLayout);
     resizeObserver.observe(chartRef.current);
@@ -341,32 +165,64 @@ export const SectionChart: React.FC<SectionChartProps> = ({ option: rawOption, e
     };
     watchDpr();
 
+    // Render initial dataset
+    renderChart(chart, optionRef.current, () => {
+      setIsRendered(true);
+      notifyReady();
+    });
+
     return () => {
       if (resizeRaf !== null) cancelAnimationFrame(resizeRaf);
       if (cleanupMedia) cleanupMedia();
       resizeObserver.disconnect();
       chartInstance.current?.dispose();
       chartInstance.current = null;
+      setIsRendered(false);
     };
-  }, []);
+  }, [hasEnteredView, resolvedTheme]);
 
-  // Reactively apply option updates to existing instance with full state synchronization
+  // Reactively apply option updates to existing instance strictly when rawOption has mutated
   useEffect(() => {
-    if (!chartInstance.current) return;
-    chartInstance.current.setOption(option, true);
-    adjustChartLayout(chartInstance.current, hasEndLabel);
+    if (!chartInstance.current || !hasEnteredView) return;
+    const optionJson = JSON.stringify(rawOption);
+    if (rawOptionJsonRef.current === optionJson) return;
+    rawOptionJsonRef.current = optionJson;
 
-    requestAnimationFrame(() => {
+    renderChart(chartInstance.current, option, () => {
       setIsRendered(true);
-      if (onReady && !hasNotifiedReady.current) {
-        hasNotifiedReady.current = true;
-        onReady();
-      }
+      notifyReady();
     });
-  }, [option, hasEndLabel, onReady]);
+  }, [rawOption, option, hasEnteredView]);
+
+  // Catch up with deferred resize operations once scrolled back into the active viewport
+  useEffect(() => {
+    if (isIntersecting && needsResizeRef.current && chartInstance.current && chartRef.current) {
+      needsResizeRef.current = false;
+      const r = chartRef.current.getBoundingClientRect();
+      const hasSizeChanged = Math.abs(r.width - lastWidthRef.current) >= 1 || Math.abs(r.height - lastHeightRef.current) >= 1;
+      if (hasSizeChanged) {
+        lastWidthRef.current = r.width;
+        lastHeightRef.current = r.height;
+        const newDpr = typeof window !== 'undefined' ? window.devicePixelRatio : 1;
+        if (newDpr !== dprRef.current) {
+          dprRef.current = newDpr;
+          chartInstance.current.dispose();
+          const nextChart = init(chartRef.current, resolvedTheme === 'dark' ? 'dark' : undefined, {
+            renderer: 'canvas',
+            devicePixelRatio: newDpr,
+          });
+          bindChartEvents(nextChart);
+          chartInstance.current = nextChart;
+          renderChart(nextChart, optionRef.current);
+        } else {
+          resizeChart(chartInstance.current);
+        }
+      }
+    }
+  }, [isIntersecting, resolvedTheme]);
 
   return (
-    <div className="relative w-full">
+    <div ref={containerRef} className="relative w-full">
       <div ref={chartRef} id={id} className={className} style={offsetTop > 0 ? { marginTop: offsetTop } : undefined} />
       <LoadingSpinner isVisible={!isRendered} fullscreen={false} size="sm" />
     </div>

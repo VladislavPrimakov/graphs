@@ -1,9 +1,9 @@
 import { Link } from 'react-router';
-import { useLanguage, useTranslation } from '@/utils/locales';
+import { usePath, useTranslation } from '@/utils/provider';
 
 /** Bare 404 error page presenting a message and a single localized link to the catalog root. */
 export default function NotFoundPage() {
-  const { getPath } = useLanguage();
+  const { getPath } = usePath();
   const { t } = useTranslation();
   const homePath = getPath('/');
 
