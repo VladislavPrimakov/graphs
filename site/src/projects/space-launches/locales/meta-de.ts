@@ -5,8 +5,8 @@ export const meta: typeof enMeta = {
   description: 'Sieben Jahrzehnte Raumfahrt: Nutzlastmasse im Orbit nach Ländern, Startkosten ($/kg) und Zuverlässigkeitstrends.',
   sections: {
     'payload-capacity': 'Nutzlastkapazität',
-    'launch-costs': 'Kosten pro kg',
     'avg-payload': 'Durchschnittliche Nutzlast',
+    'launch-costs': 'Kosten pro kg',
     'failure-rates': 'Fehlerraten',
   },
 };

@@ -4,5 +4,5 @@ import type { StaticProjectMeta } from '@/types';
 export const meta = {
   id: 'space-launches',
   tags: ['global', 'space', 'launches'],
-  sections: ['payload-capacity', 'launch-costs', 'avg-payload', 'failure-rates'],
+  sections: ['payload-capacity', 'avg-payload', 'launch-costs', 'failure-rates'],
 } as const satisfies StaticProjectMeta<'space-launches'>;

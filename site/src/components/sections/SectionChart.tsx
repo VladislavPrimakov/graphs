@@ -227,7 +227,7 @@ export const SectionChart: React.FC<SectionChartProps> = ({ option: rawOption, e
   }, [rawOption, resolvedTheme]);
 
   return (
-    <div className="relative w-full min-w-0 overflow-hidden">
+    <div className="relative w-full min-w-0">
       <div ref={chartRef} id={id} className={cn('w-full min-w-0 max-w-full', className)} />
       <LoadingSpinner isVisible={!isRendered} fullscreen={false} size="sm" />
     </div>

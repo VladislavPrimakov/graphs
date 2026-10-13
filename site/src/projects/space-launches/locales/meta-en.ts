@@ -5,8 +5,8 @@ export const meta = {
   description: 'Seven decades of orbital spaceflight: payload mass delivered to orbit by nation, launch economics ($/kg), and reliability trends.',
   sections: {
     'payload-capacity': 'Payload Capacity',
-    'launch-costs': 'Cost per Kg',
     'avg-payload': 'Avg Payload Mass',
+    'launch-costs': 'Cost per Kg',
     'failure-rates': 'Failure Rates',
   },
 } satisfies LocaleProjectMeta;

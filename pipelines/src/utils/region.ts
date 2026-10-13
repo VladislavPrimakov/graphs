@@ -21,10 +21,14 @@ export function resolveRegionCode(nameOrCode?: string): string {
   if (upper === 'EU' || upper === 'EUU' || upper === 'EUROPE' || upper === 'EUROPEAN UNION') {
     return 'EU';
   }
-  if (upper === 'REPUBLIC OF MOLDOVA' || upper === 'MOLDOVA') return 'MD';
-  if (upper === 'UNITED KINGDOM OF GREAT BRITAIN AND NORTHERN IRELAND') return 'GB';
-  if (upper === 'VIET NAM') return 'VN';
-  if (upper === 'S19') return 'TW';
+  if (upper.includes('MOLDOVA')) return 'MD';
+  if (upper.includes('UNITED KINGDOM') || upper.includes('GREAT BRITAIN')) return 'GB';
+  if (upper.includes('VIET NAM') || upper.includes('VIETNAM')) return 'VN';
+  if (upper.includes('S19') || upper.includes('TAIWAN')) return 'TW';
+  if (upper.includes('HONG KONG')) return 'HK';
+  if (upper.includes('SINGAPORE')) return 'SG';
+  if (upper.includes('ISLE OF MAN')) return 'IM';
+  if (upper.includes('GIBRALTAR')) return 'GI';
 
   // 3. ISO 3166-1 Alpha-3 conversion (e.g. 'USA' -> 'US', 'CHN' -> 'CN', 'DEU' -> 'DE', 'KAZ' -> 'KZ')
   if (trimmed.length === 3) {

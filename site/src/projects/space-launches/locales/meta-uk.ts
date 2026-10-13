@@ -5,8 +5,8 @@ export const meta: typeof enMeta = {
   description: 'Сім десятиліть орбітальних пусків: маса корисного навантаження за країнами, вартість виведення ($/кг) та надійність ракет.',
   sections: {
     'payload-capacity': 'Маса на орбіту',
-    'launch-costs': 'Вартість за кг',
     'avg-payload': 'Середня маса КН',
+    'launch-costs': 'Вартість за кг',
     'failure-rates': 'Аварійність пусків',
   },
 };

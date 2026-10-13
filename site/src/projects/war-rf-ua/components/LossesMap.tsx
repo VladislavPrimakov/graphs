@@ -1,7 +1,7 @@
 import type { FeatureCollection, Point as GeoJsonPoint } from 'geojson';
 import { type GeoJSONSource, type LayerSpecification, type MapLayerMouseEvent, Map as MapLibreMap, NavigationControl, Popup } from 'maplibre-gl';
 import type React from 'react';
-import { startTransition, useEffect, useEffectEvent, useRef, useState } from 'react';
+import { startTransition, useEffect, useEffectEvent, useRef } from 'react';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { WarLossCategory } from '@graphs/types/war-rf-ua/categories';
 import type { LossesMapSectionData, LossMapPoint } from '@graphs/types/war-rf-ua/losses-map';
@@ -12,8 +12,9 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/ToggleGroup';
 import { getMapTileStyle, registerFallbackDot } from '@/utils/map-builder';
 import { useFormat, useTheme, useTranslation } from '@/utils/provider';
 import { renderTooltipTablePopup } from '@/utils/tooltip-builder';
-import type { dict as enDict } from '../locales/dict-en';
+import { resetLossesFilters, setLossesFilterState, useLossesFilters } from '../losses-filter-store';
 import { lossColors } from '../tokens';
+import type { WarLossesDict } from '../types';
 import { CategoryIcon } from './CategoryIcon';
 import { registerCategoryMarkers } from './category-markers';
 
@@ -154,9 +155,9 @@ function getMapTimelinePeriods(points: LossMapPoint[]): string[] {
   return list;
 }
 
-interface LossesMapProps {
+export interface LossesMapProps {
   data: LossesMapSectionData;
-  t: typeof enDict;
+  t: WarLossesDict;
 }
 
 export const LossesMap: React.FC<LossesMapProps> = ({ data, t }) => {
@@ -174,12 +175,19 @@ export const LossesMap: React.FC<LossesMapProps> = ({ data, t }) => {
   const mapSourceLoadedRef = useRef(false);
   const activePopupRef = useRef<Popup | null>(null);
 
-  // Filters state
-  const [selectedSide, setSelectedSide] = useState<'all' | 'rf' | 'ua' | 'unk'>('all');
-  const [selectedCategories, setSelectedCategories] = useState<number[]>([]);
-  const [selectedModels, setSelectedModels] = useState<number[]>([]);
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
+  // Filters state coordinated via shared reactive store
+  const { selectedSide, selectedCategories, selectedModels, dateFrom, dateTo, hasActiveFilters } = useLossesFilters();
+
+  useEffect(() => {
+    setLossesFilterState({
+      mapData: {
+        points: data.points,
+        categories: data.categories,
+        models: data.models,
+        sides: data.sides,
+      },
+    });
+  }, [data]);
 
   // Primary filter criteria
   const hasSide = selectedSide !== 'all';
@@ -203,6 +211,7 @@ export const LossesMap: React.FC<LossesMapProps> = ({ data, t }) => {
   const sideCounts = { all: 0, rf: 0, ua: 0, unk: 0 };
   const categoryCounts = new Map<number, number>();
   const modelCounts = new Map<number, number>();
+  let allCategoriesCount = 0;
   const filteredPoints: LossMapPoint[] = [];
 
   for (const p of dateFilteredPoints) {
@@ -224,6 +233,7 @@ export const LossesMap: React.FC<LossesMapProps> = ({ data, t }) => {
 
     // 2. Category counts (respects active date, side, and model filters)
     if (matchSide && matchModel) {
+      allCategoriesCount++;
       categoryCounts.set(pCat, (categoryCounts.get(pCat) || 0) + 1);
     }
 
@@ -258,19 +268,23 @@ export const LossesMap: React.FC<LossesMapProps> = ({ data, t }) => {
 
   const addModel = (idx: number) => {
     startTransition(() => {
-      setSelectedModels((prev) => (prev.includes(idx) ? prev : [...prev, idx]));
+      setLossesFilterState({
+        selectedModels: selectedModels.includes(idx) ? selectedModels : [...selectedModels, idx],
+      });
     });
   };
 
   const removeModel = (idx: number) => {
     startTransition(() => {
-      setSelectedModels((prev) => prev.filter((i) => i !== idx));
+      setLossesFilterState({
+        selectedModels: selectedModels.filter((i) => i !== idx),
+      });
     });
   };
 
   const clearAllModels = () => {
     startTransition(() => {
-      setSelectedModels([]);
+      setLossesFilterState({ selectedModels: [] });
     });
   };
 
@@ -457,15 +471,9 @@ export const LossesMap: React.FC<LossesMapProps> = ({ data, t }) => {
 
   const resetAllFilters = () => {
     startTransition(() => {
-      setSelectedSide('all');
-      setSelectedCategories([]);
-      setSelectedModels([]);
-      setDateFrom('');
-      setDateTo('');
+      resetLossesFilters();
     });
   };
-
-  const hasActiveFilters = selectedSide !== 'all' || selectedCategories.length > 0 || selectedModels.length > 0 || Boolean(dateFrom) || Boolean(dateTo);
 
   return (
     <div className="flex flex-col gap-2 min-h-145">
@@ -480,7 +488,7 @@ export const LossesMap: React.FC<LossesMapProps> = ({ data, t }) => {
             onValueChange={(val) => {
               if (val) {
                 startTransition(() => {
-                  setSelectedSide(val as 'all' | 'rf' | 'ua' | 'unk');
+                  setLossesFilterState({ selectedSide: val as 'all' | 'rf' | 'ua' | 'unk' });
                 });
               }
             }}
@@ -527,11 +535,11 @@ export const LossesMap: React.FC<LossesMapProps> = ({ data, t }) => {
               selected={selectedCategories}
               onChange={(cats) => {
                 startTransition(() => {
-                  setSelectedCategories(cats);
+                  setLossesFilterState({ selectedCategories: cats });
                 });
               }}
               allLabel={t.map.allCategories}
-              allCount={hasSide ? (selectedSide === 'rf' ? sideCounts.rf : selectedSide === 'ua' ? sideCounts.ua : sideCounts.unk) : sideCounts.all}
+              allCount={allCategoriesCount}
             />
           </div>
           {hasActiveFilters && (
@@ -598,8 +606,7 @@ export const LossesMap: React.FC<LossesMapProps> = ({ data, t }) => {
           dateTo={dateTo}
           onChange={({ dateFrom: nextFrom, dateTo: nextTo }) => {
             startTransition(() => {
-              setDateFrom(nextFrom);
-              setDateTo(nextTo);
+              setLossesFilterState({ dateFrom: nextFrom, dateTo: nextTo });
             });
           }}
         />

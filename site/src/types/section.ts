@@ -208,6 +208,9 @@ export interface BreakdownGridSpec<
   previewLimit?: number;
   /** Categorized comparison cards or function building them from section data. */
   categories: BreakdownCategory[] | ((data: TData) => BreakdownCategory[]);
+  /** Optional resolver for reactive dynamic categories when external filter state is active. */
+  // biome-ignore lint/suspicious/noExplicitAny: generic filter state payload
+  dynamicCategories?: (data: TData, filters: any) => BreakdownCategory[];
 }
 
 /** Type-safe breakdown grid section builder. */

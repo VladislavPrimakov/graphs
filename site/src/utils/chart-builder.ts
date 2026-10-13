@@ -18,7 +18,6 @@ import { init } from 'echarts/core';
 import { type ThemeColors, themeFonts } from '@/styles/tokens';
 import { resolveColor, type SemanticColor } from '@/utils/color';
 import {
-  renderTooltipDot,
   renderTooltipFooter,
   renderTooltipHeader,
   renderTooltipRow,
@@ -109,7 +108,34 @@ function getCanvasInvariants(tokens: ThemeColors) {
       padding: 0,
     },
     tooltip: {
-      confine: true,
+      confine: false,
+      position: (point, _params, _dom, _rect, size) => {
+        const [x, y] = point;
+        const [contentW, contentH] = size.contentSize;
+        const [viewW, viewH] = size.viewSize;
+
+        // 1. Horizontal: place to right of cursor, flip left if overflowing canvas width
+        let posX = x + 16;
+        if (posX + contentW > viewW) {
+          posX = x - 16 - contentW;
+        }
+        if (posX < 8) {
+          posX = 8;
+        }
+
+        // 2. Vertical: smooth proportional anchoring preventing clipping in either direction
+        let posY: number;
+        if (contentH <= viewH) {
+          posY = y - 20;
+          if (posY + contentH > viewH - 8) posY = viewH - contentH - 8;
+          if (posY < 8) posY = 8;
+        } else {
+          // Tooltip taller than canvas: interpolate position so active cursor area is always in view
+          posY = Math.round(8 + (viewH - contentH - 16) * Math.max(0, Math.min(1, y / viewH)));
+        }
+
+        return [posX, posY];
+      },
       extraCssText: [
         `background: ${tokens.surface.overlay}`,
         `border: 1px solid ${tokens.border.muted}`,
@@ -1143,175 +1169,174 @@ export interface SmartChartOption<S extends readonly SeriesOption[] | SeriesOpti
 /* 5. Tooltip Rendering Engine & Option Builder                               */
 /* -------------------------------------------------------------------------- */
 
-/** Cohesive engine encapsulating all tooltip DOM rendering and formatting methods. */
-const tooltipEngine = {
-  renderDot: renderTooltipDot,
-  renderHeader: (title: string, withBorder = false, size: 'xs' | 'sm' = 'xs', icon?: string) => renderTooltipHeader({ title, withBorder, size, icon }),
-  renderRow: renderTooltipRow,
-  renderFooter: renderTooltipFooter,
+/** Resolves dual tooltip footer contract or dynamic ratio calculation. */
+function resolveDualFooter<TData>(footer: DualTooltipFooter<TData> | undefined, ctx: DualTooltipFooterContext<TData>): TooltipFooterSpec | undefined {
+  if (!footer) return undefined;
+  if (typeof footer === 'function') return footer(ctx);
+  if (ctx.posSum <= 0 || ctx.negSum <= 0) return undefined;
+  const ratioStr = footer.format(ctx.posSum, ctx.negSum, footer.precision);
+  return ratioStr ? { label: footer.label, value: ratioStr, color: footer.color ?? 'warning' } : undefined;
+}
 
-  resolveDualFooter<TData>(footer: DualTooltipFooter<TData> | undefined, ctx: DualTooltipFooterContext<TData>): TooltipFooterSpec | undefined {
-    if (!footer) return undefined;
-    if (typeof footer === 'function') return footer(ctx);
-    if (ctx.posSum <= 0 || ctx.negSum <= 0) return undefined;
-    const ratioStr = footer.format(ctx.posSum, ctx.negSum, footer.precision);
-    return ratioStr ? { label: footer.label, value: ratioStr, color: footer.color ?? 'warning' } : undefined;
-  },
+/** Normalizes polymorphic ECharts tooltip params and constructs the active tick context. */
+function unwrapTick<TData>(params: unknown, headerFn?: (ctx: TooltipTickContext<TData>) => TooltipHeaderResult): { title: string; icon?: string; ctx: TooltipTickContext<TData> } | null {
+  const items = (Array.isArray(params) ? params : [params]) as CallbackDataParams[];
+  if (!items.length) return null;
 
-  getColumnAlign: (align: TableColumnSpec['align'], colIdx: number) => (align === 'center' ? 'text-center' : align === 'right' || (!align && colIdx > 0) ? 'text-right' : 'text-left'),
+  const first = items[0];
+  const name = String(first?.name ?? '');
 
-  /** Normalizes polymorphic ECharts tooltip params and constructs the active tick context. */
-  unwrapTick<TData>(params: unknown, headerFn?: (ctx: TooltipTickContext<TData>) => TooltipHeaderResult): { title: string; icon?: string; ctx: TooltipTickContext<TData> } | null {
-    const items = (Array.isArray(params) ? params : [params]) as CallbackDataParams[];
-    if (!items.length) return null;
+  let dataIndex = first?.dataIndex ?? 0;
+  for (const item of items) {
+    const rawVal = Array.isArray(item.value) ? item.value[0] : (item.value as { value?: unknown })?.value;
+    const coordX = Array.isArray(rawVal) ? rawVal[0] : rawVal;
+    if (typeof coordX === 'number' && Number.isInteger(coordX)) {
+      dataIndex = coordX;
+      break;
+    }
+  }
 
-    const first = items[0];
-    const name = String(first?.name ?? '');
+  const data = (typeof first?.data === 'object' && first?.data !== null ? first.data : {}) as TData;
+  const ctx: TooltipTickContext<TData> = { name, dataIndex, items, data };
+  const headerRes = headerFn ? headerFn(ctx) : name;
+  const title = typeof headerRes === 'object' && headerRes !== null ? headerRes.title : String(headerRes ?? name);
+  const icon = typeof headerRes === 'object' && headerRes !== null ? headerRes.icon : undefined;
+  return { title, icon, ctx };
+}
 
-    let dataIndex = first?.dataIndex ?? 0;
-    for (const item of items) {
-      const rawVal = Array.isArray(item.value) ? item.value[0] : (item.value as { value?: unknown })?.value;
-      const coordX = Array.isArray(rawVal) ? rawVal[0] : rawVal;
-      if (typeof coordX === 'number' && Number.isInteger(coordX)) {
-        dataIndex = coordX;
-        break;
-      }
+/** Renders a list of series rows with value extraction, formatting, sorting, and aggregation. */
+function renderRows<TData>(
+  items: CallbackDataParams[],
+  tickCtx: TooltipTickContext<TData>,
+  rowFn?: (ctx: TooltipRowContext<TData>) => TooltipRowSpec | undefined,
+  valueFn?: (val: number) => string,
+  sort: 'desc' | 'asc' = 'desc',
+  isAbs = false,
+): { html: string; sum: number; count: number } {
+  const sorted = [...items].sort((a, b) => {
+    const vA = extractPointValue(a.data ?? a.value) ?? 0;
+    const vB = extractPointValue(b.data ?? b.value) ?? 0;
+    const compA = isAbs ? Math.abs(vA) : vA;
+    const compB = isAbs ? Math.abs(vB) : vB;
+    return sort === 'desc' ? compB - compA : compA - compB;
+  });
+
+  let sum = 0;
+  let count = 0;
+  const rowsHtml: string[] = [];
+
+  for (const item of sorted) {
+    const raw = extractPointValue(item.data ?? item.value);
+    if (raw === undefined || Number.isNaN(raw)) continue;
+    const num = isAbs ? Math.abs(raw) : raw;
+
+    const seriesName = String(item.seriesName ?? '');
+    const color = String(item.color ?? '#60a5fa');
+    const seriesId = String(item.seriesId ?? '');
+    const name = String(item.name ?? tickCtx.name);
+    const data = (typeof item.data === 'object' && item.data !== null ? item.data : {}) as TData;
+
+    if (rowFn) {
+      const row = rowFn({ seriesName, value: num, color, seriesId, name, dataIndex: tickCtx.dataIndex, data });
+      if (!row) continue;
+      rowsHtml.push(renderTooltipRow(row, seriesName, color));
+    } else if (valueFn && num > 0) {
+      rowsHtml.push(renderTooltipRow({ value: valueFn(num) }, seriesName, color));
+    } else {
+      continue;
     }
 
-    const data = (typeof first?.data === 'object' && first?.data !== null ? first.data : {}) as TData;
-    const ctx: TooltipTickContext<TData> = { name, dataIndex, items, data };
-    const headerRes = headerFn ? headerFn(ctx) : name;
-    const title = typeof headerRes === 'object' && headerRes !== null ? headerRes.title : String(headerRes ?? name);
-    const icon = typeof headerRes === 'object' && headerRes !== null ? headerRes.icon : undefined;
-    return { title, icon, ctx };
-  },
+    sum += num;
+    count++;
+  }
 
-  /** Renders a list of series rows with value extraction, formatting, sorting, and aggregation. */
-  renderRows<TData>(
-    items: CallbackDataParams[],
-    tickCtx: TooltipTickContext<TData>,
-    rowFn?: (ctx: TooltipRowContext<TData>) => TooltipRowSpec | undefined,
-    valueFn?: (val: number) => string,
-    sort: 'desc' | 'asc' = 'desc',
-    isAbs = false,
-  ): { html: string; sum: number; count: number } {
-    const sorted = [...items].sort((a, b) => {
-      const vA = extractPointValue(a.data ?? a.value) ?? 0;
-      const vB = extractPointValue(b.data ?? b.value) ?? 0;
-      const compA = isAbs ? Math.abs(vA) : vA;
-      const compB = isAbs ? Math.abs(vB) : vB;
-      return sort === 'desc' ? compB - compA : compA - compB;
+  return { html: rowsHtml.join(''), sum, count };
+}
+
+/** Formatter generator for axis-triggered tooltips. */
+function buildAxisTooltip<TData>(config: AxisTooltipSpec<TData>): (params: unknown) => string {
+  return (params: unknown) => {
+    const tick = unwrapTick<TData>(params, config.header);
+    if (!tick) return '';
+
+    const { html, sum, count } = renderRows(tick.ctx.items, tick.ctx, config.row, undefined, config.sort ?? 'desc');
+    if (!count) return '';
+
+    const headerHtml = renderTooltipHeader({ title: tick.title, icon: tick.icon });
+    const footerHtml = renderTooltipFooter(config.footer?.({ ...tick.ctx, sum, count }));
+    return `<div class="min-w-45 w-max">${headerHtml}<div class="space-y-1">${html}</div>${footerHtml}</div>`;
+  };
+}
+
+/** Formatter generator for dual/diverging chart tooltips. */
+function buildDualTooltip<TData>(config: DualTooltipSpec<TData>): (params: unknown) => string {
+  return (params: unknown) => {
+    const tick = unwrapTick<TData>(params, config.header);
+    if (!tick) return '';
+
+    const posItems: CallbackDataParams[] = [];
+    const negItems: CallbackDataParams[] = [];
+    for (const item of tick.ctx.items) {
+      const num = Number(extractPointValue(item.data ?? item.value));
+      if (num < 0 || String(item.seriesId).startsWith('imp')) negItems.push(item);
+      else if (num > 0 || String(item.seriesId).startsWith('exp')) posItems.push(item);
+    }
+
+    const renderBranch = (group: DualGroupConfig<TData>, items: CallbackDataParams[]) => {
+      const { html, sum } = renderRows(items, tick.ctx, config.row, config.formatValue, config.sort ?? 'desc', true);
+      if (!html && !group.total) return { html: '', sum: 0 };
+      const { className, styleAttr } = resolveColor(group.color);
+      let totalText = '';
+      if (typeof group.total === 'function') totalText = String(group.total({ ...tick.ctx, items, sum }));
+      else if (group.total === true && config.formatValue && sum > 0) totalText = config.formatValue(sum);
+      else if (group.total) totalText = String(group.total);
+
+      const header = `<div class="font-bold text-[11px] uppercase tracking-wider flex justify-between gap-4 mb-1 whitespace-nowrap ${className}"${styleAttr}><span>${group.title}</span>${totalText ? `<span>${totalText}</span>` : ''}</div>`;
+      return { html: `<div class="mb-2">${header}<div class="space-y-0.5">${html}</div></div>`, sum };
+    };
+
+    const pos = renderBranch(config.positive, posItems);
+    const neg = renderBranch(config.negative, negItems);
+    if (!pos.html && !neg.html) return '';
+
+    const headerHtml = renderTooltipHeader({ title: tick.title, icon: tick.icon });
+    const footer = resolveDualFooter(config.footer, { ...tick.ctx, posSum: pos.sum, negSum: neg.sum, posItems, negItems });
+    const footerHtml = renderTooltipFooter(footer);
+    return `<div class="min-w-50 w-max">${headerHtml}${pos.html}${neg.html}${footerHtml}</div>`;
+  };
+}
+
+/** Formatter generator for multi-column tabular tooltips. */
+function buildTableTooltip<TData>(config: TableTooltipSpec<TData>): (params: unknown) => string {
+  return (params: unknown) => {
+    const tick = unwrapTick<TData>(params, config.header);
+    if (!tick) return '';
+
+    const rowSpecs = config.rows(tick.ctx);
+    if (!rowSpecs.length) return '';
+
+    const headerHtml = renderTooltipHeader({ title: tick.title, icon: tick.icon, withBorder: true, size: 'sm' });
+    const tableHtml = renderTooltipTableStructure({
+      columns: config.columns,
+      rows: rowSpecs,
+      footer: config.footer?.(tick.ctx),
     });
 
-    let sum = 0;
-    let count = 0;
-    const rowsHtml: string[] = [];
+    return `<div class="text-xs min-w-60 w-max p-0.5">${headerHtml}${tableHtml}</div>`;
+  };
+}
 
-    for (const item of sorted) {
-      const raw = extractPointValue(item.data ?? item.value);
-      if (raw === undefined || Number.isNaN(raw)) continue;
-      const num = isAbs ? Math.abs(raw) : raw;
-
-      const seriesName = String(item.seriesName ?? '');
-      const color = String(item.color ?? '#60a5fa');
-      const seriesId = String(item.seriesId ?? '');
-      const name = String(item.name ?? tickCtx.name);
-      const data = (typeof item.data === 'object' && item.data !== null ? item.data : {}) as TData;
-
-      if (rowFn) {
-        const row = rowFn({ seriesName, value: num, color, seriesId, name, dataIndex: tickCtx.dataIndex, data });
-        if (!row) continue;
-        rowsHtml.push(this.renderRow(row, seriesName, color));
-      } else if (valueFn && num > 0) {
-        rowsHtml.push(this.renderRow({ value: valueFn(num) }, seriesName, color));
-      } else {
-        continue;
-      }
-
-      sum += num;
-      count++;
-    }
-
-    return { html: rowsHtml.join(''), sum, count };
-  },
-
-  buildAxis<TData>(config: AxisTooltipSpec<TData>): (params: unknown) => string {
-    return (params: unknown) => {
-      const tick = this.unwrapTick<TData>(params, config.header);
-      if (!tick) return '';
-
-      const { html, sum, count } = this.renderRows(tick.ctx.items, tick.ctx, config.row, undefined, config.sort ?? 'desc');
-      if (!count) return '';
-
-      const footerHtml = this.renderFooter(config.footer?.({ ...tick.ctx, sum, count }));
-      return `<div class="min-w-45">${this.renderHeader(tick.title, false, 'xs', tick.icon)}<div class="space-y-1">${html}</div>${footerHtml}</div>`;
-    };
-  },
-
-  buildDual<TData>(config: DualTooltipSpec<TData>): (params: unknown) => string {
-    return (params: unknown) => {
-      const tick = this.unwrapTick<TData>(params, config.header);
-      if (!tick) return '';
-
-      const posItems: CallbackDataParams[] = [];
-      const negItems: CallbackDataParams[] = [];
-      for (const item of tick.ctx.items) {
-        const num = Number(extractPointValue(item.data ?? item.value));
-        if (num < 0 || String(item.seriesId).startsWith('imp')) negItems.push(item);
-        else if (num > 0 || String(item.seriesId).startsWith('exp')) posItems.push(item);
-      }
-
-      const renderBranch = (group: DualGroupConfig<TData>, items: CallbackDataParams[]) => {
-        const { html, sum } = this.renderRows(items, tick.ctx, config.row, config.formatValue, config.sort ?? 'desc', true);
-        if (!html && !group.total) return { html: '', sum: 0 };
-        const { className, styleAttr } = resolveColor(group.color);
-        let totalText = '';
-        if (typeof group.total === 'function') totalText = String(group.total({ ...tick.ctx, items, sum }));
-        else if (group.total === true && config.formatValue && sum > 0) totalText = config.formatValue(sum);
-        else if (group.total) totalText = String(group.total);
-
-        const header = `<div class="font-bold text-[11px] uppercase tracking-wider flex justify-between mb-1 ${className}"${styleAttr}><span>${group.title}</span>${totalText ? `<span>${totalText}</span>` : ''}</div>`;
-        return { html: `<div class="mb-2">${header}<div class="space-y-0.5">${html}</div></div>`, sum };
-      };
-
-      const pos = renderBranch(config.positive, posItems);
-      const neg = renderBranch(config.negative, negItems);
-      if (!pos.html && !neg.html) return '';
-
-      const footer = this.resolveDualFooter(config.footer, { ...tick.ctx, posSum: pos.sum, negSum: neg.sum, posItems, negItems });
-      return `<div class="min-w-50">${this.renderHeader(tick.title, false, 'xs', tick.icon)}${pos.html}${neg.html}${this.renderFooter(footer)}</div>`;
-    };
-  },
-
-  buildTable<TData>(config: TableTooltipSpec<TData>): (params: unknown) => string {
-    return (params: unknown) => {
-      const tick = this.unwrapTick<TData>(params, config.header);
-      if (!tick) return '';
-
-      const rowSpecs = config.rows(tick.ctx);
-      if (!rowSpecs.length) return '';
-
-      const tableHtml = renderTooltipTableStructure({
-        columns: config.columns,
-        rows: rowSpecs,
-        footer: config.footer?.(tick.ctx),
-      });
-
-      return `<div class="text-xs min-w-60 p-0.5">${this.renderHeader(tick.title, true, 'sm', tick.icon)}${tableHtml}</div>`;
-    };
-  },
-
-  build<TData>(spec: ChartTooltipSpec<TData>): (params: unknown) => string {
-    switch (spec.type) {
-      case 'axis':
-        return this.buildAxis(spec);
-      case 'dual':
-        return this.buildDual(spec);
-      case 'table':
-        return this.buildTable(spec);
-    }
-  },
-};
+/** Factory resolving declarative chart tooltip specification into ECharts HTML formatter callback. */
+function buildDeclarativeTooltip<TData>(spec: ChartTooltipSpec<TData>): (params: unknown) => string {
+  switch (spec.type) {
+    case 'axis':
+      return buildAxisTooltip(spec);
+    case 'dual':
+      return buildDualTooltip(spec);
+    case 'table':
+      return buildTableTooltip(spec);
+  }
+}
 
 /** Type guard checking whether a tooltip option is a declarative chart tooltip specification. */
 function isDeclarativeTooltip<TData>(tooltip: ChartTooltipSpec<TData> | TooltipComponentOption | undefined): tooltip is ChartTooltipSpec<TData> {
@@ -1331,7 +1356,7 @@ export function chartOption<S extends readonly SeriesOption[] | SeriesOption>(co
     if (isDeclarativeTooltip(tooltipSpec)) {
       resolvedTooltip = {
         trigger: 'axis',
-        formatter: tooltipEngine.build(tooltipSpec),
+        formatter: buildDeclarativeTooltip(tooltipSpec),
         ...(tooltipSpec.axisPointer ? { axisPointer: tooltipSpec.axisPointer } : {}),
       };
     } else {

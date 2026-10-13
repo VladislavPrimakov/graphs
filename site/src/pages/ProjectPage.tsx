@@ -45,14 +45,15 @@ function ProjectDashboard({ slug, section, lang }: ProjectDashboardProps) {
   // biome-ignore lint/suspicious/noExplicitAny: polymorphic dispatch across dynamic project specifications
   const sections = project.buildSections({ lang, t: t as any, fmt, theme: resolvedTheme, tokens });
 
-  const sectionTitles: Record<string, string> = {};
-  for (const s of sections) {
-    if (s.title) sectionTitles[s.id] = s.title;
-  }
-
-  const activeSectionTitle = section ? (routeT.projMeta.sections as Record<string, string>)[section] : undefined;
+  const metaSectionTitles = routeT.projMeta.sections as Record<string, string>;
+  const activeSectionTitle = section ? metaSectionTitles[section] : undefined;
   const pageTitle = activeSectionTitle ? `${title} — ${activeSectionTitle}` : title;
-  const pageDescription = (section ? sectionTitles[section] : undefined) || description;
+
+  const fullSectionTitles: Record<string, string> = {};
+  for (const s of sections) {
+    if (s.title) fullSectionTitles[s.id] = s.title;
+  }
+  const pageDescription = (section ? fullSectionTitles[section] : undefined) || description;
 
   const targetSectionId = section || (project.sections?.[0] as string | undefined);
   const ogImage = targetSectionId ? getAbsoluteUrl(`/og/${project.id}-${targetSectionId}.png`) : undefined;
@@ -76,7 +77,7 @@ function ProjectDashboard({ slug, section, lang }: ProjectDashboardProps) {
         </>
       )}
       <div className="flex flex-col gap-8">
-        <SectionNav sections={project.sections as unknown as string[]} projectSlug={project.id} sectionTitles={sectionTitles} projectTitle={title} initialSection={section} />
+        <SectionNav sections={project.sections as unknown as string[]} projectSlug={project.id} sectionTitles={metaSectionTitles} projectTitle={title} initialSection={section} />
         <PageHeader title={title} description={description} tags={project.tags} lastUpdated={lastUpdated} />
         <div className="flex flex-col gap-8">
           {sections.map((sec, index) => {

@@ -4,7 +4,7 @@ import { chartOption, zipRecords } from '@/utils/chart-builder';
 import type { dict } from '../locales/dict-en';
 
 /** Section builder for Launch Costs to LEO by Decade chart. */
-export const launchCostsSection: SectionBuilder<LaunchCostsSectionData, typeof dict> = ({ t, fmt }) => {
+export const launchCostsSection: SectionBuilder<LaunchCostsSectionData, typeof dict> = ({ t, fmt, tokens }) => {
   return chartSection({
     id: 'launch-costs',
     title: t.proj.launchCosts.title,
@@ -58,7 +58,8 @@ export const launchCostsSection: SectionBuilder<LaunchCostsSectionData, typeof d
               return `${t.common.period}: ${fmt.decade(String(rawDecade))}`;
             },
             sort: 'asc',
-            row: ({ seriesName, value, data: pointData }) => {
+            row: ({ seriesName, value, seriesId, data: pointData }) => {
+              if (seriesId === 'average') return undefined;
               const launches = pointData.launches;
               return {
                 label: launches > 0 ? `${seriesName} (${fmt.number(launches)})` : seriesName,
@@ -73,6 +74,7 @@ export const launchCostsSection: SectionBuilder<LaunchCostsSectionData, typeof d
               return {
                 label: totalLabel,
                 value: fmt.currency(totalAvgCost),
+                color: 'warning',
               };
             },
           },
@@ -85,16 +87,33 @@ export const launchCostsSection: SectionBuilder<LaunchCostsSectionData, typeof d
             logBase: 10,
             name: fmt.per('$', 'mass-kilogram'),
           },
-          series: activeCostRegions.map((region: string) => ({
-            id: region,
-            name: fmt.region(region),
-            type: 'bar' as const,
-            color: fmt.regionColor(region),
-            data: zipRecords({
-              value: data.decadeCosts.series[region] || [],
-              launches: data.decadeCosts.launches?.[region] || [],
-            }),
-          })),
+          series: [
+            ...activeCostRegions.map((region: string) => ({
+              id: region,
+              name: fmt.region(region),
+              type: 'bar' as const,
+              color: fmt.regionColor(region),
+              data: zipRecords({
+                value: data.decadeCosts.series[region] || [],
+                launches: data.decadeCosts.launches?.[region] || [],
+              }),
+            })),
+            {
+              id: 'average',
+              name: t.common.average,
+              type: 'line' as const,
+              smooth: true,
+              z: 3,
+              color: tokens.status.warning,
+              lineStyle: { width: 2.5 },
+              symbol: 'circle',
+              symbolSize: 6,
+              data: zipRecords({
+                value: data.decadeCosts.totalAvgCost,
+                launches: data.decadeCosts.totalLaunches,
+              }),
+            },
+          ],
         }),
       };
     },

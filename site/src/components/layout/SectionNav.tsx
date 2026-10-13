@@ -12,10 +12,10 @@ export interface SectionNavProps {
   sections: string[];
   /** Project slug for URL construction. */
   projectSlug: string;
-  /** Mapping of section ID to localized section title. */
-  sectionTitles?: Record<string, string>;
-  /** Base project title for document.title update on click. */
-  projectTitle?: string;
+  /** Mapping of section ID to localized short section title from meta. */
+  sectionTitles: Record<string, string>;
+  /** Base project title for document.title update on scroll. */
+  projectTitle: string;
   /** Initial section identifier from route params. */
   initialSection?: string;
 }
@@ -29,10 +29,7 @@ export const SectionNav: React.FC<SectionNavProps> = ({ sections, projectSlug, s
   const activeId = useScrollSpy({
     initialId: initialSection,
     getHref: (id) => (id ? getHref(`/${projectSlug}/${id}`) : getHref(`/${projectSlug}`)),
-    resolveTitle: (id) => {
-      if (!id || !projectTitle || !sectionTitles?.[id]) return projectTitle;
-      return `${projectTitle} — ${sectionTitles[id]}`;
-    },
+    resolveTitle: (id) => (id && sectionTitles[id] ? `${projectTitle} — ${sectionTitles[id]}` : projectTitle),
   });
 
   useEffect(() => {

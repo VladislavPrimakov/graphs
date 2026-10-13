@@ -136,7 +136,6 @@ export const budgetAndDebtSection: SectionBuilder<BudgetDebtSectionData, typeof 
             }),
             label: { show: showLabels, position: 'top' },
             formatTotal: ({ total, item }) => formatGdpLabel(total, item.gdpPct),
-            hideOverlap: false,
           }),
           createBarSeries({
             id: 'domestic_rev',
@@ -182,19 +181,39 @@ export const budgetAndDebtSection: SectionBuilder<BudgetDebtSectionData, typeof 
             }),
             label: { show: showLabels, position: 'top' },
             formatTotal: ({ total, item }) => formatGdpLabel(total, item.gdpPct),
-            hideOverlap: false,
           }),
           createBarSeries({
-            id: 'debt',
-            name: t.proj.budgetAndDebt.externalDebt,
+            id: 'gov_debt',
+            name: t.proj.budgetAndDebt.govDebt,
+            stack: 'debt',
+            data: zipRecords({
+              value: data.govDebt.slice(startIdx, endIdx),
+              share: data.govDebtPct.slice(startIdx, endIdx),
+            }),
+            color: budgetColors.govDebt,
+            label: { show: showLabels, position: 'inside' },
+            formatLabel: ({ value, item }) => formatBudgetLabel(value, item.share),
+          }),
+          createBarSeries({
+            id: 'private_debt',
+            name: t.proj.budgetAndDebt.privateDebt,
+            stack: 'debt',
+            data: zipRecords({
+              value: data.privateDebt.slice(startIdx, endIdx),
+              share: data.privateDebtPct.slice(startIdx, endIdx),
+            }),
+            color: budgetColors.privateDebt,
+            label: { show: showLabels, position: 'inside' },
+            formatLabel: ({ value, item }) => formatBudgetLabel(value, item.share),
+          }),
+          createStackTotalSeries({
+            stack: 'debt',
             data: zipRecords({
               value: data.debt.slice(startIdx, endIdx),
               gdpPct: data.debtGdpPct.slice(startIdx, endIdx),
             }),
-            color: budgetColors.debt,
             label: { show: showLabels, position: 'top' },
-            formatLabel: ({ value, item }) => formatGdpLabel(value, item.gdpPct),
-            hideOverlap: false,
+            formatTotal: ({ total, item }) => formatGdpLabel(total, item.gdpPct),
           }),
           createBarSeries({
             id: 'gdp',
@@ -203,7 +222,6 @@ export const budgetAndDebtSection: SectionBuilder<BudgetDebtSectionData, typeof 
             color: budgetColors.gdp,
             label: { show: showLabels, position: 'top' },
             formatLabel: ({ value }) => fmt.number(value),
-            hideOverlap: false,
           }),
         ],
       });

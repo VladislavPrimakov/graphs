@@ -5,6 +5,70 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.4] - 2026-10-13
+
+### Tooling & Types
+
+#### Added
+- Added `yearLabels` field to `TradeStructureSectionData` in `types/ukraine/trade-structure.ts`.
+- Added `govDebt`, `govDebtPct`, `privateDebt`, and `privateDebtPct` fields to `types/ukraine/budget-and-debt.ts`.
+- Added `it_services`, `transport_services`, `travel`, `business_services`, and `unclassified_goods` categories to `TRADE_CATEGORY_IDS` in `types/ukraine/trade-categories.ts`.
+- Added `"types": ["bun"]` to `pipelines/tsconfig.json` for Bun test and runtime type declarations.
+- Added `test:space-launches` and `test:war-rf-ua` test scripts in `pipelines/package.json`.
+
+#### Removed
+- Removed generic root `"test"` script from `package.json` in favor of granular pipeline test scripts.
+
+---
+
+### Pipelines (@graphs/pipelines)
+
+#### Added
+- Added `src/space-launches/launches.test.ts` verifying historical orbital launch counts, complete payload mass coverage, and launch costs.
+- Extracted `FALLBACK_LEO_CAPACITY` into `src/space-launches/fallback-capacities.ts` with 9 missing launcher configurations, achieving 100% payload mass coverage across all 7,414 historical launches.
+- Extracted `FALLBACK_LAUNCH_COST` into `src/space-launches/fallback-costs.ts` with curated historical costs for ~115 rocket configurations, increasing launch cost coverage from 31.0% to 94.4%.
+- Added partial-year foreign trade ingestion from NBU monthly foreign trade workbook `Trade_m.xlsx`, automatically supplementing `#trade-structure` with current-year data and dynamic period labels.
+- Added sovereign and private external debt breakdown parsing from NBU workbooks `ZB_q_UAH.xlsx` and `ZB_y_UAH.xlsx`.
+- Added IT computer services import and export parsing by partner nation from sheets `2.3` and `2.4` of `Trade_y.xlsx`.
+- Added services (`it_services`, `transport_services`, `travel`, `business_services`) and unclassified goods (`unclassified_goods`) parsing from sheets `1.1`/`1.2` and `2.1`/`2.2` of `Trade_y.xlsx`.
+
+#### Changed
+- Removed redundant `country` and `rocket` fields from `StoredLaunch` and `src/space-launches/data.json`, reducing memory overhead and snapshot payload size.
+- Exported `StoredLaunch` and `SpaceLaunchesPipelineCache` in `src/space-launches/index.ts` for pipeline type contracts and test suite imports.
+- Standardized regional ISO alias resolution in `region.ts` to consistently use `.includes()`.
+- Extracted foreign trade totals directly from NBU BPM6 sheet `3.1` (with sheet `2.1`/`2.2` fallback for 2010), aligning total exports and imports with balance of payments figures.
+- Merged IT services into bilateral partner trade volumes in `#trade-partners`.
+- Absorbed remaining unclassified services and goods tail into residual `other` category in `#trade-categories`.
+
+---
+
+### Site (@graphs/site)
+
+#### Added
+- Added reactive filter coordination between `#losses-map` and `#equipment-breakdown` via `useLossesFilters` store, dynamically filtering model cards when map filters are active.
+- Added `dynamicCategories` support to `BreakdownGridSpec` and `SectionBreakdown.tsx` to recompute breakdown cards reactively when external filters are active.
+- Updated `#trade-structure` X-axis to render dynamic `yearLabels` (e.g. `2026 (8m)`), supporting partial-year periods alongside annual historical data.
+- Added stacked sovereign (`govDebt`) and private (`privateDebt`) debt series with top total labels to `#budget-and-debt`.
+- Added `govDebt`, `privateDebt`, and new trade category (`it_services`, `transport_services`, `travel`, `business_services`, `unclassified_goods`) palette tokens to `tokens.ts`.
+- Added localized dictionary translations for sovereign debt, private debt, and new trade categories across English, Russian, Ukrainian, and German.
+- Added unified global trend lines in `#launch-costs`, `#avg-payload`, and `#failure-rates` using warning token styling.
+
+#### Changed
+- Swapped `#avg-payload` and `#launch-costs` section order in `space-launches` dashboard, placing payload volume and average size metrics consecutively before launch economics.
+- Updated `#failure-rates` KPI 1 to compute and display the best global reliability decade with localized decade labels.
+- Renamed `#failure-rates` average line and tooltip footer to `Average` (`t.common.average`).
+- Reordered `#equipment-breakdown` immediately beneath `#losses-map` in `war-rf-ua` section layout.
+- Synchronized browser document title resolution during scrolling in `SectionNav` and `useScrollSpy` with short localized section names from metadata dictionaries.
+- Refactored chart tooltip engine from intermediate `tooltipEngine` wrapper object to pure functional generators directly invoking `tooltip-builder` primitives.
+- Styled equipment breakdown category borders with list entity accent colors using `color-mix`.
+
+#### Fixed
+- Fixed that "All categories" count in `#losses-map` collapsed to the selected category count instead of remaining the sum of all categories matching the active side and model filters.
+- Fixed that tall chart tooltips were clipped vertically by canvas container boundaries by removing `overflow: hidden` from `SectionChart`.
+- Fixed that tooltip row labels and headers were truncated with ellipsis by adopting natural content width and `whitespace-nowrap`.
+
+---
+
 ## [1.2.3] - 2026-10-09
 
 ### Tooling & Types

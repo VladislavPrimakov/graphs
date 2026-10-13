@@ -1,5 +1,19 @@
-/** 8 standardized commodity groups defined by NBU and BPM6 foreign trade classification. */
-export const TRADE_CATEGORY_IDS = ['agriculture', 'minerals', 'chemicals', 'timber', 'manufactured', 'metals', 'machinery', 'other'] as const;
+/** 13 standardized goods and services categories defined by NBU and BPM6 foreign trade classification. */
+export const TRADE_CATEGORY_IDS = [
+  'agriculture',
+  'minerals',
+  'chemicals',
+  'timber',
+  'manufactured',
+  'metals',
+  'machinery',
+  'unclassified_goods',
+  'it_services',
+  'transport_services',
+  'travel',
+  'business_services',
+  'other',
+] as const;
 
 export type TradeCategoryId = (typeof TRADE_CATEGORY_IDS)[number];
 

@@ -26,7 +26,7 @@ export const dict = {
   failureRates: {
     title: 'Orbital Launch Failure Rate by Decade',
     kpis: {
-      globalSuccessRate: 'Global Reliability Across All Launches',
+      bestGlobalDecadeReliability: 'Top Global Reliability Decade',
       reliabilityGrowth: 'Reliability Growth Across Decades',
       bestDecadeReliability: 'Top Reliability in Decade (>50 launches)',
     },

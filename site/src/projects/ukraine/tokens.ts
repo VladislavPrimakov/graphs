@@ -6,6 +6,8 @@ export const budgetColors = {
   grants: '#d97706',
   loans: '#facc15',
   debt: '#64748b',
+  govDebt: '#4f46e5',
+  privateDebt: '#94a3b8',
   gdp: '#2563eb',
 } as const;
 
@@ -19,7 +21,7 @@ export const tradeColors = {
   balanceLine: '#38bdf8',
 } as const;
 
-/** NBU commodity trade category color palette. */
+/** NBU goods and services foreign trade category color palette. */
 export const tradeCategoryColors = {
   agriculture: '#10b981',
   metals: '#64748b',
@@ -28,5 +30,10 @@ export const tradeCategoryColors = {
   chemicals: '#8b5cf6',
   timber: '#8d5b38',
   manufactured: '#f43f5e',
-  other: '#0891b2',
+  unclassified_goods: '#78716c',
+  it_services: '#6366f1',
+  transport_services: '#0d9488',
+  travel: '#f97316',
+  business_services: '#06b6d4',
+  other: '#94a3b8',
 } as const;
