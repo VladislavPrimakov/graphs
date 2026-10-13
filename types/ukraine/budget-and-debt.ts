@@ -40,7 +40,15 @@ export interface UaBudgetDebtData {
   loansPct: number[];
   /** Sum of domestic revenues, international grants, and loan financing in billion USD. */
   totalRevFin: number[];
-  /** Cumulative gross external public and publicly guaranteed debt in billion USD. */
+  /** Sovereign external debt (General Government & NBU) in billion USD. */
+  govDebt: number[];
+  /** Sovereign debt share of total gross external debt (0–100 percent). */
+  govDebtPct: number[];
+  /** Private external debt (commercial banks, corporations, intercompany) in billion USD. */
+  privateDebt: number[];
+  /** Private debt share of total gross external debt (0–100 percent). */
+  privateDebtPct: number[];
+  /** Cumulative gross external public and private debt in billion USD. */
   debt: number[];
 }
 

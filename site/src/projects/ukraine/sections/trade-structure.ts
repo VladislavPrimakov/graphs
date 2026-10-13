@@ -10,7 +10,10 @@ export const tradeStructureSection: SectionBuilder<TradeStructureSectionData, ty
   return chartSection({
     id: 'trade-structure',
     title: t.proj.tradeStructure.title,
-    sources: [{ name: 'NBU — Merchandise Trade Balance (xlsx)', url: 'https://bank.gov.ua/files/ES/Trade_y.xlsx' }],
+    sources: [
+      { name: 'NBU — Merchandise Trade Balance (xlsx)', url: 'https://bank.gov.ua/files/ES/Trade_y.xlsx' },
+      { name: 'NBU — Monthly Foreign Trade (xlsx)', url: 'https://bank.gov.ua/files/ES/Trade_m.xlsx' },
+    ],
     controls: (data) =>
       [
         {
@@ -23,7 +26,7 @@ export const tradeStructureSection: SectionBuilder<TradeStructureSectionData, ty
         },
       ] as const,
     buildView: (data, values) => {
-      const tradeYearsStr = data.years.map(String);
+      const tradeYearsStr = data.yearLabels;
       const [startYear, endYear] = values.years;
       const startIdx = Math.max(0, data.years.indexOf(startYear));
       const endIdx = data.years.indexOf(endYear) !== -1 ? data.years.indexOf(endYear) + 1 : data.years.length;

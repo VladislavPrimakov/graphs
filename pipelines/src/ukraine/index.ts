@@ -14,6 +14,7 @@ const DATA_FILE = getPipelineDataPath('ukraine');
 
 const URL_BUDGET = 'https://bank.gov.ua/files/macro/C_budget_m.xlsx';
 const URL_TRADE = 'https://bank.gov.ua/files/ES/Trade_y.xlsx';
+const URL_TRADE_M = 'https://bank.gov.ua/files/ES/Trade_m.xlsx';
 const URL_DEBT_Q = 'https://bank.gov.ua/files/ES/ZB_q_UAH.xlsx';
 const URL_DEBT_Y = 'https://bank.gov.ua/files/ES/ZB_y_UAH.xlsx';
 const URL_GDP = 'https://bank.gov.ua/files/macro/GDP_y.xlsx';
@@ -145,22 +146,29 @@ function extractMonthlyDifferences(rows: unknown[][], rowIdx: number, year: numb
   return deltas;
 }
 
-/** Parses sheet '1.1' from in-memory debt workbooks to extract Total Gross External Debt in billion UAH. */
-function loadDebtData(quarterlyWb: XLSX.WorkBook, targetYears: number[], annualWb?: XLSX.WorkBook | null): Record<number, number> {
-  const result: Record<number, number> = {};
+interface DebtBreakdown {
+  total: number;
+  gov: number;
+  private: number;
+}
+
+/** Parses in-memory debt workbooks to extract Gross, Sovereign, and Private External Debt in billion UAH. */
+function loadDebtData(quarterlyWb: XLSX.WorkBook, targetYears: number[], annualWb?: XLSX.WorkBook | null): Record<number, DebtBreakdown> {
+  const result: Record<number, DebtBreakdown> = {};
 
   if (annualWb) {
     try {
       const sheetY = annualWb.Sheets['1.1'];
       if (sheetY) {
         const rowsY = XLSX.utils.sheet_to_json(sheetY, { header: 1, raw: true, blankrows: true, defval: null }) as unknown[][];
+        let govRowY = 6;
+        let nbuRowY = 15;
         let debtRowY = 79;
         for (let r = 0; r < rowsY.length; r++) {
           const txt = String(rowsY[r]?.[0] || '').toLowerCase();
-          if (txt.includes('валовий') && txt.includes('зовнішній борг')) {
-            debtRowY = r;
-            break;
-          }
+          if (txt.includes('загального державного')) govRowY = r;
+          else if (txt.includes('центральний банк')) nbuRowY = r;
+          else if (txt.includes('валовий') && txt.includes('зовнішній борг')) debtRowY = r;
         }
         const row5 = rowsY[5] || [];
         for (let c = 1; c < row5.length; c++) {
@@ -168,8 +176,9 @@ function loadDebtData(quarterlyWb: XLSX.WorkBook, targetYears: number[], annualW
           if (typeof val === 'number') {
             const dateObj = XLSX.SSF.parse_date_code(val);
             if (dateObj?.y && rowsY[debtRowY]?.[c] != null) {
-              const valM = parseFloat(String(rowsY[debtRowY][c])) || 0;
-              result[dateObj.y] = valM / 1000.0;
+              const govM = ((parseFloat(String(rowsY[govRowY]?.[c])) || 0) + (parseFloat(String(rowsY[nbuRowY]?.[c])) || 0)) / 1000.0;
+              const totM = (parseFloat(String(rowsY[debtRowY][c])) || 0) / 1000.0;
+              result[dateObj.y] = { total: totM, gov: govM, private: Math.max(0, totM - govM) };
             }
           }
         }
@@ -183,13 +192,14 @@ function loadDebtData(quarterlyWb: XLSX.WorkBook, targetYears: number[], annualW
   if (!sheet) return result;
   const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, blankrows: true, defval: null }) as unknown[][];
 
+  let govRow = 6;
+  let nbuRow = 21;
   let debtRow = 95;
   for (let r = 0; r < rows.length; r++) {
     const txt = String(rows[r]?.[0] || '').toLowerCase();
-    if (txt.includes('валовий') && txt.includes('зовнішній борг')) {
-      debtRow = r;
-      break;
-    }
+    if (txt.includes('загального державного')) govRow = r;
+    else if (txt.includes('центральний банк')) nbuRow = r;
+    else if (txt.includes('валовий') && txt.includes('зовнішній борг')) debtRow = r;
   }
 
   let currentYear: number | null = null;
@@ -212,10 +222,11 @@ function loadDebtData(quarterlyWb: XLSX.WorkBook, targetYears: number[], annualW
   for (const y of targetYears) {
     const col = yearLatestCol.get(y);
     if (col != null && rows[debtRow]?.[col] != null) {
-      const valM = parseFloat(String(rows[debtRow][col])) || 0;
-      result[y] = valM / 1000.0;
+      const govM = ((parseFloat(String(rows[govRow]?.[col])) || 0) + (parseFloat(String(rows[nbuRow]?.[col])) || 0)) / 1000.0;
+      const totM = (parseFloat(String(rows[debtRow][col])) || 0) / 1000.0;
+      result[y] = { total: totM, gov: govM, private: Math.max(0, totM - govM) };
     } else if (result[y] == null) {
-      result[y] = 0;
+      result[y] = { total: 0, gov: 0, private: 0 };
     }
   }
   return result;
@@ -242,12 +253,104 @@ function loadGdpData(gdpWb: XLSX.WorkBook, targetYears: number[]): Record<number
   return result;
 }
 
-/** Loads Foreign Trade data (exports and imports) by partner from in-memory trade workbook across all available years. */
-function loadTradeData(tradeWb: XLSX.WorkBook): {
-  tradeYears: number[];
-  totalExports: number[];
-  totalImports: number[];
-  tradeBalance: number[];
+interface MonthlyTradePartialResult {
+  year: number;
+  monthsCount: number;
+  label: string;
+  totalExports: number;
+  totalImports: number;
+  tradeBalance: number;
+}
+
+/** Extracts current partial-year trade totals (goods + services) from monthly trade workbook when annual workbook does not yet contain it. */
+function extractMonthlyPartialYear(wb?: XLSX.WorkBook | null, maxAnnualYear?: number): MonthlyTradePartialResult | null {
+  if (!wb || !maxAnnualYear) return null;
+  const s11 = wb.Sheets['1.1'];
+  const s12 = wb.Sheets['1.2'];
+  const s21 = wb.Sheets['2.1'];
+  const s22 = wb.Sheets['2.2'];
+  if (!s11 || !s12 || !s21 || !s22) return null;
+
+  const r11 = XLSX.utils.sheet_to_json(s11, { header: 1, raw: true, defval: null }) as unknown[][];
+  const r12 = XLSX.utils.sheet_to_json(s12, { header: 1, raw: true, defval: null }) as unknown[][];
+  const r21 = XLSX.utils.sheet_to_json(s21, { header: 1, raw: true, defval: null }) as unknown[][];
+  const r22 = XLSX.utils.sheet_to_json(s22, { header: 1, raw: true, defval: null }) as unknown[][];
+
+  function getYearMonthCols(rowYears: unknown[], rowMonths: unknown[]): Map<number, number[]> {
+    const yearCols = new Map<number, number[]>();
+    let currentY: number | null = null;
+    for (let c = 3; c < rowMonths.length; c++) {
+      const yVal = rowYears[c];
+      if (yVal != null) {
+        const y = parseInt(String(yVal), 10);
+        if (!Number.isNaN(y) && y >= 1990 && y <= 2100) {
+          currentY = y;
+        }
+      }
+      if (currentY != null && rowMonths[c] != null) {
+        const mStr = String(rowMonths[c]).trim();
+        if (!mStr.includes('-') && !mStr.includes('%')) {
+          if (!yearCols.has(currentY)) yearCols.set(currentY, []);
+          yearCols.get(currentY)!.push(c);
+        }
+      }
+    }
+    return yearCols;
+  }
+
+  const gExpYearCols = getYearMonthCols(r11[4] || [], r11[5] || []);
+  const gImpYearCols = getYearMonthCols(r12[4] || [], r12[5] || []);
+  const sExpYearCols = getYearMonthCols(r21[4] || [], r21[5] || []);
+  const sImpYearCols = getYearMonthCols(r22[4] || [], r22[5] || []);
+
+  const candidateYears = Array.from(gExpYearCols.keys())
+    .filter((y) => y > maxAnnualYear)
+    .sort((a, b) => a - b);
+
+  if (candidateYears.length === 0) return null;
+
+  const targetYear = candidateYears[candidateYears.length - 1];
+  const gExpCols = gExpYearCols.get(targetYear) || [];
+  const gImpCols = gImpYearCols.get(targetYear) || [];
+  const sExpCols = sExpYearCols.get(targetYear) || [];
+  const sImpCols = sImpYearCols.get(targetYear) || [];
+
+  const monthsCount = Math.min(gExpCols.length, gImpCols.length, sExpCols.length, sImpCols.length);
+  if (monthsCount === 0) return null;
+
+  const gExp = gExpCols.slice(0, monthsCount).reduce((sum, c) => sum + (Number(r11[6]?.[c]) || 0), 0);
+  const gImp = gImpCols.slice(0, monthsCount).reduce((sum, c) => sum + (Number(r12[6]?.[c]) || 0), 0);
+  const sExp = sExpCols.slice(0, monthsCount).reduce((sum, c) => sum + (Number(r21[7]?.[c]) || 0), 0);
+  const sImp = sImpCols.slice(0, monthsCount).reduce((sum, c) => sum + (Number(r22[7]?.[c]) || 0), 0);
+
+  const totExp = round((gExp + sExp) / 1000.0, 1);
+  const totImp = round((gImp + sImp) / 1000.0, 1);
+  const tradeBalance = round(totExp - totImp, 1);
+  const label = monthsCount < 12 ? `${targetYear} (${monthsCount}m)` : String(targetYear);
+
+  return {
+    year: targetYear,
+    monthsCount,
+    label,
+    totalExports: totExp,
+    totalImports: totImp,
+    tradeBalance,
+  };
+}
+
+/** Loads Foreign Trade data (goods + services exports and imports) by partner and commodity category from in-memory trade workbook across all available years. */
+function loadTradeData(
+  tradeWb: XLSX.WorkBook,
+  tradeMonthlyWb?: XLSX.WorkBook | null,
+): {
+  annualYears: number[];
+  annualTotalExports: number[];
+  annualTotalImports: number[];
+  structureYears: number[];
+  structureYearLabels: string[];
+  structureTotalExports: number[];
+  structureTotalImports: number[];
+  structureTradeBalance: number[];
   exports: TradePartnerTuple[][];
   imports: TradePartnerTuple[][];
   categoryExports: TradeCategoryTuple[][];
@@ -257,6 +360,11 @@ function loadTradeData(tradeWb: XLSX.WorkBook): {
   const impSheet = tradeWb.Sheets['1.11'];
   const expCatSheet = tradeWb.Sheets['1.1 '];
   const impCatSheet = tradeWb.Sheets['1.2'];
+  const s31 = tradeWb.Sheets['3.1'];
+  const s21 = tradeWb.Sheets['2.1'];
+  const s22 = tradeWb.Sheets['2.2'];
+  const s23 = tradeWb.Sheets['2.3'];
+  const s24 = tradeWb.Sheets['2.4'];
 
   function processTradeSheet(sheet: WorkSheet) {
     const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, blankrows: true, defval: null }) as unknown[][];
@@ -286,6 +394,7 @@ function loadTradeData(tradeWb: XLSX.WorkBook): {
       const rawName = String(rows[r]?.[5] || '').trim();
       if (!rawName || rawName === 'TOTAL' || rawName === 'null') continue;
       const cCode = resolveRegionCode(rawName);
+      if (!cCode || cCode === 'Others') continue;
       countriesData[cCode] = {};
       for (const y of validYears) {
         const col = yMap.get(y)!;
@@ -295,17 +404,86 @@ function loadTradeData(tradeWb: XLSX.WorkBook): {
     return { validYears, totals, countries: countriesData };
   }
 
+  function processItSheet(sheet?: WorkSheet) {
+    if (!sheet) return {};
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, blankrows: true, defval: null }) as unknown[][];
+    const yMap = new Map<number, number>();
+    const headerRow = rows[5] || [];
+    for (let col = 3; col < headerRow.length; col++) {
+      const val = headerRow[col];
+      if (val != null) {
+        const num = Number(val);
+        if (!Number.isNaN(num) && num >= 1990 && num <= 2100) {
+          yMap.set(Math.floor(num), col);
+        }
+      }
+    }
+
+    const countriesData: Record<string, Record<number, number>> = {};
+    for (let r = 10; r < rows.length; r++) {
+      const rawName = String(rows[r]?.[2] || '').trim();
+      if (!rawName || rawName === 'TOTAL' || rawName.startsWith('Note') || rawName.startsWith('Since') || rawName.includes('territories')) continue;
+      const cCode = resolveRegionCode(rawName);
+      if (!cCode || cCode === 'Others' || cCode === 'Other countries') continue;
+
+      if (!countriesData[cCode]) countriesData[cCode] = {};
+      for (const [y, col] of yMap.entries()) {
+        const valM = parseFloat(String(rows[r]?.[col])) || 0;
+        countriesData[cCode][y] = (countriesData[cCode][y] || 0) + valM / 1000.0;
+      }
+    }
+    return countriesData;
+  }
+
   const expData = processTradeSheet(expSheet);
   const impData = processTradeSheet(impSheet);
+  const itExp = processItSheet(s23);
+  const itImp = processItSheet(s24);
   const tradeYears = expData.validYears.filter((y) => impData.validYears.includes(y));
 
-  // Collect all unique sovereign partner country codes across exports and imports
-  const allCountryCodes = new Set<string>([...Object.keys(expData.countries), ...Object.keys(impData.countries)]);
-  allCountryCodes.delete('Others');
+  // Extract Total Goods + Services from Sheet 3.1
+  const sheet31Exp: Record<number, number> = {};
+  const sheet31Imp: Record<number, number> = {};
+  if (s31) {
+    const rows31 = XLSX.utils.sheet_to_json(s31, { header: 1, raw: true, blankrows: true, defval: null }) as unknown[][];
+    let expRow = 7;
+    let impRow = 30;
+    for (let r = 0; r < rows31.length; r++) {
+      const txt = String(rows31[r]?.[0] || rows31[r]?.[2] || '').toLowerCase();
+      if (txt.includes('експорт товарів та послуг') || txt.includes('exports of goods and services')) expRow = r;
+      if (txt.includes('імпорт товарів та послуг') || txt.includes('imports of goods and services')) impRow = r;
+    }
+    const h31 = rows31[5] || [];
+    for (let col = 3; col < h31.length; col++) {
+      const y = parseInt(String(h31[col]), 10);
+      if (!Number.isNaN(y) && y >= 1990 && y <= 2100) {
+        if (rows31[expRow]?.[col] != null) sheet31Exp[y] = (parseFloat(String(rows31[expRow][col])) || 0) / 1000.0;
+        if (rows31[impRow]?.[col] != null) sheet31Imp[y] = (parseFloat(String(rows31[impRow][col])) || 0) / 1000.0;
+      }
+    }
+  }
 
-  const tExp = tradeYears.map((y) => round(expData.totals[y], 1));
-  const tImp = tradeYears.map((y) => round(impData.totals[y], 1));
+  // Fallback for 2010 if missing in sheet 3.1: Goods (1.10/1.11) + Services (2.1/2.2)
+  const get2010Services = (sheet?: WorkSheet, rowIdx = 8): number => {
+    if (!sheet) return 0;
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, blankrows: true, defval: null }) as unknown[][];
+    const h = rows[5] || [];
+    for (let c = 0; c < h.length; c++) {
+      if (String(h[c]).includes('2010')) return (parseFloat(String(rows[rowIdx]?.[c])) || 0) / 1000.0;
+    }
+    return 0;
+  };
+  const servExp2010 = get2010Services(s21, 8);
+  const servImp2010 = get2010Services(s22, 8);
+
+  const tExp = tradeYears.map((y) => round(sheet31Exp[y] ?? (expData.totals[y] || 0) + servExp2010, 1));
+  const tImp = tradeYears.map((y) => round(sheet31Imp[y] ?? (impData.totals[y] || 0) + servImp2010, 1));
   const saldo = tradeYears.map((_, i) => round(tExp[i] - tImp[i], 1));
+
+  // Collect all unique sovereign partner country codes across goods and IT services
+  const allCountryCodes = new Set<string>([...Object.keys(expData.countries), ...Object.keys(impData.countries), ...Object.keys(itExp), ...Object.keys(itImp)]);
+  allCountryCodes.delete('Others');
+  allCountryCodes.delete('Other countries');
 
   // Per-year breakdowns sorted descending by value: [countryCode, value, share]
   const exports: TradePartnerTuple[][] = [];
@@ -318,8 +496,9 @@ function loadTradeData(tradeWb: XLSX.WorkBook): {
 
     const yearExp: TradePartnerTuple[] = [];
     for (const code of allCountryCodes) {
-      const val = expData.countries[code]?.[y] || 0;
-      const roundedVal = round(val, 1);
+      const gVal = expData.countries[code]?.[y] || 0;
+      const itVal = itExp[code]?.[y] || 0;
+      const roundedVal = round(gVal + itVal, 1);
       if (roundedVal > 0) {
         const share = percentage(roundedVal, totE, 1);
         yearExp.push([code, roundedVal, share]);
@@ -330,8 +509,9 @@ function loadTradeData(tradeWb: XLSX.WorkBook): {
 
     const yearImp: TradePartnerTuple[] = [];
     for (const code of allCountryCodes) {
-      const val = impData.countries[code]?.[y] || 0;
-      const roundedVal = round(val, 1);
+      const gVal = impData.countries[code]?.[y] || 0;
+      const itVal = itImp[code]?.[y] || 0;
+      const roundedVal = round(gVal + itVal, 1);
       if (roundedVal > 0) {
         const share = percentage(roundedVal, totI, 1);
         yearImp.push([code, roundedVal, share]);
@@ -344,6 +524,8 @@ function loadTradeData(tradeWb: XLSX.WorkBook): {
   // Parse commodity category dynamics from sheets '1.1 ' (exports) and '1.2' (imports)
   const expCatRows = XLSX.utils.sheet_to_json(expCatSheet, { header: 1, raw: true, blankrows: false, defval: null }) as unknown[][];
   const impCatRows = XLSX.utils.sheet_to_json(impCatSheet, { header: 1, raw: true, blankrows: false, defval: null }) as unknown[][];
+  const s21Rows = s21 ? (XLSX.utils.sheet_to_json(s21, { header: 1, raw: true, blankrows: false, defval: null }) as unknown[][]) : [];
+  const s22Rows = s22 ? (XLSX.utils.sheet_to_json(s22, { header: 1, raw: true, blankrows: false, defval: null }) as unknown[][]) : [];
 
   const catHeaderRow = expCatRows[4] || [];
   const catYearCols = new Map<number, number>();
@@ -352,35 +534,88 @@ function loadTradeData(tradeWb: XLSX.WorkBook): {
     if (!Number.isNaN(y)) catYearCols.set(y, c);
   }
 
-  const CATEGORY_ROWS: { id: TradeCategoryId; row: number }[] = [
-    { id: 'agriculture', row: 6 },
-    { id: 'minerals', row: 7 },
-    { id: 'chemicals', row: 8 },
-    { id: 'timber', row: 9 },
-    { id: 'manufactured', row: 10 },
-    { id: 'metals', row: 11 },
-    { id: 'machinery', row: 12 },
-    { id: 'other', row: 13 },
+  const s21HeaderRow = s21Rows[5] || [];
+  const servYearCols = new Map<number, number>();
+  for (let c = 3; c < s21HeaderRow.length; c++) {
+    const y = parseInt(String(s21HeaderRow[c]), 10);
+    if (!Number.isNaN(y)) servYearCols.set(y, c);
+  }
+
+  const COMMODITY_GROUPS: { id: TradeCategoryId; pattern: string }[] = [
+    { id: 'agriculture', pattern: 'продовольчі' },
+    { id: 'minerals', pattern: 'мінеральні' },
+    { id: 'chemicals', pattern: 'хімічної' },
+    { id: 'timber', pattern: 'деревина' },
+    { id: 'manufactured', pattern: 'промислові' },
+    { id: 'metals', pattern: 'метали' },
+    { id: 'machinery', pattern: 'машини' },
+    { id: 'unclassified_goods', pattern: 'різне' },
   ];
 
-  // Per-year commodity category breakdowns sorted descending by value: [categoryId, value, share]
+  const resolveCategoryRow = (rows: unknown[][], pattern: string): number => {
+    for (let r = 0; r < rows.length; r++) {
+      const txt = String(rows[r]?.[0] || rows[r]?.[1] || '').toLowerCase();
+      if (txt.includes(pattern)) return r;
+    }
+    return -1;
+  };
+
+  const resolveExactServiceRow = (rows: unknown[][], exactUa: string, patternEn: string): number => {
+    for (let r = 0; r < rows.length; r++) {
+      const u = String(rows[r]?.[0] || rows[r]?.[1] || '')
+        .trim()
+        .toLowerCase();
+      const e = String(rows[r]?.[2] || '')
+        .trim()
+        .toLowerCase();
+      if (u === exactUa || e === patternEn || u.includes(exactUa)) return r;
+    }
+    return -1;
+  };
+
+  const expTransportRow = resolveExactServiceRow(s21Rows, 'транспорт', 'transport');
+  const impTransportRow = resolveExactServiceRow(s22Rows, 'транспорт', 'transport');
+  const expTravelRow = resolveExactServiceRow(s21Rows, 'подорожі', 'travel');
+  const impTravelRow = resolveExactServiceRow(s22Rows, 'подорожі', 'travel');
+  const expItRow = resolveCategoryRow(s21Rows, 'телекомунікаційні, комп');
+  const impItRow = resolveCategoryRow(s22Rows, 'телекомунікаційні, комп');
+  const expBusinessRow = resolveExactServiceRow(s21Rows, 'інші ділові послуги', 'other business services');
+  const impBusinessRow = resolveExactServiceRow(s22Rows, 'інші ділові послуги', 'other business services');
+
+  const SERVICE_ITEMS: { id: TradeCategoryId; expRow: number; impRow: number }[] = [
+    { id: 'it_services', expRow: expItRow, impRow: impItRow },
+    { id: 'transport_services', expRow: expTransportRow, impRow: impTransportRow },
+    { id: 'travel', expRow: expTravelRow, impRow: impTravelRow },
+    { id: 'business_services', expRow: expBusinessRow, impRow: impBusinessRow },
+  ];
+
+  // Per-year category breakdowns sorted descending by value: [categoryId, value, share]
   const categoryExports: TradeCategoryTuple[][] = [];
   const categoryImports: TradeCategoryTuple[][] = [];
 
   for (let i = 0; i < tradeYears.length; i++) {
     const y = tradeYears[i];
-    const col = catYearCols.get(y);
+    const catCol = catYearCols.get(y);
+    const servCol = servYearCols.get(y);
     const totE = tExp[i];
     const totI = tImp[i];
 
     const yearCatExp: TradeCategoryTuple[] = [];
     const yearCatImp: TradeCategoryTuple[] = [];
+    let sumKnownExp = 0;
+    let sumKnownImp = 0;
 
-    for (const { id, row } of CATEGORY_ROWS) {
-      const expVal = col != null ? (Number(expCatRows[row]?.[col]) || 0) / 1000.0 : 0;
-      const impVal = col != null ? (Number(impCatRows[row]?.[col]) || 0) / 1000.0 : 0;
+    // 1. 7 Goods categories
+    for (const { id, pattern } of COMMODITY_GROUPS) {
+      const expRow = resolveCategoryRow(expCatRows, pattern);
+      const impRow = resolveCategoryRow(impCatRows, pattern);
+      const expVal = catCol != null && expRow !== -1 ? (Number(expCatRows[expRow]?.[catCol]) || 0) / 1000.0 : 0;
+      const impVal = catCol != null && impRow !== -1 ? (Number(impCatRows[impRow]?.[catCol]) || 0) / 1000.0 : 0;
       const roundedExp = round(expVal, 1);
       const roundedImp = round(impVal, 1);
+
+      sumKnownExp += roundedExp;
+      sumKnownImp += roundedImp;
 
       if (roundedExp > 0) {
         const share = percentage(roundedExp, totE, 1);
@@ -392,6 +627,39 @@ function loadTradeData(tradeWb: XLSX.WorkBook): {
       }
     }
 
+    // 2. 4 Service categories
+    for (const { id, expRow, impRow } of SERVICE_ITEMS) {
+      const expVal = servCol != null && expRow !== -1 ? (Number(s21Rows[expRow]?.[servCol]) || 0) / 1000.0 : 0;
+      const impVal = servCol != null && impRow !== -1 ? (Number(s22Rows[impRow]?.[servCol]) || 0) / 1000.0 : 0;
+      const roundedExp = round(expVal, 1);
+      const roundedImp = round(impVal, 1);
+
+      sumKnownExp += roundedExp;
+      sumKnownImp += roundedImp;
+
+      if (roundedExp > 0) {
+        const share = percentage(roundedExp, totE, 1);
+        yearCatExp.push([id, roundedExp, share]);
+      }
+      if (roundedImp > 0) {
+        const share = percentage(roundedImp, totI, 1);
+        yearCatImp.push([id, roundedImp, share]);
+      }
+    }
+
+    // 3. Residual volume (remaining services + miscellaneous goods) absorbed into category 'other'
+    const otherExp = round(Math.max(0, totE - sumKnownExp), 1);
+    if (otherExp > 0) {
+      const share = percentage(otherExp, totE, 1);
+      yearCatExp.push(['other', otherExp, share]);
+    }
+
+    const otherImp = round(Math.max(0, totI - sumKnownImp), 1);
+    if (otherImp > 0) {
+      const share = percentage(otherImp, totI, 1);
+      yearCatImp.push(['other', otherImp, share]);
+    }
+
     yearCatExp.sort((a, b) => b[1] - a[1]);
     yearCatImp.sort((a, b) => b[1] - a[1]);
 
@@ -399,11 +667,24 @@ function loadTradeData(tradeWb: XLSX.WorkBook): {
     categoryImports.push(yearCatImp);
   }
 
+  const maxAnnualYear = tradeYears[tradeYears.length - 1] ?? 0;
+  const partial = extractMonthlyPartialYear(tradeMonthlyWb, maxAnnualYear);
+
+  const structureYears = partial ? [...tradeYears, partial.year] : [...tradeYears];
+  const structureYearLabels = partial ? [...tradeYears.map(String), partial.label] : tradeYears.map(String);
+  const structureTotalExports = partial ? [...tExp, partial.totalExports] : [...tExp];
+  const structureTotalImports = partial ? [...tImp, partial.totalImports] : [...tImp];
+  const structureTradeBalance = partial ? [...saldo, partial.tradeBalance] : [...saldo];
+
   return {
-    tradeYears,
-    totalExports: tExp,
-    totalImports: tImp,
-    tradeBalance: saldo,
+    annualYears: tradeYears,
+    annualTotalExports: tExp,
+    annualTotalImports: tImp,
+    structureYears,
+    structureYearLabels,
+    structureTotalExports,
+    structureTotalImports,
+    structureTradeBalance,
     exports,
     imports,
     categoryExports,
@@ -430,7 +711,7 @@ export async function runUkrainePipeline(forceUpdate = false, verbose?: boolean)
 
       const hasValidDataset = Boolean(existingCache?.sections?.['budget-and-debt']?.years?.length) && Boolean(existingCache?.sections?.['trade-structure']?.years?.length);
 
-      const allUrls = [URL_BUDGET, URL_TRADE, URL_DEBT_Q, URL_DEBT_Y, URL_GDP];
+      const allUrls = [URL_BUDGET, URL_TRADE, URL_TRADE_M, URL_DEBT_Q, URL_DEBT_Y, URL_GDP];
 
       // Fast check: verify if remote files are unchanged via HTTP HEAD
       if (!forceUpdate && hasValidDataset && existingCache?.meta) {
@@ -457,16 +738,27 @@ export async function runUkrainePipeline(forceUpdate = false, verbose?: boolean)
 
       let budgetWb: XLSX.WorkBook;
       let tradeWb: XLSX.WorkBook;
+      let tradeMonthlyWb: XLSX.WorkBook | null = null;
       let debtWb: XLSX.WorkBook;
       let debtAnnualWb: XLSX.WorkBook | null = null;
       let gdpWb: XLSX.WorkBook;
       const newMeta: Record<string, RemoteFileMeta> = { ...(existingCache?.meta || {}) };
 
       try {
-        const [bRes, tRes, dRes, gRes] = await Promise.all([fetchBinaryWithMeta(URL_BUDGET), fetchBinaryWithMeta(URL_TRADE), fetchBinaryWithMeta(URL_DEBT_Q), fetchBinaryWithMeta(URL_GDP)]);
+        const [bRes, tRes, tmRes, dRes, gRes] = await Promise.all([
+          fetchBinaryWithMeta(URL_BUDGET),
+          fetchBinaryWithMeta(URL_TRADE),
+          fetchBinaryWithMeta(URL_TRADE_M).catch(() => null),
+          fetchBinaryWithMeta(URL_DEBT_Q),
+          fetchBinaryWithMeta(URL_GDP),
+        ]);
 
         newMeta[URL_BUDGET] = bRes.meta;
         newMeta[URL_TRADE] = tRes.meta;
+        if (tmRes) {
+          newMeta[URL_TRADE_M] = tmRes.meta;
+          tradeMonthlyWb = XLSX.read(tmRes.buffer, { type: 'buffer' });
+        }
         newMeta[URL_DEBT_Q] = dRes.meta;
         newMeta[URL_GDP] = gRes.meta;
 
@@ -532,6 +824,8 @@ export async function runUkrainePipeline(forceUpdate = false, verbose?: boolean)
       const loansVals: number[] = [];
       const totalRevFinVals: number[] = [];
       const debtVals: number[] = [];
+      const govDebtVals: number[] = [];
+      const privDebtVals: number[] = [];
       const gdpList: (number | null)[] = [];
       const weightedRates: number[] = [];
       const yearLabels: string[] = [];
@@ -586,9 +880,13 @@ export async function runUkrainePipeline(forceUpdate = false, verbose?: boolean)
 
         const lastM = months[months.length - 1];
         const rateLastM = rates[`${year}-${lastM}`] || 40.0;
-        const debtUah = debtUahByYear[year] || 0;
-        const debtUsd = debtUah > 0 ? debtUah / rateLastM : 0;
+        const debtObj = debtUahByYear[year] || { total: 0, gov: 0, private: 0 };
+        const debtUsd = debtObj.total > 0 ? debtObj.total / rateLastM : 0;
+        const govDebtUsd = debtObj.gov > 0 ? debtObj.gov / rateLastM : 0;
+        const privDebtUsd = debtObj.private > 0 ? debtObj.private / rateLastM : 0;
         debtVals.push(round(debtUsd, 1));
+        govDebtVals.push(round(govDebtUsd, 1));
+        privDebtVals.push(round(privDebtUsd, 1));
 
         const gdpUah = gdpUahByYear[year];
         const gdpUsd = gdpUah != null && weightedRate > 0 ? round(gdpUah / weightedRate, 1) : null;
@@ -621,8 +919,10 @@ export async function runUkrainePipeline(forceUpdate = false, verbose?: boolean)
       const expGdpPct = gdpList.map((gdp, i) => percentageNullable(totalExpVals[i], gdp, 1));
       const revGdpPct = gdpList.map((gdp, i) => percentageNullable(totalRevFinVals[i], gdp, 1));
       const debtGdpPct = gdpList.map((gdp, i) => percentageNullable(debtVals[i], gdp, 1));
+      const govDebtPct = govDebtVals.map((g, i) => percentage(g, debtVals[i], 1));
+      const privDebtPct = privDebtVals.map((p, i) => percentage(p, debtVals[i], 1));
 
-      const trade = loadTradeData(tradeWb);
+      const trade = loadTradeData(tradeWb, tradeMonthlyWb);
 
       const budgetDebtSectionData: BudgetDebtSectionData = {
         years: budgetYears,
@@ -645,28 +945,33 @@ export async function runUkrainePipeline(forceUpdate = false, verbose?: boolean)
         loans: loansVals,
         loansPct,
         totalRevFin: totalRevFinVals,
+        govDebt: govDebtVals,
+        govDebtPct,
+        privateDebt: privDebtVals,
+        privateDebtPct: privDebtPct,
         debt: debtVals,
       };
 
       const tradeStructureSectionData: TradeStructureSectionData = {
-        years: trade.tradeYears,
-        totalExports: trade.totalExports,
-        totalImports: trade.totalImports,
-        tradeBalance: trade.tradeBalance,
+        years: trade.structureYears,
+        yearLabels: trade.structureYearLabels,
+        totalExports: trade.structureTotalExports,
+        totalImports: trade.structureTotalImports,
+        tradeBalance: trade.structureTradeBalance,
       };
 
       const tradePartnersSectionData: TradePartnersSectionData = {
-        years: trade.tradeYears,
-        totalExports: trade.totalExports,
-        totalImports: trade.totalImports,
+        years: trade.annualYears,
+        totalExports: trade.annualTotalExports,
+        totalImports: trade.annualTotalImports,
         exports: trade.exports,
         imports: trade.imports,
       };
 
       const tradeCategoriesSectionData: TradeCategoriesSectionData = {
-        years: trade.tradeYears,
-        totalExports: trade.totalExports,
-        totalImports: trade.totalImports,
+        years: trade.annualYears,
+        totalExports: trade.annualTotalExports,
+        totalImports: trade.annualTotalImports,
         categoryExports: trade.categoryExports,
         categoryImports: trade.categoryImports,
       };

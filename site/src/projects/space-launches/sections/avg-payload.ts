@@ -4,7 +4,7 @@ import { chartOption, zipRecords } from '@/utils/chart-builder';
 import type { dict } from '../locales/dict-en';
 
 /** Section builder for Average Payload to Orbit by Decade chart. */
-export const avgPayloadSection: SectionBuilder<AvgPayloadSectionData, typeof dict> = ({ t, fmt }) => {
+export const avgPayloadSection: SectionBuilder<AvgPayloadSectionData, typeof dict> = ({ t, fmt, tokens }) => {
   return chartSection({
     id: 'avg-payload',
     title: t.proj.avgPayload.title,
@@ -53,7 +53,8 @@ export const avgPayloadSection: SectionBuilder<AvgPayloadSectionData, typeof dic
               return `${t.common.period}: ${fmt.decade(String(rawDecade))}`;
             },
             sort: 'desc',
-            row: ({ seriesName, value, data: pointData }) => {
+            row: ({ seriesName, value, seriesId, data: pointData }) => {
+              if (seriesId === 'average') return undefined;
               const launches = pointData.launches;
               return {
                 label: launches > 0 ? `${seriesName} (${fmt.number(launches)})` : seriesName,
@@ -68,6 +69,7 @@ export const avgPayloadSection: SectionBuilder<AvgPayloadSectionData, typeof dic
               return {
                 label: totalLabel,
                 value: fmt.unit(totalAvgPayload, 'mass-kilogram'),
+                color: 'warning',
               };
             },
           },
@@ -79,16 +81,33 @@ export const avgPayloadSection: SectionBuilder<AvgPayloadSectionData, typeof dic
             type: 'value',
             name: fmt.per(fmt.unitName('mass-kilogram'), 'event-launch'),
           },
-          series: activeRegions.map((region: string) => ({
-            id: region,
-            name: fmt.region(region),
-            type: 'bar' as const,
-            color: fmt.regionColor(region),
-            data: zipRecords({
-              value: data.avgPayload.series[region] || [],
-              launches: data.avgPayload.launches?.[region] || [],
-            }),
-          })),
+          series: [
+            ...activeRegions.map((region: string) => ({
+              id: region,
+              name: fmt.region(region),
+              type: 'bar' as const,
+              color: fmt.regionColor(region),
+              data: zipRecords({
+                value: data.avgPayload.series[region] || [],
+                launches: data.avgPayload.launches?.[region] || [],
+              }),
+            })),
+            {
+              id: 'average',
+              name: t.common.average,
+              type: 'line' as const,
+              smooth: true,
+              z: 3,
+              color: tokens.status.warning,
+              lineStyle: { width: 2.5 },
+              symbol: 'circle',
+              symbolSize: 6,
+              data: zipRecords({
+                value: data.avgPayload.totalAvgPayload,
+                launches: data.avgPayload.totalLaunches,
+              }),
+            },
+          ],
         }),
       };
     },

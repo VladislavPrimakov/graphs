@@ -28,7 +28,7 @@ export const dict: typeof enDict = {
   failureRates: {
     title: 'Аварійність орбітальних запусків за десятиліттями',
     kpis: {
-      globalSuccessRate: 'Глобальна надійність серед усіх запусків',
+      bestGlobalDecadeReliability: 'Рекорд глобальної надійності за десятиліття',
       reliabilityGrowth: 'Зростання надійності за десятиліттями',
       bestDecadeReliability: 'Рекорд надійності за десятиліття (>50 запусків)',
     },

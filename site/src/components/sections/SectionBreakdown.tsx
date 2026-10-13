@@ -2,7 +2,8 @@ import type React from 'react';
 import { useState } from 'react';
 import { ChevronDownIcon, ExpandArrowsIcon } from '@/components/icons';
 import { SectionHeader } from '@/components/sections/SectionHeader';
-import type { BreakdownGridSpec } from '@/types';
+import { useLossesFilters } from '@/projects/war-rf-ua/losses-filter-store';
+import type { BreakdownCategory, BreakdownGridSpec } from '@/types';
 import { cn } from '@/utils/cn';
 import { useFormat, useTranslation } from '@/utils/provider';
 
@@ -16,13 +17,16 @@ export interface SectionBreakdownProps {
   projectSlug?: string;
 }
 
-/** Generic categorized breakdown grid presenting multi-entity item comparisons with responsive flexbox card layout and accordion expansion. */
+/** Generic categorized breakdown grid presenting multi-entity item comparisons with responsive card layout and accordion expansion. */
 export const SectionBreakdown: React.FC<SectionBreakdownProps> = ({ spec, data, projectSlug }) => {
   const { id, previewLimit = 5 } = spec;
-  const categories = typeof spec.categories === 'function' ? spec.categories(data) : spec.categories;
+  const lossesFilters = useLossesFilters();
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
   const { t } = useTranslation();
   const fmt = useFormat();
+
+  const staticCategories = typeof spec.categories === 'function' ? spec.categories(data) : spec.categories;
+  const categories: BreakdownCategory[] = spec.dynamicCategories && lossesFilters.hasActiveFilters && lossesFilters.mapData ? spec.dynamicCategories(data, lossesFilters) : staticCategories;
 
   const toggleCategory = (catId: string) => {
     setExpandedCategories((prev) => ({
@@ -37,9 +41,9 @@ export const SectionBreakdown: React.FC<SectionBreakdownProps> = ({ spec, data, 
   const toggleAllCategories = () => {
     const nextState = !allExpanded;
     const update: Record<string, boolean> = {};
-    expandableCategories.forEach((cat) => {
+    for (const cat of expandableCategories) {
       update[cat.id] = nextState;
-    });
+    }
     setExpandedCategories(update);
   };
 
@@ -94,7 +98,10 @@ export const SectionBreakdown: React.FC<SectionBreakdownProps> = ({ spec, data, 
                             {list.items.length} {t.common.models}
                           </span>
                         </div>
-                        <div className="space-y-0.5 text-content-muted pl-1.5 border-l-2 border-border-subtle">
+                        <div
+                          className="space-y-0.5 text-content-muted pl-1.5 border-l-2"
+                          style={{ borderLeftColor: list.color ? `color-mix(in srgb, ${list.color} 40%, transparent)` : 'var(--color-border-subtle)' }}
+                        >
                           {visibleItems.map((item) => (
                             <div key={item.name} className="flex justify-between">
                               <span className="truncate pr-2">{item.name}</span>

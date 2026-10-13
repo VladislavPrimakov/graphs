@@ -4,7 +4,7 @@ import { chartOption, zipRecords } from '@/utils/chart-builder';
 import type { dict } from '../locales/dict-en';
 
 /** Section builder for Launch Failure Rates by Decade chart. */
-export const failureRatesSection: SectionBuilder<FailureRatesSectionData, typeof dict> = ({ t, fmt }) => {
+export const failureRatesSection: SectionBuilder<FailureRatesSectionData, typeof dict> = ({ t, fmt, tokens }) => {
   return chartSection({
     id: 'failure-rates',
     title: t.proj.failureRates.title,
@@ -29,8 +29,8 @@ export const failureRatesSection: SectionBuilder<FailureRatesSectionData, typeof
       return {
         kpisTop: [
           {
-            label: t.proj.failureRates.kpis.globalSuccessRate,
-            value: fmt.percent(summary.globalSuccessRate),
+            label: `${t.proj.failureRates.kpis.bestGlobalDecadeReliability} (${fmt.decade(summary.bestDecadeGlobalReliabilityDecade)})`,
+            value: fmt.percent(summary.bestDecadeGlobalReliabilityRate),
             valueColor: 'success',
           },
           {
@@ -53,7 +53,8 @@ export const failureRatesSection: SectionBuilder<FailureRatesSectionData, typeof
               return `${t.common.period}: ${fmt.decade(String(rawDecade))}`;
             },
             sort: 'desc',
-            row: ({ seriesName, value, data: pointData }) => {
+            row: ({ seriesName, value, seriesId, data: pointData }) => {
+              if (seriesId === 'average') return undefined;
               const { attempts, failures } = pointData;
               const label = attempts > 0 ? `${seriesName} (${fmt.number(failures)}/${fmt.number(attempts)})` : seriesName;
               return {
@@ -66,7 +67,7 @@ export const failureRatesSection: SectionBuilder<FailureRatesSectionData, typeof
               const totalFailures = data.failureRates.totalFailures[dataIndex] || 0;
               const totalRate = data.failureRates.totalFailureRate[dataIndex];
               if (totalRate == null) return undefined;
-              const totalLabel = totalAttempts > 0 ? `${t.common.total} (${fmt.number(totalFailures)}/${fmt.number(totalAttempts)})` : t.common.total;
+              const totalLabel = totalAttempts > 0 ? `${t.common.average} (${fmt.number(totalFailures)}/${fmt.number(totalAttempts)})` : t.common.average;
               return {
                 label: totalLabel,
                 value: fmt.percent(totalRate),
@@ -82,17 +83,35 @@ export const failureRatesSection: SectionBuilder<FailureRatesSectionData, typeof
             type: 'value',
             name: '%',
           },
-          series: activeRegions.map((region: string) => ({
-            id: region,
-            name: fmt.region(region),
-            type: 'bar' as const,
-            color: fmt.regionColor(region),
-            data: zipRecords({
-              value: data.failureRates.series[region] || [],
-              attempts: data.failureRates.attempts?.[region] || [],
-              failures: data.failureRates.failures?.[region] || [],
-            }),
-          })),
+          series: [
+            ...activeRegions.map((region: string) => ({
+              id: region,
+              name: fmt.region(region),
+              type: 'bar' as const,
+              color: fmt.regionColor(region),
+              data: zipRecords({
+                value: data.failureRates.series[region] || [],
+                attempts: data.failureRates.attempts?.[region] || [],
+                failures: data.failureRates.failures?.[region] || [],
+              }),
+            })),
+            {
+              id: 'average',
+              name: t.common.average,
+              type: 'line' as const,
+              smooth: true,
+              z: 3,
+              color: tokens.status.warning,
+              lineStyle: { width: 2.5 },
+              symbol: 'circle',
+              symbolSize: 6,
+              data: zipRecords({
+                value: data.failureRates.totalFailureRate,
+                attempts: data.failureRates.totalAttempts,
+                failures: data.failureRates.totalFailures,
+              }),
+            },
+          ],
         }),
       };
     },

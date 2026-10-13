@@ -73,7 +73,7 @@ export function renderTooltipHeader({ title, icon, withBorder = false, size = 'x
   const iconHtml = icon ? `<span class="shrink-0 flex items-center leading-none text-accent-primary">${icon}</span>` : '';
   const borderCls = withBorder || icon ? ' pb-1 border-b border-border-subtle/80' : '';
   const sizeCls = size === 'sm' || icon ? 'text-sm' : 'text-xs';
-  return `<div class="font-bold text-accent-primary flex items-center gap-2 mb-2 ${sizeCls}${borderCls}">${iconHtml}<span class="truncate">${title}</span></div>`;
+  return `<div class="font-bold text-accent-primary flex items-center gap-2 mb-2 whitespace-nowrap ${sizeCls}${borderCls}">${iconHtml}<span>${title}</span></div>`;
 }
 
 /** Renders a single key-value row with color dot, label, and formatted value. */
@@ -82,14 +82,14 @@ export function renderTooltipRow(row: TooltipRowSpec, fallbackName = '', fallbac
   const { className, styleAttr } = resolveColor(row.color);
   const label = row.label ?? fallbackName;
   const sub = row.subValue !== undefined && row.subValue !== '' ? ` <span class="text-content-muted font-normal ml-1">(${row.subValue})</span>` : '';
-  return `<div class="flex items-center justify-between text-xs gap-4"><span class="text-content-secondary flex items-center min-w-0">${dot}<span class="truncate">${label}</span></span><span class="font-semibold shrink-0 ${className}"${styleAttr}>${row.value}${sub}</span></div>`;
+  return `<div class="flex items-center justify-between text-xs gap-4 whitespace-nowrap"><span class="text-content-secondary flex items-center shrink-0">${dot}<span>${label}</span></span><span class="font-semibold shrink-0 ${className}"${styleAttr}>${row.value}${sub}</span></div>`;
 }
 
 /** Renders summary footer row with top border. */
 export function renderTooltipFooter(footer?: TooltipFooterSpec): string {
   if (!footer) return '';
   const { className, styleAttr } = resolveColor(footer.color, 'primary');
-  return `<div class="mt-2 pt-1.5 border-t border-border-subtle/80 flex justify-between items-center text-xs font-bold"><span class="text-content-secondary">${footer.label}:</span><span class="${className}"${styleAttr}>${footer.value}</span></div>`;
+  return `<div class="mt-2 pt-1.5 border-t border-border-subtle/80 flex justify-between items-center text-xs font-bold whitespace-nowrap gap-4"><span class="text-content-secondary">${footer.label}:</span><span class="${className}"${styleAttr}>${footer.value}</span></div>`;
 }
 
 /** Renders standard glassmorphic key-value table matching chart-builder & MapLibre popup specs. */
@@ -104,12 +104,12 @@ export function renderTooltipTablePopup({ title, rows, footer }: { title?: strin
       const sub = r.subValue !== undefined && r.subValue !== '' ? ` <span class="text-content-muted font-normal ml-1">(${r.subValue})</span>` : '';
       return `<tr class="${border}">
         <td class="py-1 text-content-muted font-normal whitespace-nowrap pr-3 align-top flex items-center">${dot}${r.label ? `${r.label}:` : ''}</td>
-        <td class="py-1 text-content-primary font-medium text-right wrap-break-word leading-snug ${className}"${styleAttr}>${r.value}${sub}</td>
+        <td class="py-1 text-content-primary font-medium text-right whitespace-nowrap pl-4 leading-snug ${className}"${styleAttr}>${r.value}${sub}</td>
       </tr>`;
     })
     .join('');
 
-  return `<div class="text-xs min-w-50 max-w-85">
+  return `<div class="text-xs min-w-50">
     ${headerHtml}
     <table class="w-full border-collapse text-[11px] mb-1">
       <tbody>${rowsHtml}</tbody>
