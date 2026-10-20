@@ -1,8 +1,8 @@
-import type { StaticProjectMeta } from '@/types';
+import type { ProjectManifest } from '@/utils/project';
 
 /** Static metadata descriptor for AI Tokens dashboard. */
 export const meta = {
   id: 'ai-tokens',
   tags: ['ai', 'tokens', 'compute', 'global'],
   sections: ['tokens-by-region', 'tokens-by-company'],
-} as const satisfies StaticProjectMeta<'ai-tokens'>;
+} as const satisfies ProjectManifest;

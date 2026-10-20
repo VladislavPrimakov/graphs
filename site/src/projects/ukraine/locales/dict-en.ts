@@ -1,5 +1,7 @@
 export const dict = {
-  budgetAndDebt: {
+  countries: 'Countries',
+  noCountriesFound: 'No countries found',
+  macro: {
     title: 'State Budget Execution & External Debt Dynamics',
     domesticRevenues: 'Domestic Revenues',
     defenseSpending: 'Defense Spending',
@@ -12,6 +14,22 @@ export const dict = {
     nominalGdp: 'Nominal GDP',
     fxRate: 'FX',
     gdp: 'GDP',
+  },
+  macroGrowth: {
+    title: 'Macroeconomic Growth Dynamics (YoY in USD)',
+    gdp: 'Nominal GDP',
+    realGdp: 'Real GDP (Physical Volume)',
+    domesticRev: 'Domestic Revenues',
+    externalFin: 'External Financing (Grants & Loans)',
+    defense: 'Defense Spending',
+    totalExp: 'Total Expenditures',
+    govDebt: 'Sovereign External Debt',
+    privateDebt: 'Private External Debt',
+    gdpShort: 'GDP',
+    realGdpShort: 'Real GDP',
+    domesticRevShort: 'REV',
+    totalExpShort: 'EXP',
+    govDebtShort: 'DEBT',
   },
   tradeStructure: {
     title: 'Foreign Trade Structure (Goods & Services)',

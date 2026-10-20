@@ -1,32 +1,56 @@
 import type React from 'react';
 import { useState } from 'react';
 import { ChevronDownIcon, ExpandArrowsIcon } from '@/components/icons';
-import { SectionHeader } from '@/components/sections/SectionHeader';
-import { useLossesFilters } from '@/projects/war-rf-ua/losses-filter-store';
-import type { BreakdownCategory, BreakdownGridSpec } from '@/types';
 import { cn } from '@/utils/cn';
 import { useFormat, useTranslation } from '@/utils/provider';
 
+/** Single item within a breakdown list. */
+export interface BreakdownItem {
+  /** Display name of the item or model. */
+  name: string;
+  /** Numerical count or formatted value of the item. */
+  value: number | string;
+}
+
+/** Named list of items inside a breakdown category card. */
+export interface BreakdownList {
+  /** Display label for the group or faction (e.g. 'RF', 'UA'). */
+  label: string;
+  /** Aggregate total count or metric for this list. */
+  total?: number | string;
+  /** Color theme accent applied to totals and indicator borders. */
+  color?: string;
+  /** Array of individual items in this list. */
+  items: BreakdownItem[];
+}
+
+/** Individual category card within a breakdown grid. */
+export interface BreakdownCategory {
+  /** Unique category identifier. */
+  id: string;
+  /** User-facing category title (e.g. 'Aircraft', 'Tanks'). */
+  title: string;
+  /** Optional icon displayed before the category title. */
+  icon?: React.ReactNode;
+  /** Optional badge text displayed in the header (e.g. '1.9:1'). */
+  badge?: string;
+  /** Comparison lists displayed inside this category card. */
+  lists: BreakdownList[];
+}
+
 /** Props for the generic categorized SectionBreakdown component. */
 export interface SectionBreakdownProps {
-  /** Specification declaring categories, comparison lists, and layout parameters. */
-  spec: BreakdownGridSpec;
-  /** Optional section dataset passed to dynamic category builders. */
-  data?: unknown;
-  /** Unique project slug identifier for anchor links. */
-  projectSlug?: string;
+  /** Categorized comparison cards to display. */
+  categories: BreakdownCategory[];
+  /** Number of items to show per list before collapsing. @default 5 */
+  previewLimit?: number;
 }
 
 /** Generic categorized breakdown grid presenting multi-entity item comparisons with responsive card layout and accordion expansion. */
-export const SectionBreakdown: React.FC<SectionBreakdownProps> = ({ spec, data, projectSlug }) => {
-  const { id, previewLimit = 5 } = spec;
-  const lossesFilters = useLossesFilters();
+export const SectionBreakdown: React.FC<SectionBreakdownProps> = ({ categories, previewLimit = 5 }) => {
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
   const { t } = useTranslation();
   const fmt = useFormat();
-
-  const staticCategories = typeof spec.categories === 'function' ? spec.categories(data) : spec.categories;
-  const categories: BreakdownCategory[] = spec.dynamicCategories && lossesFilters.hasActiveFilters && lossesFilters.mapData ? spec.dynamicCategories(data, lossesFilters) : staticCategories;
 
   const toggleCategory = (catId: string) => {
     setExpandedCategories((prev) => ({
@@ -49,20 +73,15 @@ export const SectionBreakdown: React.FC<SectionBreakdownProps> = ({ spec, data, 
 
   return (
     <>
-      <SectionHeader
-        sectionId={id}
-        projectSlug={projectSlug}
-        title={spec.title}
-        actions={
-          expandableCategories.length > 0 ? (
-            <button type="button" onClick={toggleAllCategories} className="btn-subtle">
-              <ExpandArrowsIcon className="w-3.5 h-3.5 text-accent-primary" />
-              <span className="hidden sm:inline">{allExpanded ? t.common.collapseAllCategories : t.common.expandAllCategories}</span>
-              <span className="sm:hidden">{allExpanded ? t.common.collapse : t.common.expandAll}</span>
-            </button>
-          ) : undefined
-        }
-      />
+      {expandableCategories.length > 0 && (
+        <div className="flex justify-end -mt-2 mb-3">
+          <button type="button" onClick={toggleAllCategories} className="btn-subtle px-2.5 h-7 text-xs text-content-secondary hover:text-content-primary transition-colors flex items-center gap-1.5">
+            <ExpandArrowsIcon className="w-3.5 h-3.5 text-accent-primary" />
+            <span className="hidden sm:inline">{allExpanded ? t.common.collapseAllCategories : t.common.expandAllCategories}</span>
+            <span className="sm:hidden">{allExpanded ? t.common.collapse : t.common.expandAll}</span>
+          </button>
+        </div>
+      )}
 
       <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,380px),1fr))] gap-4 items-start">
         {categories.map((cat) => {

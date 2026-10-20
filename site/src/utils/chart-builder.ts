@@ -187,6 +187,7 @@ function getDefaultLabelStyle(tokens: ThemeColors): SeriesLabelStyle {
 
 /** Default styling for line series end labels (e.g. world economic indicators). */
 const DEFAULT_END_LABEL_STYLE = {
+  show: true,
   fontFamily: themeFonts.sansFamily,
   fontWeight: 'bold',
   color: 'inherit',
@@ -333,6 +334,9 @@ function enhanceSingleSeries(series: SeriesOption, labelStyle: SeriesLabelStyle)
 
   if ('endLabel' in enhanced && enhanced.endLabel) {
     enhanced.endLabel = smartMerge(DEFAULT_END_LABEL_STYLE, enhanced.endLabel);
+    if (!enhanced.labelLayout && (enhanced.endLabel as { show?: boolean }).show !== false) {
+      enhanced.labelLayout = { moveOverlap: 'shiftY' };
+    }
   }
 
   if (Array.isArray(enhanced.data) && enhanced.data.some((item) => item && typeof item === 'object' && 'label' in item && item.label)) {
@@ -588,6 +592,7 @@ export function exportChartAsPng(chart: ECharts, title: string | undefined, expo
       },
       true,
     );
+    adjustChartLayout(offscreenChart);
 
     dataUrl = offscreenChart.getDataURL({
       type: 'png',
@@ -863,6 +868,67 @@ export function bindChartEvents(chart: ECharts | null | undefined): void {
 /* -------------------------------------------------------------------------- */
 /* 3. Columnar Transposition & Stacked Bar Series Builders                    */
 /* -------------------------------------------------------------------------- */
+
+/** Configuration options for outlier gap detection and axis ceiling resolution. */
+export interface OutlierCapOptions {
+  /** Multiplier ratio between adjacent ranked values to qualify as an isolated outlier. @default 2.5 */
+  ratio?: number;
+  /** Additional headroom multiplier added to the effective maximum for chart spacing. @default 1.15 */
+  headroom?: number;
+  /** Granularity rounding step for the resulting maximum. @default 50 */
+  roundStep?: number;
+  /** Minimum absolute threshold below which the calculated ceiling will not drop. @default 0 */
+  fallbackMin?: number;
+  /** Whether to return a calculated ceiling even when no outlier is present. @default false */
+  alwaysClamp?: boolean;
+}
+
+/**
+ * Resolves an effective maximum value from a series of numbers (or a list of parallel series)
+ * by detecting and suppressing isolated extreme outliers.
+ *
+ * When passed a 2D array of series, each series is evaluated independently so that isolated spikes
+ * in one metric (e.g. defense or external aid) do not falsely cluster with spikes in another metric,
+ * preserving high vertical resolution for normal indicators (e.g. GDP, debt, revenue).
+ */
+export function resolveEffectiveMax(seriesOrValues: readonly (number | null | undefined)[] | readonly (readonly (number | null | undefined)[])[], options: OutlierCapOptions = {}): number | undefined {
+  const is2D = seriesOrValues.length > 0 && Array.isArray(seriesOrValues[0]);
+  const seriesList = (is2D ? seriesOrValues : [seriesOrValues]) as readonly (readonly (number | null | undefined)[])[];
+
+  const ratio = options.ratio ?? 2.5;
+  let globalHasOutlier = false;
+  let maxEffectiveCeiling = 0;
+
+  for (const series of seriesList) {
+    const nums = series.filter((v): v is number => v != null && Number.isFinite(v) && v > 0);
+    if (nums.length === 0) continue;
+
+    const sorted = [...nums].sort((a, b) => b - a);
+    let effective = sorted[0];
+
+    for (let i = 0; i < sorted.length - 1; i++) {
+      if (sorted[i] > sorted[i + 1] * ratio && sorted[i + 1] > 0) {
+        effective = sorted[i + 1];
+        globalHasOutlier = true;
+      } else {
+        break;
+      }
+    }
+
+    if (effective > maxEffectiveCeiling) {
+      maxEffectiveCeiling = effective;
+    }
+  }
+
+  if (maxEffectiveCeiling === 0) return undefined;
+  if (!globalHasOutlier && !options.alwaysClamp) return undefined;
+
+  const headroom = options.headroom ?? 1.15;
+  const step = options.roundStep ?? 20;
+  const fallbackMin = options.fallbackMin ?? 0;
+
+  return Math.max(fallbackMin, Math.ceil((maxEffectiveCeiling * headroom) / step) * step);
+}
 
 /**
  * Transposes an object of parallel columnar arrays into an array of row objects.
@@ -1284,12 +1350,12 @@ function buildDualTooltip<TData>(config: DualTooltipSpec<TData>): (params: unkno
 
     const renderBranch = (group: DualGroupConfig<TData>, items: CallbackDataParams[]) => {
       const { html, sum } = renderRows(items, tick.ctx, config.row, config.formatValue, config.sort ?? 'desc', true);
-      if (!html && !group.total) return { html: '', sum: 0 };
+      if (!html) return { html: '', sum: 0 };
       const { className, styleAttr } = resolveColor(group.color);
       let totalText = '';
       if (typeof group.total === 'function') totalText = String(group.total({ ...tick.ctx, items, sum }));
-      else if (group.total === true && config.formatValue && sum > 0) totalText = config.formatValue(sum);
-      else if (group.total) totalText = String(group.total);
+      else if (group.total === true) totalText = config.formatValue ? config.formatValue(sum) : String(sum);
+      else if (typeof group.total === 'string') totalText = group.total;
 
       const header = `<div class="font-bold text-[11px] uppercase tracking-wider flex justify-between gap-4 mb-1 whitespace-nowrap ${className}"${styleAttr}><span>${group.title}</span>${totalText ? `<span>${totalText}</span>` : ''}</div>`;
       return { html: `<div class="mb-2">${header}<div class="space-y-0.5">${html}</div></div>`, sum };

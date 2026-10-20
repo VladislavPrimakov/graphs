@@ -33,4 +33,7 @@ export const dict: typeof enDict = {
       bestDecadeReliability: 'Höchste Zuverlässigkeit im Jahrzehnt (>50 Starts)',
     },
   },
+  countries: 'Länder',
+  noCountriesFound: 'Keine Länder gefunden',
+  allCountries: 'Alle Länder',
 };

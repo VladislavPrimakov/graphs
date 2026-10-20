@@ -1,15 +1,21 @@
-import type { CleanPowerSectionData } from '@graphs/types/world/clean-power';
-import type { ElectricityGenerationSectionData } from '@graphs/types/world/electricity-generation';
-import type { ElectricityPerCapitaSectionData } from '@graphs/types/world/electricity-per-capita';
-import type { GdpPerCapitaPppSectionData } from '@graphs/types/world/gdp-per-capita-ppp';
-import type { GdpPppSectionData } from '@graphs/types/world/gdp-ppp';
-import type { MachineryTurnoverSectionData } from '@graphs/types/world/machinery-turnover';
-import { exportProjectSections, getPipelineDataPath } from '@/utils/dataset';
+import type {
+  CleanPowerSectionData,
+  ElectricityGenerationSectionData,
+  ElectricityPerCapitaSectionData,
+  GdpPerCapitaPppSectionData,
+  GdpPppSectionData,
+  MachineryTurnoverSectionData,
+  WorldDataset,
+} from '@graphs/types/world';
+import { exportDataset, getPipelineDataPath } from '@/utils/dataset';
 import { fileExists, readJson, writeJson } from '@/utils/fs';
 import { fetchHeadMeta, fetchWithRetry, isRemoteMetaEqual, type RemoteFileMeta } from '@/utils/http';
 import { getLogger, isUpdate, isVerbose, runWithLogger } from '@/utils/logger';
 import { range, round } from '@/utils/math';
+import { loadEnv } from '@/utils/paths';
 import { resolveRegionCode } from '@/utils/region';
+
+loadEnv();
 
 const DATA_FILE = getPipelineDataPath('world');
 
@@ -18,6 +24,9 @@ const WDI_SOURCE_URL = 'https://api.worldbank.org/v2/sources/2?format=json';
 
 const START_YEAR = 1990;
 const CURRENT_YEAR = new Date().getFullYear();
+const DEFAULT_TOP = 7;
+const MIN_TOP = 3;
+const MAX_TOP = 15;
 
 /** Explicitly ignored global or non-geographic aggregate entities. */
 export const EXCLUDED_ENTITIES = new Set([
@@ -83,9 +92,37 @@ interface WorldPipelineCache {
   };
 }
 
-/** Exports section datasets for world. */
+/** Exports unified dataset for world along with project-level metadata. */
 async function exportWorld(sections: WorldPipelineCache['sections']): Promise<void> {
-  await exportProjectSections('world', sections);
+  const allEntities = new Set<string>();
+  let minYear = Number.POSITIVE_INFINITY;
+  let maxYear = Number.NEGATIVE_INFINITY;
+
+  for (const sec of Object.values(sections)) {
+    if (sec.years?.length) {
+      minYear = Math.min(minYear, sec.years[0]);
+      maxYear = Math.max(maxYear, sec.years[sec.years.length - 1]);
+    }
+    if (sec.series) {
+      for (const entity of Object.keys(sec.series)) {
+        allEntities.add(entity);
+      }
+    }
+  }
+
+  const sortedEntities = Array.from(allEntities).sort();
+  const dataset: WorldDataset = {
+    ...sections,
+    minYear: Number.isFinite(minYear) ? minYear : 1990,
+    maxYear: Number.isFinite(maxYear) ? maxYear : CURRENT_YEAR,
+    totalEntities: sortedEntities.length,
+    entities: sortedEntities,
+    defaultTop: DEFAULT_TOP,
+    minTop: MIN_TOP,
+    maxTop: MAX_TOP,
+  };
+
+  await exportDataset('world', dataset);
 }
 
 /** Fetches latest WDI database release date from World Bank sources API. */
@@ -549,9 +586,7 @@ export async function runWorldPipeline(forceUpdate = false, verbose?: boolean): 
           }
         }
 
-        const sortedEntities = Array.from(entityLatest.keys())
-          .sort((a, b) => (entityLatest.get(b) || 0) - (entityLatest.get(a) || 0))
-          .slice(0, 20);
+        const sortedEntities = Array.from(entityLatest.keys()).sort((a, b) => (entityLatest.get(b) || 0) - (entityLatest.get(a) || 0));
 
         const seriesByEntity: Record<string, (number | null)[]> = {};
         for (const c of sortedEntities) {
@@ -605,7 +640,7 @@ export async function runWorldPipeline(forceUpdate = false, verbose?: boolean): 
         0,
       );
       await exportWorld(sections);
-      logger.success(`Exported world datasets (${years[0]}–${years[years.length - 1]} global metrics, 20 top economies)`);
+      logger.success(`Exported world datasets (${years[0]}–${years[years.length - 1]} global metrics across all sovereign economies)`);
     },
     verbose,
   );

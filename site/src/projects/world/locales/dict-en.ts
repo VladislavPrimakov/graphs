@@ -1,4 +1,7 @@
 export const dict = {
+  countries: 'Countries',
+  searchCountry: 'Search country',
+  noCountriesFound: 'No countries found',
   gdpPpp: {
     title: 'GDP at PPP (Constant 2021 $)',
   },

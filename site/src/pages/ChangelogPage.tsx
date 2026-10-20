@@ -3,8 +3,8 @@ import { useParams } from 'react-router';
 import NotFoundPage from '@/pages/NotFoundPage';
 import { cn } from '@/utils/cn';
 import { usePath, useTranslation } from '@/utils/provider';
-import { SECTION_DATA_ATTR, useScrollSpy } from '@/utils/useScrollSpy';
 import { parseChangelogVersions, SITE_VERSION } from '@/utils/version';
+import { SECTION_DATA_ATTR, scrollToSection, useScrollSpy } from '@/utils/viewport';
 
 interface ChangelogData {
   html: string;
@@ -57,14 +57,14 @@ function ChangelogContent({ html, versions, normalizedVersion }: ChangelogConten
   const { t } = useTranslation();
   const { getHref } = usePath();
 
-  const activeId = useScrollSpy({
-    initialId: normalizedVersion,
-    getHref: (id) => (id ? getHref(`/changelog/${id}`) : getHref('/changelog')),
-    resolveTitle: (id) => {
+  const activeId = useScrollSpy(
+    (id) => (id ? getHref(`/changelog/${id}`) : getHref('/changelog')),
+    normalizedVersion,
+    (id) => {
       const ver = (id || normalizedVersion || `v${SITE_VERSION}`).replace(/^v/, '');
       return `${t.common.changelog} (v${ver})`;
     },
-  });
+  );
 
   const activeVersion = (activeId || normalizedVersion || `v${SITE_VERSION}`).replace(/^v/, '');
   const pageTitle = `${t.common.changelog} (v${activeVersion})`;
@@ -111,13 +111,10 @@ function ChangelogContent({ html, versions, normalizedVersion }: ChangelogConten
                     key={ver}
                     href={targetHref}
                     onClick={(e) => {
-                      const target = document.getElementById(id);
-                      if (target) {
-                        e.preventDefault();
-                        target.scrollIntoView({ behavior: 'smooth' });
-                        history.replaceState(null, '', targetHref + window.location.search);
-                        document.title = `${t.common.changelog} (v${ver})`;
-                      }
+                      e.preventDefault();
+                      scrollToSection(id, 'smooth');
+                      history.replaceState(null, '', targetHref + window.location.search);
+                      document.title = `${t.common.changelog} (v${ver})`;
                     }}
                     className={cn(
                       'px-3 py-1.5 font-mono transition-all',
@@ -143,13 +140,7 @@ export default function ChangelogPage() {
   const { html, versions } = use(loadChangelog());
   const { version } = useParams<{ version?: string }>();
 
-  let normalizedVersion = version ? (version.startsWith('v') ? version : `v${version}`) : undefined;
-  if (!normalizedVersion && typeof window !== 'undefined' && window.location.hash) {
-    const hash = window.location.hash.slice(1).replace(/^v-/, 'v');
-    if (versions.some((v) => `v${v}` === hash)) {
-      normalizedVersion = hash;
-    }
-  }
+  const normalizedVersion = version ? (version.startsWith('v') ? version : `v${version}`) : undefined;
 
   if (normalizedVersion && !versions.some((v) => `v${v}` === normalizedVersion)) {
     return <NotFoundPage />;

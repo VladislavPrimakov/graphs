@@ -1,4 +1,4 @@
-import type { WarLossCategory } from '@graphs/types/war-rf-ua/categories';
+import type { WarLossCategory } from '@graphs/types/war-rf-ua/losses';
 import type { Map as MapLibreMap } from 'maplibre-gl';
 import { lossColors } from '../tokens';
 

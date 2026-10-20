@@ -9,10 +9,13 @@
     "type-check": "tsc --noEmit",
     "test:space-launches": "bun test src/space-launches/launches.test.ts",
     "test:war-rf-ua": "bun test src/war-rf-ua/parse-attacks-ua.test.ts",
+    "test:country": "bun test src/country/cache.test.ts src/country/regions.test.ts",
+    "generate:countries": "bun src/country/generate-countries.ts",
     "run:ai-tokens": "bun src/ai-tokens/index.ts",
     "run:space-launches": "bun src/space-launches/index.ts",
     "run:world": "bun src/world/index.ts",
     "run:ukraine": "bun src/ukraine/index.ts",
+    "run:country": "bun src/country/index.ts",
     "run:war-rf-ua": "bun src/war-rf-ua/index.ts"
   },
   "dependencies": {
@@ -25,7 +28,7 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
-    "@types/bun": "^1.2.0",
+    "@types/bun": "^1.4.3",
     "@types/node": "^24.0.0",
     "typescript": "^5.9.3"
   }

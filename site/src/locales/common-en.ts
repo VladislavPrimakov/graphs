@@ -1,4 +1,4 @@
-import type { ProjectTag } from '@/types';
+import type { ProjectTag } from '@/utils/project';
 
 export const LocaleCommon = {
   graphs: 'Graphs',
@@ -50,6 +50,16 @@ export const LocaleCommon = {
   clear: 'Clear',
   restore: 'Reset Zoom',
   exportPng: 'Export PNG',
+  previousMonth: 'Previous month (Shift+click for 1 year)',
+  nextMonth: 'Next month (Shift+click for 1 year)',
+  previousDay: 'Previous day (Shift+click for 7 days)',
+  nextDay: 'Next day (Shift+click for 7 days)',
+  previousYearStep: 'Previous year (Shift+click for 10 years)',
+  nextYearStep: 'Next year (Shift+click for 10 years)',
+  previousYear: 'Previous year',
+  nextYear: 'Next year',
+  previousDecade: 'Previous decade',
+  nextDecade: 'Next decade',
   viewOnGitHub: 'View on GitHub',
   changelog: 'Changelog',
   toggleNavigation: 'Toggle navigation',

@@ -1,59 +1,82 @@
-import type { TradePartnersSectionData } from '@graphs/types/ukraine/trade-partners';
-import { chartSection, type SectionBuilder } from '@/types';
+import { createElement } from 'react';
+import { createChart } from '@/components/sections/SectionChart';
 import { chartOption, createBarSeries } from '@/utils/chart-builder';
-import type { dict } from '../locales/dict-en';
+import type { Section } from '../project';
 import { tradeColors } from '../tokens';
 
 /** Section builder for Ukraine Foreign Trade Sovereign Partners chart. */
-export const tradePartnersSection: SectionBuilder<TradePartnersSectionData, typeof dict> = ({ t, fmt }) => {
-  return chartSection({
+export const tradePartnersSection: Section = ({ t, fmt }) => {
+  return {
     id: 'trade-partners',
     title: t.proj.tradePartners.title,
     sources: [{ name: 'NBU — Merchandise Trade by Partner Nation (xlsx)', url: 'https://bank.gov.ua/files/ES/Trade_y.xlsx' }],
-    controls: (data) =>
-      [
+    toolbars: ({ ukraine: dataset }) => {
+      const data = dataset['trade-partners'];
+      const volumeByCountry: Record<string, number> = {};
+      for (const yearExports of data.exports) {
+        for (const [code, val] of yearExports) {
+          volumeByCountry[code] = (volumeByCountry[code] || 0) + val;
+        }
+      }
+      for (const yearImports of data.imports) {
+        for (const [code, val] of yearImports) {
+          volumeByCountry[code] = (volumeByCountry[code] || 0) + val;
+        }
+      }
+      const partnerCodes = Object.keys(volumeByCountry).sort((a, b) => volumeByCountry[b] - volumeByCountry[a]);
+
+      return [
         {
-          id: 'labels',
-          type: 'checkbox',
-          defaultValue: true,
-          label: t.common.labels,
+          id: 'partners',
+          controls: [
+            {
+              id: 'mode',
+              type: 'toggle',
+              defaultValue: 'absolute',
+              label: t.common.metric,
+              options: [
+                { value: 'absolute', label: `${fmt.scale(1e9)} ($)` },
+                { value: 'percent', label: `${t.common.share} (%)` },
+              ],
+            },
+            {
+              id: 'count',
+              type: 'slider',
+              min: 3,
+              max: 15,
+              defaultValue: 7,
+              label: t.common.top,
+              disabled: (state) => ((state.countries as string[])?.length ?? 0) > 0,
+            },
+            {
+              id: 'countries',
+              type: 'multi-search-select',
+              placeholder: t.proj.countries,
+              emptyLabel: t.proj.noCountriesFound,
+              items: partnerCodes.map((code) => ({
+                value: code,
+                label: fmt.region(code),
+                icon: createElement('span', { className: 'font-mono text-[10px] opacity-75' }, code),
+              })),
+            },
+          ] as const,
         },
-        {
-          id: 'mode',
-          type: 'toggle',
-          defaultValue: 'absolute',
-          label: t.common.metric,
-          options: [
-            { value: 'absolute', label: `${fmt.scale(1e9)} ($)` },
-            { value: 'percent', label: `${t.common.share} (%)` },
-          ],
-        },
-        {
-          id: 'count',
-          type: 'slider',
-          min: 3,
-          max: Math.min(15, Math.max(3, ...data.exports.map((e) => e.length), ...data.imports.map((i) => i.length))),
-          defaultValue: 7,
-          label: t.common.top,
-        },
-        {
-          id: 'years',
-          type: 'range-slider',
-          min: data.years[0],
-          max: data.years[data.years.length - 1],
-          defaultValue: [data.years[Math.max(0, data.years.length - 6)], data.years[data.years.length - 1]],
-          label: t.common.period,
-        },
-      ] as const,
-    buildView: (data, values) => {
-      const count = values.count;
-      const isPercent = values.mode === 'percent';
-      const [startYear, endYear] = values.years;
-      const showLabels = values.labels;
+      ] as const;
+    },
+    buildView: ({ ukraine: dataset }, { ukraine, partners }) => {
+      const data = dataset['trade-partners'];
+      const [selStartYear, selEndYear] = ukraine?.years ?? [data.years[Math.max(0, data.years.length - 6)], data.years[data.years.length - 1]];
+      const showLabels = ukraine?.labels ?? true;
+      const isPercent = partners.mode === 'percent';
+      const count = partners.count;
+      const selectedCountries = partners.countries ?? [];
+      const hasSelectedCountries = selectedCountries.length > 0;
       const tradeYearsStr = data.years.map(String);
 
-      const startIdx = Math.max(0, data.years.indexOf(startYear));
-      const endIdx = data.years.indexOf(endYear) !== -1 ? data.years.indexOf(endYear) + 1 : data.years.length;
+      const foundStartIdx = data.years.findIndex((y) => y >= selStartYear);
+      const startIdx = foundStartIdx === -1 ? 0 : foundStartIdx;
+      const foundEndIdx = data.years.findLastIndex((y) => y <= selEndYear);
+      const endIdx = foundEndIdx === -1 ? data.years.length : foundEndIdx + 1;
 
       const visibleYears = data.years.slice(startIdx, endIdx);
       const visibleExports = data.exports.slice(startIdx, endIdx);
@@ -71,7 +94,9 @@ export const tradePartnersSection: SectionBuilder<TradePartnersSectionData, type
 
         for (let i = 0; i < visibleYears.length; i++) {
           const year = visibleYears[i];
-          const yearTop = dataset[i]?.slice(0, count) || [];
+          const rawYearList = dataset[i] || [];
+          const yearTop = hasSelectedCountries ? rawYearList.filter(([code]) => selectedCountries.includes(code)) : rawYearList.slice(0, count);
+
           for (const [code, val, share] of yearTop) {
             const localizedName = fmt.region(code);
             series.push(
@@ -105,54 +130,58 @@ export const tradePartnersSection: SectionBuilder<TradePartnersSectionData, type
         return series;
       };
 
-      return chartOption({
-        title: { text: `${t.proj.tradePartners.title} (${t.common.top} ${count})` },
-        tooltip: {
-          type: 'dual',
-          header: ({ name }) => `${t.common.period}: ${name}`,
-          positive: {
-            title: t.common.exports,
-            color: tradeColors.exportTotal,
-            total: ({ dataIndex }) => fmt.number(visibleTotalExports[dataIndex] || 0),
-          },
-          negative: {
-            title: t.common.imports,
-            color: tradeColors.importTotal,
-            total: ({ dataIndex }) => fmt.number(visibleTotalImports[dataIndex] || 0),
-          },
-          row: ({ data: rowData }) => {
-            const { val, share } = rowData as { val: number; share: number };
-            return {
-              value: isPercent ? fmt.percent(share) : fmt.number(val),
-              subValue: isPercent ? fmt.number(val) : fmt.percent(share),
-            };
-          },
-          footer: ({ dataIndex }) => {
-            const balance = visibleTradeBalance[dataIndex] || 0;
-            const sign = balance > 0 ? '+' : '';
-            return {
-              label: t.common.balance,
-              value: `${sign}${fmt.number(balance)}`,
-              color: balance < 0 ? 'danger' : 'success',
-            };
-          },
-        },
-        legend: {
-          show: true,
-        },
-        xAxis: {
-          type: 'category',
-          data: tradeYearsStr.slice(startIdx, endIdx),
-        },
-        yAxis: {
-          type: 'value',
-          name: isPercent ? '%' : `${fmt.scale(1e9)} ($)`,
-          axisLabel: {
-            formatter: (val: number) => String(Math.abs(val)),
-          },
-        },
-        series: [...buildTradeSeries('exp'), ...buildTradeSeries('imp')],
-      });
+      return {
+        title: hasSelectedCountries ? t.proj.tradePartners.title : `${t.proj.tradePartners.title} (${t.common.top} ${count})`,
+        content: createChart(
+          chartOption({
+            tooltip: {
+              type: 'dual',
+              header: ({ name }) => `${t.common.period}: ${name}`,
+              positive: {
+                title: t.common.exports,
+                color: tradeColors.exportTotal,
+                total: ({ dataIndex }) => fmt.number(visibleTotalExports[dataIndex] || 0),
+              },
+              negative: {
+                title: t.common.imports,
+                color: tradeColors.importTotal,
+                total: ({ dataIndex }) => fmt.number(visibleTotalImports[dataIndex] || 0),
+              },
+              row: ({ data: rowData }) => {
+                const { val, share } = rowData as { val: number; share: number };
+                return {
+                  value: isPercent ? fmt.percent(share) : fmt.number(val),
+                  subValue: isPercent ? fmt.number(val) : fmt.percent(share),
+                };
+              },
+              footer: ({ dataIndex }) => {
+                const balance = visibleTradeBalance[dataIndex] || 0;
+                const sign = balance > 0 ? '+' : '';
+                return {
+                  label: t.common.balance,
+                  value: `${sign}${fmt.number(balance)}`,
+                  color: balance < 0 ? 'danger' : 'success',
+                };
+              },
+            },
+            legend: {
+              show: true,
+            },
+            xAxis: {
+              type: 'category',
+              data: tradeYearsStr.slice(startIdx, endIdx),
+            },
+            yAxis: {
+              type: 'value',
+              name: isPercent ? '%' : `${fmt.scale(1e9)} ($)`,
+              axisLabel: {
+                formatter: (val: number) => String(Math.abs(val)),
+              },
+            },
+            series: [...buildTradeSeries('exp'), ...buildTradeSeries('imp')],
+          }),
+        ),
+      };
     },
-  });
+  };
 };

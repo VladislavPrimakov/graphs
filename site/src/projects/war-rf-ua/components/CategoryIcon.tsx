@@ -1,4 +1,4 @@
-import type { WarLossCategory } from '@graphs/types/war-rf-ua/categories';
+import type { WarLossCategory } from '@graphs/types/war-rf-ua/losses';
 import { CATEGORY_SVG_PATHS } from './category-markers';
 
 export interface CategoryIconProps {

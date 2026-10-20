@@ -31,4 +31,7 @@ export const dict = {
       bestDecadeReliability: 'Top Reliability in Decade (>50 launches)',
     },
   },
+  countries: 'Countries',
+  noCountriesFound: 'No countries found',
+  allCountries: 'All Countries',
 };

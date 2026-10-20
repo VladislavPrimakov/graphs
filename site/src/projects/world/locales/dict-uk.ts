@@ -1,6 +1,9 @@
 import type { dict as enDict } from './dict-en';
 
 export const dict: typeof enDict = {
+  countries: 'Країни',
+  searchCountry: 'Пошук країни',
+  noCountriesFound: 'Країни не знайдені',
   gdpPpp: {
     title: 'ВВП за ПКС (у цінах 2021 р.)',
   },

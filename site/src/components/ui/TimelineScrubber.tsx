@@ -2,150 +2,169 @@ import type React from 'react';
 import { useRef, useState } from 'react';
 import { cn } from '@/utils/cn';
 import { useFormat, useTranslation } from '@/utils/provider';
+import { DatePickerPopover } from './DatePickerPopover';
+
+export type ScrubberGranularity = 'daily' | 'monthly' | 'yearly';
 
 /** Props for the interactive TimelineScrubber component. */
-export type TimelineScrubberProps =
-  | {
-      /** Range selection mode with two handles and middle window dragging (default). */
-      mode?: 'range';
-      /** Sequential period identifiers spanning the full timeline (e.g. `['2022-02', '2022-03', ...]`). */
-      periods: string[];
-      /** Numeric event counts for the background density histogram matching `periods` 1:1. */
-      density?: number[];
-      /** Currently active start date (`YYYY-MM-DD` or `YYYY-MM`), or empty string for all time. */
-      dateFrom: string;
-      /** Currently active end date (`YYYY-MM-DD` or `YYYY-MM`), or empty string for all time. */
-      dateTo: string;
-      /** Callback fired when the selection window or year preset changes. */
-      onChange: (range: { dateFrom: string; dateTo: string }) => void;
-      selectedDate?: never;
-      onSelectDate?: never;
-      /** Additional container CSS class names. */
-      className?: string;
-    }
-  | {
-      /** Single date selection mode with a single draggable handle. */
-      mode: 'single';
-      /** Sequential period identifiers spanning the full timeline (e.g. daily `['2023-01-28', ...]`). */
-      periods: string[];
-      /** Numeric event counts for the background density histogram matching `periods` 1:1. */
-      density?: number[];
-      /** Currently active selected date (`YYYY-MM-DD` or `YYYY-MM`). */
-      selectedDate: string;
-      /** Callback fired when the active date changes. */
-      onSelectDate: (date: string) => void;
-      dateFrom?: never;
-      dateTo?: never;
-      onChange?: never;
-      /** Additional container CSS class names. */
-      className?: string;
-    };
-
-/** Resolves the last calendar day for a given `YYYY-MM` month string. */
-function getLastDayOfMonth(period: string): string {
-  const [yStr, mStr] = period.split('-');
-  const y = Number(yStr);
-  const m = Number(mStr);
-  const lastDay = new Date(y, m, 0).getDate();
-  return String(lastDay).padStart(2, '0');
+export interface TimelineScrubberProps {
+  /** Temporal resolution: 'daily', 'monthly', or 'yearly'. */
+  granularity: ScrubberGranularity;
+  /** Sequential period identifiers spanning the full timeline (e.g. yearly `['1990', ...]`, monthly `['2022-02', ...]`, daily `['2023-01-28', ...]`). */
+  periods: string[];
+  /** Numeric event counts for the background density histogram matching `periods` 1:1. */
+  density?: number[];
+  /** Currently active start date (`YYYY`, `YYYY-MM`, or `YYYY-MM-DD`), or empty string for all time. */
+  dateFrom: string;
+  /** Currently active end date (`YYYY`, `YYYY-MM`, or `YYYY-MM-DD`), or empty string for all time. */
+  dateTo: string;
+  /** Callback fired when the selection window or preset changes. */
+  onChange: (range: { dateFrom: string; dateTo: string }) => void;
+  /** Optional callback resetting state back to default. */
+  onReset?: () => void;
+  /** Indicates whether non-default filters are active. */
+  hasActiveFilters?: boolean;
+  /** Additional container CSS class names. */
+  className?: string;
 }
 
-/** Formats a `YYYY-MM` or `YYYY-MM-DD` period into a localized label (e.g. 'Feb 2022' or '28 Jan 2023'). */
-function formatPeriodLabel(fmt: ReturnType<typeof useFormat>, period: string): string {
+/** Formats a `YYYY`, `YYYY-MM`, or `YYYY-MM-DD` period into a localized label. */
+function formatPeriodLabel(fmt: ReturnType<typeof useFormat>, period: string, granularity: ScrubberGranularity): string {
   if (!period) return '';
-  const parts = period.split('-');
-  if (parts.length === 3) {
-    const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
-    return fmt.date(d, { day: 'numeric', month: 'short', year: 'numeric' });
+  const parts = period.split('-').map(Number);
+  if (granularity === 'yearly') {
+    return fmt.date(new Date(parts[0], 0, 1), { year: 'numeric' });
   }
-  const [y, m] = parts;
-  const d = new Date(Number(y), Number(m) - 1, 1);
-  return fmt.date(d, { month: 'short', year: 'numeric' });
+  if (granularity === 'monthly') {
+    return fmt.date(new Date(parts[0], parts[1] - 1, 1), { month: 'short', year: 'numeric' });
+  }
+  return fmt.date(new Date(parts[0], parts[1] - 1, parts[2]), { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
-interface PresetChipProps {
+const labelLengthCache = new WeakMap<ReturnType<typeof useFormat>, Map<ScrubberGranularity, number>>();
+
+/** Dynamically computes the maximum formatted date string length across all calendar units for the active locale. */
+function getMaxPeriodLabelChars(fmt: ReturnType<typeof useFormat>, granularity: ScrubberGranularity): number {
+  let cache = labelLengthCache.get(fmt);
+  if (!cache) {
+    cache = new Map();
+    labelLengthCache.set(fmt, cache);
+  }
+  const cached = cache.get(granularity);
+  if (cached !== undefined) return cached;
+
+  let maxLen = 0;
+  if (granularity === 'yearly') {
+    maxLen = 4;
+  } else {
+    for (let m = 0; m < 12; m++) {
+      const d = granularity === 'monthly' ? new Date(2024, m, 1) : new Date(2024, m, 28);
+      const label = granularity === 'monthly' ? fmt.date(d, { month: 'short', year: 'numeric' }) : fmt.date(d, { day: 'numeric', month: 'short', year: 'numeric' });
+      if (label.length > maxLen) {
+        maxLen = label.length;
+      }
+    }
+  }
+
+  cache.set(granularity, maxLen);
+  return maxLen;
+}
+
+/** Resolves index of a date string in sequential periods supporting exact, prefix, or boundary clamping. */
+function findPeriodIndex(periods: string[], date: string, type: 'start' | 'end', granularity: ScrubberGranularity): number {
+  if (!date || periods.length === 0) return type === 'start' ? 0 : periods.length - 1;
+
+  const directIdx = periods.indexOf(date);
+  if (directIdx !== -1) return directIdx;
+
+  let target = date;
+  if (granularity === 'yearly') {
+    target = date.slice(0, 4);
+  } else if (granularity === 'monthly') {
+    target = date.length > 7 ? date.slice(0, 7) : date;
+  }
+
+  const targetIdx = periods.indexOf(target);
+  if (targetIdx !== -1) return targetIdx;
+
+  if (type === 'start') {
+    const idx = periods.findIndex((p) => p >= target);
+    return idx === -1 ? periods.length - 1 : idx;
+  }
+  const idx = periods.findLastIndex((p) => p <= target || p.startsWith(target));
+  return idx === -1 ? 0 : idx;
+}
+
+interface PeriodPresetEntry {
+  id: string;
   label: string;
-  isActive: boolean;
-  onClick: () => void;
-}
-
-/** Reusable preset button chip for quick navigation between years or all time. */
-function PresetChip({ label, isActive, onClick }: PresetChipProps) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        'px-2.5 py-0.5 text-xs font-medium rounded-md transition-colors cursor-pointer',
-        isActive ? 'btn-accent font-semibold shadow-xs' : 'btn-subtle text-content-muted hover:text-content-primary',
-      )}
-    >
-      {label}
-    </button>
-  );
-}
-
-interface ScrubberThumbProps {
-  percent: number;
-  title: string;
-  isDragging: boolean;
-  onPointerDown: (e: React.PointerEvent<HTMLDivElement>) => void;
-  onPointerMove: (e: React.PointerEvent<HTMLDivElement>) => void;
-  onPointerUp: (e: React.PointerEvent<HTMLDivElement>) => void;
-}
-
-/** Unified draggable handle with pointer capture and glowing active ring. */
-function ScrubberThumb({ percent, title, isDragging, onPointerDown, onPointerMove, onPointerUp }: ScrubberThumbProps) {
-  return (
-    <div
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-      onPointerCancel={onPointerUp}
-      style={{ left: `${percent}%` }}
-      className="absolute top-0 bottom-0 -ml-2.5 w-5 flex items-center justify-center cursor-ew-resize group z-20 touch-none"
-      title={title}
-    >
-      <div
-        className={cn(
-          'w-2 h-6 rounded-xs bg-accent-primary border border-white/20 shadow-xs flex items-center justify-center transition-transform',
-          'group-hover:scale-110 group-hover:bg-accent-hover',
-          isDragging && 'scale-115 ring-2 ring-accent-primary/40',
-        )}
-      >
-        <div className="w-0.5 h-3 bg-white/70 rounded-full" />
-      </div>
-    </div>
-  );
-}
-
-interface YearEntry {
-  year: string;
   firstIdx: number;
   lastIdx: number;
   firstPeriod: string;
   lastPeriod: string;
 }
 
-/** Precomputes unique year metadata and start/end boundaries for preset chips and tick marks. */
-function computeYearEntries(periods: string[]): YearEntry[] {
-  const yearEntries: YearEntry[] = [];
-  const yearMap = new Map<string, YearEntry>();
-  const total = periods.length;
+const presetsCache = new WeakMap<ReturnType<typeof useFormat>, WeakMap<string[], PeriodPresetEntry[]>>();
 
-  for (let i = 0; i < total; i++) {
-    const y = periods[i].slice(0, 4);
-    const existing = yearMap.get(y);
+/** Precomputes preset boundary chunks (years or decades for long yearly mode), cached per periods array. */
+function getPeriodPresets(periods: string[], granularity: ScrubberGranularity, fmt: ReturnType<typeof useFormat>): PeriodPresetEntry[] {
+  let fmtCache = presetsCache.get(fmt);
+  if (!fmtCache) {
+    fmtCache = new WeakMap();
+    presetsCache.set(fmt, fmtCache);
+  }
+  let entries = fmtCache.get(periods);
+  if (entries) return entries;
+
+  entries = [];
+  const map = new Map<string, PeriodPresetEntry>();
+  const isDecades = granularity === 'yearly' && periods.length > 10;
+
+  for (let i = 0; i < periods.length; i++) {
+    const key = isDecades ? `${periods[i].slice(0, 3)}0` : periods[i].slice(0, 4);
+    const existing = map.get(key);
     if (!existing) {
-      const entry: YearEntry = { year: y, firstIdx: i, lastIdx: i, firstPeriod: periods[i], lastPeriod: periods[i] };
-      yearMap.set(y, entry);
-      yearEntries.push(entry);
+      const label = isDecades ? fmt.decade(`${key}s`) : key;
+      const entry: PeriodPresetEntry = { id: key, label, firstIdx: i, lastIdx: i, firstPeriod: periods[i], lastPeriod: periods[i] };
+      map.set(key, entry);
+      entries.push(entry);
     } else {
       existing.lastIdx = i;
       existing.lastPeriod = periods[i];
     }
   }
-  return yearEntries;
+
+  fmtCache.set(periods, entries);
+  return entries;
+}
+
+interface TrackMarker {
+  key: string;
+  label: string;
+  firstIdx: number;
+}
+
+const trackMarkersCache = new WeakMap<string[], TrackMarker[]>();
+
+/** Precomputes demarcation track markers, cached per periods array. */
+function getTrackMarkers(periods: string[], granularity: ScrubberGranularity): TrackMarker[] {
+  let markers = trackMarkersCache.get(periods);
+  if (markers) return markers;
+
+  markers = [];
+  const isDecades = granularity === 'yearly' && periods.length > 15;
+  const seen = new Set<string>();
+
+  for (let i = 0; i < periods.length; i++) {
+    const label = isDecades ? `${periods[i].slice(0, 3)}0` : periods[i].slice(0, 4);
+    if (!seen.has(label)) {
+      seen.add(label);
+      markers.push({ key: label, label, firstIdx: i });
+    }
+  }
+
+  trackMarkersCache.set(periods, markers);
+  return markers;
 }
 
 interface DensityBar {
@@ -156,71 +175,109 @@ interface DensityBar {
   centerPercent: number;
 }
 
-/** Normalizes and samples density bars down to max 100 bars for smooth 60 FPS rendering and crisp gaps. */
-function computeDensityBars(density: number[] | undefined, periods: string[]): DensityBar[] {
-  if (!density || density.length === 0) return [];
-  const n = density.length;
+const densityBarsCache = new WeakMap<string[], DensityBar[]>();
 
+/** Normalizes and samples density bars down to max 100 bars, cached per periods array. */
+function getDensityBars(periods: string[], density?: number[]): DensityBar[] {
+  if (!density || density.length === 0) return [];
+  let bars = densityBarsCache.get(periods);
+  if (bars) return bars;
+
+  const n = density.length;
   if (n <= 100) {
     const maxVal = Math.max(...density, 0.001);
     const barWidth = Math.max(0.4, 100 / n - 0.25);
-    return density.map((val, idx) => ({
+    bars = density.map((val, idx) => ({
       key: periods[idx] || String(idx),
       xPercent: (idx / n) * 100,
       widthPercent: barWidth,
       heightPercent: val > 0 ? Math.max(4, (val / maxVal) * 85) : 0,
       centerPercent: ((idx + 0.5) / n) * 100,
     }));
-  }
+  } else {
+    const bins = 100;
+    const binSize = n / bins;
+    const barWidth = 100 / bins - 0.25;
+    const binValues: number[] = [];
 
-  const bins = 100;
-  const binSize = n / bins;
-  const barWidth = 100 / bins - 0.25;
-
-  const binValues: number[] = [];
-  for (let b = 0; b < bins; b++) {
-    const start = Math.floor(b * binSize);
-    const end = Math.floor((b + 1) * binSize);
-    let sum = 0;
-    for (let i = start; i < end; i++) {
-      sum += density[i] || 0;
+    for (let b = 0; b < bins; b++) {
+      const start = Math.floor(b * binSize);
+      const end = Math.floor((b + 1) * binSize);
+      let sum = 0;
+      for (let i = start; i < end; i++) sum += density[i] || 0;
+      binValues.push(sum);
     }
-    binValues.push(sum);
+
+    const maxBarVal = Math.max(...binValues, 0.001);
+    bars = binValues.map((val, b) => ({
+      key: `bin-${b}`,
+      xPercent: (b / bins) * 100,
+      widthPercent: barWidth,
+      heightPercent: val > 0 ? Math.max(4, (val / maxBarVal) * 85) : 0,
+      centerPercent: ((b + 0.5) / bins) * 100,
+    }));
   }
 
-  const maxBarVal = Math.max(...binValues, 0.001);
-
-  return binValues.map((val, b) => ({
-    key: `bin-${b}`,
-    xPercent: (b / bins) * 100,
-    widthPercent: barWidth,
-    heightPercent: val > 0 ? Math.max(4, (val / maxBarVal) * 85) : 0,
-    centerPercent: ((b + 0.5) / bins) * 100,
-  }));
+  densityBarsCache.set(periods, bars);
+  return bars;
 }
 
-const SELECTION_ZONE_BASE = 'absolute top-0 bottom-0 bg-accent-primary/20 border-y border-accent-primary/40 transition-colors';
-const SELECTION_ZONE_ACTIVE = 'bg-accent-primary/30 border-accent-primary/70';
+/** Unified draggable handle with pointer capture and glowing active ring. */
+function ScrubberThumb({
+  percent,
+  title,
+  isDragging,
+  onPointerDown,
+  onPointerMove,
+  onPointerUp,
+}: {
+  percent: number;
+  title: string;
+  isDragging: boolean;
+  onPointerDown: (e: React.PointerEvent<HTMLDivElement>) => void;
+  onPointerMove: (e: React.PointerEvent<HTMLDivElement>) => void;
+  onPointerUp: (e: React.PointerEvent<HTMLDivElement>) => void;
+}) {
+  return (
+    <div
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerUp}
+      style={{ left: `${percent}%` }}
+      className="absolute top-0 bottom-0 -ml-2 w-4 flex items-center justify-center cursor-ew-resize group z-20 touch-none"
+      title={title}
+    >
+      <div
+        className={cn(
+          'w-1.5 h-3.5 rounded-xs bg-accent-primary border border-white/20 shadow-xs flex items-center justify-center transition-transform',
+          'group-hover:scale-110 group-hover:bg-accent-hover',
+          isDragging && 'scale-115 ring-2 ring-accent-primary/40',
+        )}
+      >
+        <div className="w-0.5 h-2 bg-white/70 rounded-full" />
+      </div>
+    </div>
+  );
+}
+
+const SELECTION_ZONE_BASE = 'absolute top-0 bottom-0 bg-accent-primary/20 border-y border-accent-primary/40 pointer-events-none transition-colors';
 
 /**
  * Interactive timeline scrubber control featuring:
- * - Dual-thumb interval resizing and window dragging in 'range' mode
- * - Single-thumb precision date scrubbing in 'single' mode
- * - Year preset chips and quick-jump navigation
+ * - Dual-thumb interval resizing with nearest-thumb track clicks
+ * - Year and decade preset chips and quick-jump navigation
  * - Lightweight SVG data density mini-histogram
- * - Year tick markers and active period status badge
+ * - Segmented date picker popovers supporting daily, monthly, and yearly granularities
  */
-export function TimelineScrubber(props: TimelineScrubberProps) {
-  const { periods, density = [], className } = props;
-  const isSingle = props.mode === 'single';
-
+export function TimelineScrubber({ granularity, periods, density, dateFrom, dateTo, onChange, onReset, hasActiveFilters, className }: TimelineScrubberProps) {
   const {
     t: { common: tCommon },
   } = useTranslation();
   const fmt = useFormat();
 
   const trackRef = useRef<HTMLDivElement>(null);
-  const [dragging, setDragging] = useState<'left' | 'right' | 'window' | 'single' | null>(null);
+  const [dragging, setDragging] = useState<'left' | 'right' | null>(null);
 
   const dragInfoRef = useRef<{
     pointerId: number;
@@ -228,79 +285,47 @@ export function TimelineScrubber(props: TimelineScrubberProps) {
     initialStartIdx: number;
     initialEndIdx: number;
     trackWidth: number;
-  }>({
-    pointerId: 0,
-    startX: 0,
-    initialStartIdx: 0,
-    initialEndIdx: 0,
-    trackWidth: 0,
-  });
+  }>({ pointerId: 0, startX: 0, initialStartIdx: 0, initialEndIdx: 0, trackWidth: 0 });
 
   const totalPeriods = periods.length;
   if (totalPeriods === 0) return null;
 
-  // Single mode state
-  let singleIdx = 0;
-  if (isSingle) {
-    singleIdx = props.selectedDate ? periods.indexOf(props.selectedDate) : totalPeriods - 1;
-    if (singleIdx < 0) singleIdx = totalPeriods - 1;
-  }
+  const startIdx = Math.min(dateFrom ? findPeriodIndex(periods, dateFrom, 'start', granularity) : 0, totalPeriods - 1);
+  const rawEndIdx = dateTo ? findPeriodIndex(periods, dateTo, 'end', granularity) : totalPeriods - 1;
+  const endIdx = Math.max(startIdx, rawEndIdx);
 
-  // Range mode state
-  const fromMonth = !isSingle && props.dateFrom ? props.dateFrom.slice(0, 7) : '';
-  const toMonth = !isSingle && props.dateTo ? props.dateTo.slice(0, 7) : '';
+  const presets = getPeriodPresets(periods, granularity, fmt);
+  const trackMarkers = getTrackMarkers(periods, granularity);
+  const densityBars = getDensityBars(periods, density);
 
-  let startIdx = fromMonth ? periods.indexOf(fromMonth) : 0;
-  if (startIdx < 0) startIdx = 0;
+  const isAllTime = startIdx === 0 && endIdx === totalPeriods - 1;
+  let activePreset: string | null = isAllTime ? 'all' : null;
 
-  let endIdx = toMonth ? periods.indexOf(toMonth) : totalPeriods - 1;
-  if (endIdx < 0) endIdx = totalPeriods - 1;
-
-  if (startIdx > endIdx) {
-    startIdx = endIdx;
-  }
-
-  // Precompute year metadata and density bars via pure module functions
-  const yearEntries = computeYearEntries(periods);
-  const densityBars = computeDensityBars(density, periods);
-
-  // Detect currently active year preset in range mode
-  const isAllTime = !isSingle && !props.dateFrom && !props.dateTo;
-  let activeYearPreset: string | null = isAllTime ? 'all' : null;
-
-  if (!isSingle && !isAllTime) {
-    for (const entry of yearEntries) {
-      if (fromMonth === entry.firstPeriod && toMonth === entry.lastPeriod) {
-        activeYearPreset = entry.year;
+  if (!isAllTime) {
+    for (const entry of presets) {
+      if (startIdx === entry.firstIdx && endIdx === entry.lastIdx) {
+        activePreset = entry.id;
         break;
       }
     }
   }
 
-  const singleYear = isSingle ? periods[singleIdx]?.slice(0, 4) : null;
-
-  // Percentage calculations
   const leftPercent = totalPeriods > 1 ? (startIdx / (totalPeriods - 1)) * 100 : 0;
   const rightPercent = totalPeriods > 1 ? (endIdx / (totalPeriods - 1)) * 100 : 100;
   const widthPercent = Math.max(0, rightPercent - leftPercent);
-  const singlePercent = totalPeriods > 1 ? (singleIdx / (totalPeriods - 1)) * 100 : 100;
 
-  // Emit updated date range from indices (range mode)
   const commitIndices = (nextStart: number, nextEnd: number) => {
-    if (props.mode === 'single') return;
-    if (nextStart === 0 && nextEnd === totalPeriods - 1) {
-      props.onChange({ dateFrom: '', dateTo: '' });
-      return;
-    }
-    const nextStartPeriod = periods[nextStart];
-    const nextEndPeriod = periods[nextEnd];
-    const nextFrom = `${nextStartPeriod}-01`;
-    const nextTo = `${nextEndPeriod}-${getLastDayOfMonth(nextEndPeriod)}`;
-    props.onChange({ dateFrom: nextFrom, dateTo: nextTo });
+    onChange({ dateFrom: periods[nextStart], dateTo: periods[nextEnd] });
   };
 
-  // Drag handlers with pointer capture
-  const handlePointerDown = (type: 'left' | 'right' | 'window' | 'single', e: React.PointerEvent<HTMLDivElement>) => {
+  const applyRangePreset = (first: string, last: string) => {
+    onChange({
+      dateFrom: first,
+      dateTo: last,
+    });
+  };
+
+  const handlePointerDown = (type: 'left' | 'right', e: React.PointerEvent<HTMLDivElement>) => {
     if (!trackRef.current) return;
     e.stopPropagation();
     e.preventDefault();
@@ -309,8 +334,8 @@ export function TimelineScrubber(props: TimelineScrubberProps) {
     dragInfoRef.current = {
       pointerId: e.pointerId,
       startX: e.clientX,
-      initialStartIdx: isSingle ? singleIdx : startIdx,
-      initialEndIdx: isSingle ? singleIdx : endIdx,
+      initialStartIdx: startIdx,
+      initialEndIdx: endIdx,
       trackWidth: rect.width,
     };
 
@@ -328,22 +353,10 @@ export function TimelineScrubber(props: TimelineScrubberProps) {
     const deltaX = e.clientX - startX;
     const deltaIdx = Math.round((deltaX / trackWidth) * (totalPeriods - 1));
 
-    if (dragging === 'single') {
-      const nextIdx = Math.max(0, Math.min(totalPeriods - 1, initialStartIdx + deltaIdx));
-      if (props.mode === 'single' && periods[nextIdx] !== props.selectedDate) {
-        props.onSelectDate(periods[nextIdx]);
-      }
-    } else if (dragging === 'left') {
-      const nextStart = Math.max(0, Math.min(initialEndIdx, initialStartIdx + deltaIdx));
-      commitIndices(nextStart, initialEndIdx);
+    if (dragging === 'left') {
+      commitIndices(Math.max(0, Math.min(initialEndIdx, initialStartIdx + deltaIdx)), initialEndIdx);
     } else if (dragging === 'right') {
-      const nextEnd = Math.max(initialStartIdx, Math.min(totalPeriods - 1, initialEndIdx + deltaIdx));
-      commitIndices(initialStartIdx, nextEnd);
-    } else if (dragging === 'window') {
-      const span = initialEndIdx - initialStartIdx;
-      const nextStart = Math.max(0, Math.min(totalPeriods - 1 - span, initialStartIdx + deltaIdx));
-      const nextEnd = nextStart + span;
-      commitIndices(nextStart, nextEnd);
+      commitIndices(initialStartIdx, Math.max(initialStartIdx, Math.min(totalPeriods - 1, initialEndIdx + deltaIdx)));
     }
   };
 
@@ -356,110 +369,152 @@ export function TimelineScrubber(props: TimelineScrubberProps) {
     }
   };
 
-  // Direct track click
   const handleTrackPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!trackRef.current) return;
     const rect = trackRef.current.getBoundingClientRect();
     const clickRatio = (e.clientX - rect.left) / rect.width;
     const clickedIdx = Math.max(0, Math.min(totalPeriods - 1, Math.round(clickRatio * (totalPeriods - 1))));
 
-    if (props.mode === 'single') {
-      if (periods[clickedIdx] !== props.selectedDate) {
-        props.onSelectDate(periods[clickedIdx]);
-      }
-      dragInfoRef.current = {
-        pointerId: e.pointerId,
-        startX: e.clientX,
-        initialStartIdx: clickedIdx,
-        initialEndIdx: clickedIdx,
-        trackWidth: rect.width,
-      };
-      try {
-        e.currentTarget.setPointerCapture(e.pointerId);
-      } catch {}
-      setDragging('single');
-      return;
-    }
-
     const distToStart = Math.abs(clickedIdx - startIdx);
     const distToEnd = Math.abs(clickedIdx - endIdx);
+    const targetThumb: 'left' | 'right' = distToStart < distToEnd ? 'left' : 'right';
 
-    if (distToStart < distToEnd) {
+    if (targetThumb === 'left') {
       commitIndices(clickedIdx, endIdx);
     } else {
       commitIndices(startIdx, clickedIdx);
     }
+
+    dragInfoRef.current = {
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      initialStartIdx: targetThumb === 'left' ? clickedIdx : startIdx,
+      initialEndIdx: targetThumb === 'right' ? clickedIdx : endIdx,
+      trackWidth: rect.width,
+    };
+
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {}
+    setDragging(targetThumb);
   };
 
-  // Formatted date status strings
-  const formattedSingle = isSingle ? formatPeriodLabel(fmt, periods[singleIdx]) : '';
-  const formattedStart = !isSingle ? formatPeriodLabel(fmt, periods[startIdx]) : '';
-  const formattedEnd = !isSingle ? formatPeriodLabel(fmt, periods[endIdx]) : '';
+  const maxDateChars = getMaxPeriodLabelChars(fmt, granularity);
+  const formattedStart = formatPeriodLabel(fmt, periods[startIdx], granularity);
+  const formattedEnd = formatPeriodLabel(fmt, periods[endIdx], granularity);
 
   return (
-    <div className={cn('flex flex-col gap-1 w-full select-none', className)}>
-      {/* Top Header: Year Presets & Active Date Range Status */}
+    <div className={cn('flex flex-col gap-1.5 w-full select-none', className)}>
+      {/* Top Header: Presets & Active Date Range Status */}
       <div className="flex flex-wrap items-center justify-between gap-1">
-        {/* Preset Chips */}
         <div className="flex flex-wrap items-center gap-1">
-          {isSingle ? (
-            yearEntries.map(({ year, firstPeriod }, idx) => {
-              const isLastYear = idx === yearEntries.length - 1;
-              return (
-                <PresetChip
-                  key={year}
-                  label={year}
-                  isActive={singleYear === year}
-                  onClick={() => {
-                    const target = isLastYear ? periods[totalPeriods - 1] : firstPeriod;
-                    props.onSelectDate(target);
-                  }}
-                />
-              );
-            })
-          ) : (
-            <>
-              <PresetChip label={tCommon.all} isActive={activeYearPreset === 'all'} onClick={() => props.onChange({ dateFrom: '', dateTo: '' })} />
-              {yearEntries.map(({ year, firstPeriod, lastPeriod }) => (
-                <PresetChip
-                  key={year}
-                  label={year}
-                  isActive={activeYearPreset === year}
-                  onClick={() => {
-                    props.onChange({
-                      dateFrom: `${firstPeriod}-01`,
-                      dateTo: `${lastPeriod}-${getLastDayOfMonth(lastPeriod)}`,
-                    });
-                  }}
-                />
-              ))}
-            </>
-          )}
+          <button
+            type="button"
+            onClick={() => applyRangePreset(periods[0], periods[totalPeriods - 1])}
+            className={cn(
+              'px-2 py-0.5 text-xs font-medium rounded-md transition-colors cursor-pointer',
+              activePreset === 'all' ? 'btn-accent font-semibold shadow-xs' : 'btn-subtle text-content-muted hover:text-content-primary',
+            )}
+          >
+            {tCommon.all}
+          </button>
+          {presets.map(({ id, label, firstPeriod, lastPeriod }) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => applyRangePreset(firstPeriod, lastPeriod)}
+              className={cn(
+                'px-2 py-0.5 text-xs font-medium rounded-md transition-colors cursor-pointer',
+                activePreset === id ? 'btn-accent font-semibold shadow-xs' : 'btn-subtle text-content-muted hover:text-content-primary',
+              )}
+            >
+              {label}
+            </button>
+          ))}
         </div>
 
-        {/* Status Badge: Active Period */}
-        <div className="text-xs text-content-secondary font-medium flex items-center ml-auto">
-          <span className="text-content-primary font-semibold">{isSingle ? formattedSingle : `${formattedStart} — ${formattedEnd}`}</span>
+        <div className="text-xs text-content-secondary font-medium flex items-center gap-1.5 ml-auto">
+          {onReset && (
+            <button
+              type="button"
+              onClick={onReset}
+              className={cn(
+                'text-xs text-content-muted hover:text-accent-primary transition-opacity underline cursor-pointer select-none whitespace-nowrap mr-1',
+                !hasActiveFilters && 'invisible pointer-events-none',
+              )}
+            >
+              {tCommon.reset}
+            </button>
+          )}
+
+          <DatePickerPopover
+            mode={granularity}
+            value={periods[startIdx]}
+            minDate={periods[0]}
+            maxDate={periods[endIdx]}
+            label={formattedStart}
+            minChars={maxDateChars}
+            onSelect={(dateStr) => {
+              const newIdx = findPeriodIndex(periods, dateStr, 'start', granularity);
+              commitIndices(Math.min(newIdx, endIdx), endIdx);
+            }}
+            onStepPrev={(e) => {
+              const step = e.shiftKey ? (granularity === 'yearly' ? 10 : granularity === 'monthly' ? 12 : 7) : 1;
+              commitIndices(Math.max(0, startIdx - step), endIdx);
+            }}
+            canStepPrev={startIdx > 0}
+            onStepNext={(e) => {
+              const step = e.shiftKey ? (granularity === 'yearly' ? 10 : granularity === 'monthly' ? 12 : 7) : 1;
+              commitIndices(Math.min(endIdx, startIdx + step), endIdx);
+            }}
+            canStepNext={startIdx < endIdx}
+            title={tCommon.from}
+          />
+
+          <span className="text-content-dim font-bold text-xs select-none">—</span>
+
+          <DatePickerPopover
+            mode={granularity}
+            value={periods[endIdx]}
+            minDate={periods[startIdx]}
+            maxDate={periods[totalPeriods - 1]}
+            label={formattedEnd}
+            minChars={maxDateChars}
+            onSelect={(dateStr) => {
+              const newIdx = findPeriodIndex(periods, dateStr, 'end', granularity);
+              commitIndices(startIdx, Math.max(startIdx, newIdx));
+            }}
+            onStepPrev={(e) => {
+              const step = e.shiftKey ? (granularity === 'yearly' ? 10 : granularity === 'monthly' ? 12 : 7) : 1;
+              commitIndices(startIdx, Math.max(startIdx, endIdx - step));
+            }}
+            canStepPrev={endIdx > startIdx}
+            onStepNext={(e) => {
+              const step = e.shiftKey ? (granularity === 'yearly' ? 10 : granularity === 'monthly' ? 12 : 7) : 1;
+              commitIndices(startIdx, Math.min(totalPeriods - 1, endIdx + step));
+            }}
+            canStepNext={endIdx < totalPeriods - 1}
+            title={tCommon.to}
+          />
         </div>
       </div>
 
       {/* Scrubber Track Container */}
-      <div className="flex flex-col gap-0.5 w-full">
-        <div
-          ref={trackRef}
-          onPointerDown={handleTrackPointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
-          onPointerCancel={handlePointerUp}
-          className="relative w-full h-8 rounded-lg bg-surface-base/90 border border-border-subtle/80 overflow-hidden cursor-pointer touch-none"
-        >
-          {/* Background Data Density Mini-Histogram (SVG) */}
+      <div
+        ref={trackRef}
+        onPointerDown={handleTrackPointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+        className="relative w-full h-5 rounded-md bg-surface-base/90 border border-border-subtle/80 overflow-hidden cursor-pointer touch-none"
+      >
+        {/* Background Layer: Histogram & In-Track Labels */}
+        <div className="absolute inset-0 overflow-hidden rounded-md pointer-events-none">
           {densityBars.length > 0 && (
             <svg className="absolute inset-0 w-full h-full pointer-events-none" preserveAspectRatio="none">
               {densityBars.map((bar) => {
                 if (bar.heightPercent <= 0) return null;
-                const isSelected = isSingle ? bar.centerPercent <= singlePercent : bar.centerPercent >= leftPercent && bar.centerPercent <= rightPercent;
-
+                const isSelected = bar.centerPercent >= leftPercent && bar.centerPercent <= rightPercent;
                 return (
                   <rect
                     key={bar.key}
@@ -475,77 +530,41 @@ export function TimelineScrubber(props: TimelineScrubberProps) {
             </svg>
           )}
 
-          {isSingle ? (
-            <>
-              {/* Single Mode: Active Progress Fill */}
-              <div style={{ width: `${singlePercent}%` }} className={cn(SELECTION_ZONE_BASE, 'left-0 border-r pointer-events-none', dragging === 'single' && SELECTION_ZONE_ACTIVE)} />
-
-              {/* Single Mode: Draggable Thumb */}
-              <ScrubberThumb
-                percent={singlePercent}
-                title={formattedSingle}
-                isDragging={dragging === 'single'}
-                onPointerDown={(e) => handlePointerDown('single', e)}
-                onPointerMove={handlePointerMove}
-                onPointerUp={handlePointerUp}
-              />
-            </>
-          ) : (
-            <>
-              {/* Range Mode: Active Selection Window (Brush Box with Middle Drag) */}
-              <div
-                onPointerDown={(e) => handlePointerDown('window', e)}
-                onPointerMove={handlePointerMove}
-                onPointerUp={handlePointerUp}
-                onPointerCancel={handlePointerUp}
-                style={{
-                  left: `${leftPercent}%`,
-                  width: `${widthPercent}%`,
-                }}
-                className={cn(SELECTION_ZONE_BASE, 'cursor-grab active:cursor-grabbing', dragging === 'window' && SELECTION_ZONE_ACTIVE)}
-                title={`${formattedStart} — ${formattedEnd}`}
-              >
-                {/* Centered Grab Pill Indicator */}
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-40 hover:opacity-90 transition-opacity">
-                  <div className="w-5 h-1 rounded-full bg-accent-primary/80" />
+          {/* In-Track Demarcation Labels */}
+          <div className="absolute inset-0 flex items-center pointer-events-none">
+            {trackMarkers.map(({ key, label, firstIdx }) => {
+              const markerLeftPercent = totalPeriods > 1 ? (firstIdx / (totalPeriods - 1)) * 100 : 0;
+              return (
+                <div key={key} style={{ left: `${markerLeftPercent}%` }} className="absolute top-0 bottom-0 flex items-center pl-1.5 border-l border-border-subtle/80 pointer-events-none">
+                  <span className="text-[10px] font-mono font-bold text-content-secondary select-none tracking-wider">{label}</span>
                 </div>
-              </div>
-
-              {/* Left Resize Handle (Thumb) */}
-              <ScrubberThumb
-                percent={leftPercent}
-                title={formattedStart}
-                isDragging={dragging === 'left'}
-                onPointerDown={(e) => handlePointerDown('left', e)}
-                onPointerMove={handlePointerMove}
-                onPointerUp={handlePointerUp}
-              />
-
-              {/* Right Resize Handle (Thumb) */}
-              <ScrubberThumb
-                percent={rightPercent}
-                title={formattedEnd}
-                isDragging={dragging === 'right'}
-                onPointerDown={(e) => handlePointerDown('right', e)}
-                onPointerMove={handlePointerMove}
-                onPointerUp={handlePointerUp}
-              />
-            </>
-          )}
+              );
+            })}
+          </div>
         </div>
 
-        {/* Year Tick Marks and Labels */}
-        <div className="relative w-full h-5 px-0.5 mt-0.5">
-          {yearEntries.map(({ year, firstIdx }) => {
-            const yearLeftPercent = totalPeriods > 1 ? (firstIdx / (totalPeriods - 1)) * 100 : 0;
-            return (
-              <div key={year} style={{ left: `${yearLeftPercent}%` }} className="absolute top-0 -translate-x-1/2 flex flex-col items-center pointer-events-none">
-                <div className="w-px h-1.5 bg-border-active" />
-                <span className="text-xs font-mono text-content-secondary font-semibold tracking-tight">{year}</span>
-              </div>
-            );
-          })}
-        </div>
+        {/* Active Selection Zone (Visual range fill) */}
+        <div style={{ left: `${leftPercent}%`, width: `${widthPercent}%` }} className={SELECTION_ZONE_BASE} />
+
+        {/* Left Resize Handle */}
+        <ScrubberThumb
+          percent={leftPercent}
+          title={formattedStart}
+          isDragging={dragging === 'left'}
+          onPointerDown={(e) => handlePointerDown('left', e)}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+        />
+
+        {/* Right Resize Handle */}
+        <ScrubberThumb
+          percent={rightPercent}
+          title={formattedEnd}
+          isDragging={dragging === 'right'}
+          onPointerDown={(e) => handlePointerDown('right', e)}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+        />
       </div>
     </div>
   );

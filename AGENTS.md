@@ -8,7 +8,7 @@ Operational guide and rulebook for AI agents working on the `graphs` repository.
 
 ### 1.1 Verification Commands
 - **Frontend / UI Changes**: Run `bun run build:site` (runs Knip, Biome format/lint, TypeScript `tsc --noEmit`, and multi-locale SSG pre-rendering). Granular checks: `bun --filter @graphs/site check`, `type-check`, `knip`.
-- **Data Scrapers / Pipelines**: Run `bun run build:pipeline`. Run `bun test` ONLY when modifying parser code covered by unit tests (`pipelines/src/war-rf-ua/parse-attacks-ua.ts` and `*.test.ts`). Never run `bun test` for UI, styles, or locales.
+- **Data Scrapers / Pipelines**: Run `bun run build:pipeline`. Granular test suites: `bun --filter @graphs/pipelines test:country`, `test:war-rf-ua`, `test:space-launches`. Never run `bun test` for UI, styles, or locales.
 - **Full CI Verification**: Run `bun run build` (builds pipelines + site across all locales).
 - **Execution Invariant**: Never invoke background `schedule` timers or polling loops while waiting for command execution; rely exclusively on automatic reactive system notifications.
 - **React 19 & React Compiler**: React Compiler (`babel-plugin-react-compiler`) optimizes components/hooks at build time. Never write manual `useMemo` or `useCallback`.
@@ -37,15 +37,17 @@ Operational guide and rulebook for AI agents working on the `graphs` repository.
 ```
 
 ### 2.1 Two-Tier Data Architecture
-1. **Tier 1 (Committed Minimal Snapshot)**: `pipelines/src/<slug>/data.json` (or `data-losses.json`, `data-attacks-ua.json`, `data-attacks-rf.json`, `data-frontline.json` for `war-rf-ua`). Committed minimal raw offline baseline; strips upstream XML/SVG overhead.
-2. **Tier 2 (Ephemeral Production Dataset)**: `site/public/data/<slug>/<sectionId>/data.json` (or `site/public/data/<slug>.json`). Compact single-line JSON build artifacts gitignored by default, exported via `exportProjectSections` / `exportDataset`.
+1. **Tier 1 (Committed Minimal Snapshot)**: `pipelines/src/<slug>/data.json` (or `data-losses.json`, `data-attacks-ua.json`, `data-attacks-rf.json`, `data-frontline.json` for `war-rf-ua`, `country/data.json` for `country`). Committed minimal raw offline baseline; strips upstream XML/SVG overhead.
+   - **Explicit Null Contract**: Streams confirmed empty by upstream must be saved as `null`, reserving `undefined` strictly for unqueried or failed streams. Empty `{}` objects are strictly forbidden in Tier 1 snapshots.
+2. **Tier 2 (Ephemeral Production Dataset)**: `site/public/data/<slug>/<sectionId>/data.json` (or `site/public/data/<slug>/<code>.json`) and optional project toolbar metadata `site/public/data/<slug>/toolbar-meta.json`. Compact single-line JSON build artifacts gitignored by default, exported via `exportProjectSections` / `exportDataset` / `exportProjectMeta`.
 - **Invariants**: `bun run build:site` requires Tier 2 datasets (run `bun run build:pipeline` first on fresh clones). CI runs every 3 days or on push to `main`.
 
 ### 2.2 Pipelines & ETL Lifecycle
 - **CLI**: Run all: `bun run build:pipeline`. Run single: `bun --filter @graphs/pipelines run:<slug>`. Flags: `-u` (force download), `-v` (verbose logs).
 - **In-Memory Ingestion**: Scraping, XML parsing, and CSV downloads must occur in memory. Never write temporary cache files to disk. Default execution is cache-first against Tier 1 snapshots.
 - **Pre-Computation**: All domain aggregations, totals, and timeline pivots are computed in ETL. Static datasets output compact camelCase JSON strings matching `@graphs/types` schemas.
-- **Shared Utilities (`pipelines/src/utils/`)**: `paths.ts` (path resolution), `dataset.ts` (`exportDataset`, `exportProjectSections`), `http.ts` (`fetchWithRetry`, `fetchHeadMeta`), `region.ts` (`resolveRegionCode`), `fs.ts` (`writeJson`, `readJson`), `logger.ts` (`getLogger`), `math.ts` (rounding/aggregation helpers), `metadata.ts` (`updateMetadata`).
+- **Rate Limiting & Pacing Invariant**: External API scrapers subject to rate limits must use serialized pacer queues. UN Comtrade requests must strictly obey `COMTRADE_PACER_DELAY_MS = 1000` (1 request/second) with automatic circuit breaker on daily call volume quota exhaustion (HTTP 403).
+- **Shared Utilities (`pipelines/src/utils/`)**: `paths.ts` (path resolution, `loadEnv`), `dataset.ts` (`exportDataset`, `exportProjectSections`, `exportProjectMeta`), `http.ts` (`fetchWithRetry`, `fetchHeadMeta`), `region.ts` (`resolveRegionCode`), `fs.ts` (`writeJson`, `readJson`), `logger.ts` (`getLogger`), `math.ts` (rounding/aggregation helpers), `metadata.ts` (`updateMetadata`).
 - **Constraint for `parse-attacks-ua.ts`**: Strictly prohibits any comments (`//`, `/* */`) or docstrings.
 
 ---
@@ -54,39 +56,60 @@ Operational guide and rulebook for AI agents working on the `graphs` repository.
 
 ### 3.1 Structure & Dynamic Loading
 - **Structure**: Pages in `site/src/pages/`, modular components in `site/src/components/` (`layout/`, `sections/`, `ui/`, `icons/`), and self-contained project slices in `site/src/projects/<slug>/` (`meta.ts`, `project.ts`, `sections/<section-id>.ts`, `locales/`).
-- **Three-Tier Dynamic Loading & Code-Splitting**:
+- **Four-Tier Dynamic Loading & Code-Splitting**:
   - **Tier 1 (Root Locale)**: `loadRootLocale(lang)` in `root.tsx` loads `common-{lang}.ts`, CLDR formats, and `loadCatalog` into `<AppProvider>`.
   - **Tier 2 (Project Bundle)**: `loadProjectBundle(slug, lang)` loads project specification and localized dictionaries (`dict-{lang}.ts`, `meta-{lang}.ts`) via React 19 `use()`.
-  - **Tier 3 (Per-Section Datasets)**: `loadSectionData(slug, sectionId)` asynchronously loads typed section JSON (`public/data/<slug>/<sectionId>/data.json`) on demand when `<Section>` approaches the viewport (`useInView`).
+  - **Tier 3 (Project Toolbar Metadata)**: `loadProjectToolbarMeta(slug)` loads compact precomputed metadata (e.g. `site/public/data/<slug>/toolbar-meta.json`) via React 19 `use()` during project toolbar evaluation.
+  - **Tier 4 (Per-Section Datasets)**: `loadSectionData(slug, sectionId)` asynchronously loads typed section JSON (`public/data/<slug>/<sectionId>/data.json`) on demand when `<Section>` approaches the viewport (`useInView`).
   - **Component Code-Splitting**: Heavy client visualizers (`SectionChart`, `FrontlineMap`, `LossesMap`) are dynamically imported via `React.lazy()` with fallback `<LoadingSpinner />`.
 - **SectionHeader Architecture**: Dynamic 3-column mathematical centering, top-aligned anchor button and first action on row 1, subsequent actions stacked below row 1, and width caching across breakpoints to prevent layout jitter.
-- **React 19 Concurrency**: Use `startTransition` for interactive control/filter state updates to keep UI smooth. Use `useEffectEvent` for non-reactive callbacks. Decouple `ResizeObserver` in `SectionChart.tsx` to pause off-screen canvas redraws.
-- **Smart Navigation & Programmatic Scroll Locking**: Deep-linking (`/:slug/:section`) and outline clicks smoothly transition between sections while `useInView` programmatic locking (`startScrollLock`) and dynamic header clipping (`-${getHeaderHeight()}px 0px 400px 0px`) completely suppress intermediate JSON fetching and canvas rendering during fast scroll flight. `useScrollSpy` clips the bottom 400px reading boundary and syncs URL/title on native `scrollend`. `<AnchorButton>` copies deep-links without mutating history.
+- **React 19 Concurrency**: Use `startTransition` for interactive control/filter state updates to keep UI smooth. Use `useEffectEvent` for non-reactive callbacks. `SectionChart.tsx` relies on standard container `ResizeObserver` with `requestAnimationFrame` debouncing.
+- **Smart Navigation & Programmatic Scroll Locking (`viewport.ts`)**: Deep-linking (`/:slug/:section`) and outline clicks smoothly transition between sections while `useInView` programmatic locking (`startScrollLock`) and dynamic header clipping (`-${getHeaderHeight()}px 0px 400px 0px`) completely suppress intermediate JSON fetching and canvas rendering during fast scroll flight. `useScrollSpy` clips the bottom 400px reading boundary and syncs URL/title on native `scrollend`. `<AnchorButton>` copies deep-links without mutating history.
 
-### 3.2 Polymorphic Sections & Visualization Invariants
-- **`DashboardSection` Discriminated Union**: `ChartSectionSpec` (`type: 'chart'`, defined via `chartSection`), `BreakdownGridSpec` (`type: 'breakdown-grid'`), and `CustomSectionSpec` (`type: 'custom'`).
+### 3.2 Unified Section Contract & Visualization Invariants
+- **Unified Section Contract (`defineSection`)**: Every section shares an identical uniform contract declared via `defineSection`:
+  `id`, `title`, `sources`, optional `toolbars`, optional `kpisTop`, optional `kpisBottom`, and `buildView: (data, stores?) => ({ content: ReactNode, title?, kpisTop?, kpisBottom? })` (or direct `content: ReactNode`). No discriminated union of section types (`chart`/`breakdown-grid`/`custom`).
+- **Canvas Visualizer Helper (`createChart`)**: Chart options returned from `chartOption(...)` are wrapped in `createChart(chartOption(...))` in `site/src/components/sections/SectionChart.tsx`. Custom views (maps, grids) render components directly (`createElement(FrontlineMap, ...)`, `<SectionBreakdown ... />`).
 - **Clean Y-Axis**: Never attach currency symbols, percent signs, or units to Y-axis tick labels via `axisLabel.formatter`. Units belong strictly in `yAxis.name`. `axisLabel.formatter` is permitted exclusively in diverging mirrored charts to strip negative signs (`Math.abs`).
 - **Declarative Tooltips (`chartOption`)**: Zero raw HTML strings in tooltip formatters. Use declarative `tooltip: { type: 'axis' | 'dual' | 'table', ... }` with automatic type inference and auto-sorting (`sort: 'desc'`).
 - **Canvas Theme Enhancement (`enhanceOption`)**: `<SectionChart>` injects fonts, dark/light grid clearance, tooltips, and toolbox controls automatically. Always update canvases with `notMerge: true` (`chart.setOption(option, true)`).
 - **PNG Chart Export (`exportChartAsPng`)**: Generates 2D canvas composite with centered section title, solid card surface background (`tokens.surface.card`), automatic `dataZoom` bottom margin cropping, and native ECharts downward-arrow icon.
 - **Localization**: Pure TypeScript SSoT (`typeof` contracts + `satisfies` validation across `en`, `ru`, `uk`, `de`). Zero trailing colons or punctuation in dictionary values. Default language (`en`) has no URL prefix (`/:slug/:section`); non-default languages use `/:lang/...`.
 
-### 3.3 Core Utilities & Design System
-- **Utilities (`site/src/utils/`)**: `format.ts` (CLDR formatting `fmt.*`), `color.ts` (`resolveColor`), `cn.ts` (class merging), `chart-builder.ts` (`chartOption`, `zipRecords`, `createBarSeries`, `exportChartAsPng`), `tooltip-builder.ts` (pure HTML tooltips/popups), `map-builder.ts` (MapLibre vector styles/layers), `useInView.ts` (lazy viewport observer), `useScrollSpy.ts` (telemetry/scrollend sync), `provider.tsx` (`AppProvider`, `useTheme`, `useLanguage`, `useTranslation`, `useFormat`, `useCatalog`), `version.ts` (`SITE_VERSION`).
+### 3.3 Interactive Controls & Reactive Store Architecture
+- **Supported Control Types**: `slider` (number), `range-slider` ([number, number]), `toggle` (string union), `checkbox` (boolean), `single-search-select` (string), `multi-search-select` (string[]), `timeline-scrubber` ([string, string]).
+- **Control Lifecycle SSoT Invariant (CRITICAL)**:
+  When adding or updating any interactive control type, ALL 3 layers MUST be kept in sync:
+  1. **Contract & Typings (`site/src/utils/project.ts`)**: Add interface extending `BaseControl`, register mapped value type in `ControlValueMap`, add to `Control` discriminated union.
+  2. **Reactive Store & URL Sync (`site/src/utils/store.ts`)**:
+     - `defaultState`: Initialize default value (e.g. `ctrl.defaultValue` or bounds from `min`/`max`/`periods`).
+     - `parse`: Parse URL query value (support comma-delimited strings/arrays for tuples/lists, parse numbers/booleans, clamp within valid bounds).
+     - `serialize`: Uses `isEqual(val, def)` against `defaultState` to write active non-default filters to query params `${scopeId}.${ctrl.id}`.
+  3. **Control Rendering (`site/src/components/ui/ControlBar.tsx`)**: Implement case in `ControlField` switch statement.
+- **Toolbar Scopes & Sticky Layout**:
+  - **Section Toolbars**: Declared in section `toolbars: [...]`. Scoped to the toolbar ID; stored as `${toolbarId}.${controlId}`.
+  - **Dashboard/Coordinated Toolbars**: Declared in project `toolbars: () => [...]` with `scope: string[]` designating which sections subscribe to this store `${toolbarId}.${controlId}`. Multiple sections receive coordinated state in `buildView(data, stores)`.
+  - **Layout Invariant in `ControlBar`**: Compact controls (`toggle`, `slider`, `checkbox`, `single-search-select`, `multi-search-select`) render inline on row 1 mathematically centered with the `Reset` button on the right. Full-width controls (`timeline-scrubber`) render spanning 100% width (`w-full`) underneath row 1.
+
+### 3.4 Core Utilities & Design System
+- **Utilities (`site/src/utils/`)**: `project.ts` (`defineSection`, `defineProject`, `loadSectionData`, `loadProjectBundle`, `loadProjectToolbarMeta`), `store.ts` (`getOrCreateStoreFromControls`, `useCombinedStores`), `viewport.ts` (`useInView`, `useScrollSpy`, `startScrollLock`, `scrollToSection`), `format.ts` (CLDR formatting `fmt.*`), `format-locale.ts` (`resolveAdditionalRegionName`), `color.ts` (`resolveColor`), `cn.ts` (class merging), `chart-builder.ts` (`chartOption`, `zipRecords`, `createBarSeries`, `exportChartAsPng`, `resolveEffectiveMax`), `tooltip-builder.ts` (pure HTML tooltips/popups), `map-builder.ts` (MapLibre vector styles/layers), `provider.tsx` (`AppProvider`, `useTheme`, `useLanguage`, `useTranslation`, `useFormat`, `useCatalog`), `version.ts` (`SITE_VERSION`).
+- **Interactive Components (`site/src/components/ui/`)**: `ControlBar.tsx` (`ControlBar`, `DashboardToolbars`), `TimelineScrubber.tsx`, `DatePickerPopover.tsx`, `SearchSelect.tsx`, `Slider.tsx`, `ToggleGroup.tsx`, `Checkbox.tsx`, `AnchorButton.tsx`, `KpiCard.tsx`, `TagBadge.tsx`.
 - **Styles (`site/src/styles/`)**: `global.css` (Tailwind v4 `@theme`, container utilities: `glass-bar`, `glass-overlay`, `card`, `card-elevated`, `control-panel`, `btn-subtle`, `btn-accent`, `nav-pill`, `anchor-btn`), `tags.css` (`@utility tag-pill`), `changelog.css`, `map.css`, `tokens.ts`. Prefer standard utility classes over arbitrary pixel brackets.
 - **Responsive Invariant**: Avoid arbitrary responsive modifier jumping (`sm:`, `md:`) on gaps, paddings, and font sizes; keep responsive adaptations strictly confined to global navbar drawer collapsing and section header action stacks.
-- **Mandatory Imports**: Use `@/*` aliases in `site/src/`. Import types from subpaths `@graphs/types/<slug>/<section-id>`.
+- **Mandatory Imports**: Use `@/*` aliases in `site/src/`. Import types from subpaths `@graphs/types/<slug>` (or `@graphs/types/<slug>/<section-id>`).
 
 ---
 
 ## 4. New Dashboard Registration Checklist
 
 To register a new dashboard slice:
-1. **Section Schemas (`types/<slug>/<section-id>.ts`)**: Define TypeScript interfaces (`*SectionData`) exported via subpaths `@graphs/types/<slug>/<section-id>`.
-2. **ETL Pipeline (`pipelines/src/<slug>/index.ts`)**: Scrape/parse data, output compact JSONs via `exportProjectSections`, and update `metadata.json`.
+1. **Section Schemas (`types/<slug>/index.ts`)**: Define TypeScript interfaces (`*SectionData`) exported via subpaths `@graphs/types/<slug>`.
+2. **ETL Pipeline (`pipelines/src/<slug>/index.ts`)**: Scrape/parse data, output compact JSONs via `exportProjectSections` (and `exportProjectMeta` if coordinated toolbar metadata is needed), and update `metadata.json`.
 3. **Pipeline Runner (`pipelines/src/run-all.ts`)**: Register in `PIPELINES` registry and package scripts.
 4. **Project Module (`site/src/projects/<slug>/`)**:
    - `meta.ts`: Export static metadata `export const meta: StaticProjectMeta = { id, tags, sources, sections }`.
-   - `sections/<section-id>.ts`: Implement section builders (`export const <name>Section: SectionBuilder = ...`).
+   - `sections/<section-id>.ts`: Implement section builders via `defineSection`:
+     `export const <name>Section = defineSection(({ t, fmt }) => ({ id, title, sources, toolbars?, buildView: (data, stores?) => ({ content }) }))`.
    - `locales/meta-{lang}.ts` & `locales/dict-{lang}.ts`: Export localized `meta` and `dict` across all 4 locales (`en`, `ru`, `uk`, `de`).
-   - `project.ts`: Export specification `export const project: Project = { ...meta, buildSections: (ctx) => [...] }`.
+   - `project.ts`: Export specification via `defineProject`:
+     `export const project = defineProject<typeof dict>({ meta, sections: import.meta.glob('./sections/*.ts', { eager: true }), toolbars?: () => [...] })`.

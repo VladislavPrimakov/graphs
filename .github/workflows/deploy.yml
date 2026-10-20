@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
@@ -40,6 +40,14 @@ jobs:
 
       - name: Build site
         run: bun run build:site
+
+      - name: Install Playwright Chromium & dependencies
+        run: bunx playwright install --with-deps chromium
+
+      - name: Generate OpenGraph preview images
+        run: bun run generate:og
+        env:
+          BASE_URL: /graphs
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v5

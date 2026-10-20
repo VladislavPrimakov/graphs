@@ -2,9 +2,8 @@ import { type GeoJSONSource, Map as MapLibreMap, NavigationControl } from 'mapli
 import type React from 'react';
 import { useEffect, useRef, useState } from 'react';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import type { DayFrontlineEntry, FrontlineMapLayers, FrontlineMapSectionData } from '@graphs/types/war-rf-ua/frontline-map';
+import type { DayFrontlineEntry, FrontlineMapLayers, FrontlineMapSectionData } from '@graphs/types/war-rf-ua/frontline';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
-import { TimelineScrubber } from '@/components/ui/TimelineScrubber';
 import { createFillLayer, createLineLayer, decodeMultiPolygon, getMapTileStyle, multiPolygonToGeoJson, registerFallbackDot, UKRAINE_MAP_PRESETS } from '@/utils/map-builder';
 import { useFormat, useTheme } from '@/utils/provider';
 import type { dict as enDict } from '../locales/dict-en';
@@ -12,6 +11,7 @@ import { frontlineColors } from '../tokens';
 
 interface FrontlineMapProps {
   data: FrontlineMapSectionData;
+  targetDate?: string;
   t: typeof enDict;
 }
 
@@ -41,7 +41,7 @@ function loadFrontlineHistory(): Promise<Record<string, DayFrontlineEntry>> {
   if (cachedHistoryDays) return Promise.resolve(cachedHistoryDays);
   if (cachedHistoryPromise) return cachedHistoryPromise;
 
-  const url = `${import.meta.env.BASE_URL}data/war-rf-ua/frontline-map/frontline-history.json`;
+  const url = `${import.meta.env.BASE_URL}data/war-rf-ua/frontline-history.json`;
   const promise = fetch(url)
     .then((res) => {
       if (!res.ok) throw new Error(`HTTP ${res.status} fetching ${url}`);
@@ -60,26 +60,24 @@ function loadFrontlineHistory(): Promise<Record<string, DayFrontlineEntry>> {
   return promise;
 }
 
-const timelineCache = new WeakMap<FrontlineMapSectionData, { dates: string[]; density: number[] }>();
+const timelineDatesCache = new WeakMap<FrontlineMapSectionData, string[]>();
 
-/** Caches immutable timeline dates and density arrays per dataset to avoid GC allocations during scrubbing. */
-function getTimelineData(data: FrontlineMapSectionData): { dates: string[]; density: number[] } {
-  let cached = timelineCache.get(data);
+/** Caches immutable timeline dates per dataset to avoid GC allocations during scrubbing. */
+function getTimelineDates(data: FrontlineMapSectionData): string[] {
+  let cached = timelineDatesCache.get(data);
   if (!cached) {
-    const dates = data.timeline && data.timeline.length > 0 ? data.timeline.map((p) => p.date) : [data.summary.latestDate];
-    const density = data.timeline && data.timeline.length > 0 ? data.timeline.map((p) => Math.max(0, p.deltaKm2 ?? 0)) : [];
-    cached = { dates, density };
-    timelineCache.set(data, cached);
+    cached = data.timeline && data.timeline.length > 0 ? data.timeline.map((p) => p.date) : [data.summary.latestDate];
+    timelineDatesCache.set(data, cached);
   }
   return cached;
 }
 
-export const FrontlineMap: React.FC<FrontlineMapProps> = ({ data, t }) => {
+export const FrontlineMap: React.FC<FrontlineMapProps> = ({ data, targetDate: rawTargetDate, t }) => {
   const { resolvedTheme, tokens } = useTheme();
   const fmt = useFormat();
 
-  const { dates, density: timelineDensity } = getTimelineData(data);
-  const [selectedDate, setSelectedDate] = useState<string>(data.summary.latestDate);
+  const dates = getTimelineDates(data);
+  const selectedDate = rawTargetDate ? (rawTargetDate.length === 7 ? (dates.findLast((d) => d.startsWith(rawTargetDate)) ?? rawTargetDate) : rawTargetDate) : data.summary.latestDate;
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
   const mapContainerRef = useRef<HTMLDivElement>(null);
@@ -275,7 +273,9 @@ export const FrontlineMap: React.FC<FrontlineMapProps> = ({ data, t }) => {
 
         {/* Floating Dark Glassmorphic Map Legend */}
         <div className="absolute bottom-4 left-4 z-10 glass-bar rounded-xl p-3.5 text-xs max-w-90 shadow-lg border border-border-subtle/80 flex flex-col gap-2.5 pointer-events-auto">
-          <div className="font-semibold text-content-primary text-[11px] uppercase tracking-wider text-accent-primary">{t.frontline.legendTitle}</div>
+          <div className="font-semibold text-content-primary text-[11px] uppercase tracking-wider text-accent-primary">
+            {t.frontline.legendTitle} ({fmt.date(selectedDate)})
+          </div>
 
           {/* Territorial Zones */}
           <div className="flex flex-col gap-1.5 text-[11px]">
@@ -334,13 +334,6 @@ export const FrontlineMap: React.FC<FrontlineMapProps> = ({ data, t }) => {
           </div>
         </div>
       </div>
-
-      {/* Single-Date Timeline Scrubber Bar */}
-      {dates.length > 1 && (
-        <div className="control-panel p-2">
-          <TimelineScrubber mode="single" periods={dates} density={timelineDensity} selectedDate={selectedDate} onSelectDate={setSelectedDate} />
-        </div>
-      )}
     </div>
   );
 };

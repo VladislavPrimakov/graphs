@@ -13,7 +13,15 @@ if (!fs.existsSync(distDir)) {
   process.exit(1);
 }
 
-fs.mkdirSync(ogDir, { recursive: true });
+if (fs.existsSync(ogDir)) {
+  for (const file of fs.readdirSync(ogDir)) {
+    if (file.endsWith('.png')) {
+      fs.unlinkSync(path.join(ogDir, file));
+    }
+  }
+} else {
+  fs.mkdirSync(ogDir, { recursive: true });
+}
 
 function getProjectSections(): { slug: string; sectionId: string }[] {
   const projectsDir = path.resolve(import.meta.dirname, '../src/projects');
@@ -88,12 +96,17 @@ async function captureSection(browser: Browser, slug: string, sectionId: string)
 
     await page.goto(targetUrl, { waitUntil: 'networkidle', timeout: 30000 });
 
-    // Inject strict 1200x630 layout and styling
+    // Inject strict 1200x630 layout and hide navigation, toolbars, and controls
     await page.addStyleTag({
       content: `
         header, nav, #header-section-nav, aside, footer { display: none !important; }
         .loading-spinner-overlay { display: none !important; }
         .echarts-toolbox { display: none !important; }
+        .anchor-btn { display: none !important; }
+        [data-sticky-toolbar], .section-toolbar, .control-bar, .control-panel, [role="toolbar"] { display: none !important; }
+        [data-radix-popper-content-wrapper], .maplibregl-popup, [class*="tooltip"] { display: none !important; }
+
+        .section-group:not(:has([data-section="${sectionId}"])) { display: none !important; }
         section:not([data-section="${sectionId}"]) { display: none !important; }
 
         html, body {
@@ -105,10 +118,11 @@ async function captureSection(browser: Browser, slug: string, sectionId: string)
           background-color: #0b0f19 !important;
         }
 
-        #root, main, .flex-col {
+        #root, #root > div, main, .section-group {
           padding: 0 !important;
           margin: 0 !important;
           gap: 0 !important;
+          max-width: none !important;
         }
 
         [data-section="${sectionId}"] {
@@ -117,12 +131,13 @@ async function captureSection(browser: Browser, slug: string, sectionId: string)
           margin: 24px auto !important;
           display: flex !important;
           flex-direction: column !important;
+          gap: 16px !important;
         }
 
         [data-section="${sectionId}"] .card {
           width: 100% !important;
-          height: 100% !important;
-          max-height: 582px !important;
+          flex: 1 !important;
+          min-height: 0 !important;
           display: flex !important;
           flex-direction: column !important;
           overflow: hidden !important;
@@ -145,11 +160,18 @@ async function captureSection(browser: Browser, slug: string, sectionId: string)
       `,
     });
 
+    await page.evaluate(() => {
+      window.scrollTo(0, 0);
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
+      window.dispatchEvent(new Event('resize'));
+    });
+
     const sectionEl = page.locator(`[data-section="${sectionId}"]`).first();
     await sectionEl.waitFor({ state: 'visible', timeout: 15000 });
 
     // Wait a moment for canvas animation and tiles to settle
-    await page.waitForTimeout(1000);
+    await page.waitForTimeout(1200);
 
     await page.screenshot({ path: outputPath });
     console.log(`  ✅ [captured 1200x630] ${slug}/${sectionId}`);
@@ -163,7 +185,7 @@ async function captureSection(browser: Browser, slug: string, sectionId: string)
 async function main() {
   const sections = getProjectSections();
   const totalTasks = sections.length;
-  console.log(`📸 Generating ${totalTasks} section OG preview images in parallel...\n`);
+  console.log(`📸 Generating ${totalTasks} section OG preview images...\n`);
 
   const browser = await chromium.launch({
     headless: true,
@@ -173,7 +195,14 @@ async function main() {
 
   await browser.close();
   server.stop();
-  console.log(`\n🎉 All ${totalTasks} section OG images generated successfully in site/public/og/!`);
+
+  const distOgDir = path.join(distDir, 'og');
+  if (fs.existsSync(distDir)) {
+    fs.mkdirSync(distOgDir, { recursive: true });
+    fs.cpSync(ogDir, distOgDir, { recursive: true });
+  }
+
+  console.log(`\n🎉 All ${totalTasks} section OG images generated successfully in site/public/og/ and site/dist/client/og/!`);
 }
 
 main().catch((err) => {

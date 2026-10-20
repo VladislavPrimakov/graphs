@@ -1,51 +1,40 @@
-import type { AvgPayloadSectionData } from '@graphs/types/space-launches/avg-payload';
-import { chartSection, type SectionBuilder } from '@/types';
+import { createChart } from '@/components/sections/SectionChart';
 import { chartOption, zipRecords } from '@/utils/chart-builder';
-import type { dict } from '../locales/dict-en';
+import type { Section } from '../project';
 
 /** Section builder for Average Payload to Orbit by Decade chart. */
-export const avgPayloadSection: SectionBuilder<AvgPayloadSectionData, typeof dict> = ({ t, fmt, tokens }) => {
-  return chartSection({
-    id: 'avg-payload',
-    title: t.proj.avgPayload.title,
-    sources: [{ name: 'The Space Devs — Launch Library 2 API', url: 'https://ll.thespacedevs.com/2.3.0/launches/' }],
-    controls: (data) =>
-      [
-        {
-          id: 'topN',
-          type: 'slider',
-          min: Math.min(3, data.regions.length),
-          max: data.regions.length,
-          defaultValue: Math.min(7, data.regions.length),
-          label: t.common.top,
-        },
-      ] as const,
-    buildView: (data, values) => {
-      const summary = data.summary;
-      const allRegions = data.regions;
-      const topN = values.topN;
-      const activeRegions = allRegions.slice(0, topN);
+export const avgPayloadSection: Section = ({ t, fmt, tokens }) => ({
+  id: 'avg-payload',
+  title: t.proj.avgPayload.title,
+  sources: [{ name: 'The Space Devs — Launch Library 2 API', url: 'https://ll.thespacedevs.com/2.3.0/launches/' }],
+  buildView: ({ spaceLaunches }, { launches }) => {
+    const data = spaceLaunches['avg-payload'];
+    const summary = data.summary;
+    const allRegions = data.regions;
+    const selectedRegions = launches?.countries?.length ? (launches.countries as string[]).filter((r) => allRegions.includes(r)) : allRegions;
+    const activeRegions = selectedRegions.length > 0 ? selectedRegions : allRegions;
 
-      return {
-        kpisTop: [
-          {
-            label: `${t.proj.avgPayload.kpis.bestAvgPayload} (${fmt.decade(summary.bestDecadeAvgPayloadDecade)})`,
-            value: fmt.unit(summary.currentDecadeAvgPayloadKg, 'mass-kilogram'),
-            valueColor: 'success',
-          },
-          {
-            label: `${t.proj.avgPayload.kpis.payloadGrowth} (${fmt.decade(summary.worstDecadeAvgPayloadDecade)}: ${fmt.unit(summary.baselineAvgPayloadKg, 'mass-kilogram')} → ${fmt.decade(summary.bestDecadeAvgPayloadDecade)}: ${fmt.unit(summary.currentDecadeAvgPayloadKg, 'mass-kilogram')})`,
-            value: `${summary.payloadGrowthFactor}×`,
-            valueColor: 'primary',
-          },
-          {
-            label: `${t.proj.avgPayload.kpis.heavyClassRecord} (${fmt.region(summary.bestDecadeCountryAvgPayloadRegion)}, ${fmt.decade(summary.bestDecadeCountryAvgPayloadDecade)})`,
-            value: fmt.unit(summary.bestDecadeCountryAvgPayloadKg, 'mass-kilogram'),
-            valueColor: 'info',
-          },
-        ],
-        option: chartOption({
-          title: { text: `${t.proj.avgPayload.title} (${t.common.top} ${topN})` },
+    return {
+      kpisTop: [
+        {
+          label: `${t.proj.avgPayload.kpis.bestAvgPayload} (${fmt.decade(summary.bestDecadeAvgPayloadDecade)})`,
+          value: fmt.unit(summary.currentDecadeAvgPayloadKg, 'mass-kilogram'),
+          valueColor: 'success',
+        },
+        {
+          label: `${t.proj.avgPayload.kpis.payloadGrowth} (${fmt.decade(summary.worstDecadeAvgPayloadDecade)}: ${fmt.unit(summary.baselineAvgPayloadKg, 'mass-kilogram')} → ${fmt.decade(summary.bestDecadeAvgPayloadDecade)}: ${fmt.unit(summary.currentDecadeAvgPayloadKg, 'mass-kilogram')})`,
+          value: `${summary.payloadGrowthFactor}×`,
+          valueColor: 'primary',
+        },
+        {
+          label: `${t.proj.avgPayload.kpis.heavyClassRecord} (${fmt.region(summary.bestDecadeCountryAvgPayloadRegion)}, ${fmt.decade(summary.bestDecadeCountryAvgPayloadDecade)})`,
+          value: fmt.unit(summary.bestDecadeCountryAvgPayloadKg, 'mass-kilogram'),
+          valueColor: 'info',
+        },
+      ],
+      content: createChart(
+        chartOption({
+          title: { text: t.proj.avgPayload.title },
           tooltip: {
             type: 'axis',
             header: ({ dataIndex }) => {
@@ -109,7 +98,7 @@ export const avgPayloadSection: SectionBuilder<AvgPayloadSectionData, typeof dic
             },
           ],
         }),
-      };
-    },
-  });
-};
+      ),
+    };
+  },
+});

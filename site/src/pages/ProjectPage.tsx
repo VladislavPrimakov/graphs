@@ -1,15 +1,15 @@
-import metadata from '@data/metadata.json';
-import { use, useEffect, useLayoutEffect } from 'react';
+import { use } from 'react';
 import { useParams } from 'react-router';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { SectionNav } from '@/components/layout/SectionNav';
 import { Section } from '@/components/sections/Section';
+import { DashboardToolbars } from '@/components/ui/ControlBar';
 import NotFoundPage from '@/pages/NotFoundPage';
-import { loadProjectBundle, STATIC_PROJECT_MAP } from '@/projects/registry';
+import { type DashboardSectionSpec, type DashboardToolbarSpec, loadProjectBundle, STATIC_PROJECT_MAP } from '@/utils/project';
 import { type Language, useFormat, useLanguage, useTheme, useTranslation } from '@/utils/provider';
+import { type ControlStore, getOrCreateStoreFromControls } from '@/utils/store';
 import { getAbsoluteUrl } from '@/utils/version';
-
-const useIsomorphicLayoutEffect = typeof window !== 'undefined' ? useLayoutEffect : useEffect;
+import metadata from '../../public/data/metadata.json';
 
 interface ProjectDashboardProps {
   slug: string;
@@ -25,15 +25,6 @@ function ProjectDashboard({ slug, section, lang }: ProjectDashboardProps) {
 
   const { project, t: routeT } = use(loadProjectBundle(slug, lang));
 
-  useIsomorphicLayoutEffect(() => {
-    if (section) {
-      const el = document.getElementById(section);
-      el?.scrollIntoView({ behavior: 'instant' });
-    } else {
-      window.scrollTo({ top: 0, behavior: 'instant' });
-    }
-  }, [section]);
-
   const t = {
     common: localeT.common,
     projMeta: routeT.projMeta,
@@ -43,7 +34,22 @@ function ProjectDashboard({ slug, section, lang }: ProjectDashboardProps) {
   const description = t.projMeta.description;
   const lastUpdated = (metadata as Record<string, string>)[project.id];
   // biome-ignore lint/suspicious/noExplicitAny: polymorphic dispatch across dynamic project specifications
-  const sections = project.buildSections({ lang, t: t as any, fmt, theme: resolvedTheme, tokens });
+  const buildCtx = { lang, t: t as any, fmt, theme: resolvedTheme, tokens };
+
+  // Resolve project-level data loaders (if defined)
+  const projectData: Record<string, unknown> = {};
+  if (project.data) {
+    const promises: Record<string, Promise<unknown>> = {};
+    for (const key in project.data) {
+      promises[key] = project.data[key]();
+    }
+    for (const key in promises) {
+      projectData[key] = use(promises[key]);
+    }
+  }
+
+  const sections = project.buildSections(buildCtx);
+  const toolbars: DashboardToolbarSpec[] = project.toolbars ? project.toolbars(projectData, buildCtx) : [];
 
   const metaSectionTitles = routeT.projMeta.sections as Record<string, string>;
   const activeSectionTitle = section ? metaSectionTitles[section] : undefined;
@@ -57,6 +63,73 @@ function ProjectDashboard({ slug, section, lang }: ProjectDashboardProps) {
 
   const targetSectionId = section || (project.sections?.[0] as string | undefined);
   const ogImage = targetSectionId ? getAbsoluteUrl(`/og/${project.id}-${targetSectionId}.png`) : undefined;
+
+  const getMatchedToolbars = (secId: string) => toolbars.filter((tb) => (tb.scope === 'all' ? true : tb.scope.includes(secId)));
+
+  const renderSections = () => {
+    if (toolbars.length === 0) {
+      return sections.map((sec, index) => {
+        const isInitial = section ? sec.id === section : index === 0;
+        return <Section key={sec.id} section={sec} projectSlug={project.id} projectData={projectData} initialInView={isInitial} />;
+      });
+    }
+
+    const projectStores: Record<string, ControlStore> = {};
+    for (const tb of toolbars) {
+      projectStores[tb.id] = getOrCreateStoreFromControls(tb.id, tb.controls);
+    }
+
+    interface SectionGroup {
+      toolbars: DashboardToolbarSpec[];
+      sections: { spec: DashboardSectionSpec; index: number }[];
+    }
+
+    const groups: SectionGroup[] = [];
+
+    for (let idx = 0; idx < sections.length; idx++) {
+      const spec = sections[idx];
+      const matched = getMatchedToolbars(spec.id);
+      const lastGroup = groups[groups.length - 1];
+
+      const isSameGroup = lastGroup && lastGroup.toolbars.length === matched.length && lastGroup.toolbars.every((tb, i) => tb.id === matched[i].id);
+
+      if (isSameGroup) {
+        lastGroup.sections.push({ spec, index: idx });
+      } else {
+        groups.push({ toolbars: matched, sections: [{ spec, index: idx }] });
+      }
+    }
+
+    return groups.map((group) => {
+      if (group.toolbars.length === 0) {
+        return group.sections.map(({ spec, index }) => (
+          <Section key={spec.id} section={spec} projectSlug={project.id} projectData={projectData} sectionLoaders={project.sectionData} initialInView={section ? spec.id === section : index === 0} />
+        ));
+      }
+
+      const groupStores: Record<string, ControlStore> = {};
+      for (const tb of group.toolbars) {
+        groupStores[tb.id] = projectStores[tb.id];
+      }
+
+      return (
+        <div key={`group-${group.sections[0].spec.id}`} className="section-group relative flex flex-col gap-8">
+          <DashboardToolbars toolbars={group.toolbars} stores={groupStores} />
+          {group.sections.map(({ spec, index }) => (
+            <Section
+              key={spec.id}
+              section={spec}
+              projectSlug={project.id}
+              projectData={projectData}
+              sectionLoaders={project.sectionData}
+              initialInView={section ? spec.id === section : index === 0}
+              toolbarStores={groupStores}
+            />
+          ))}
+        </div>
+      );
+    });
+  };
 
   return (
     <>
@@ -79,12 +152,7 @@ function ProjectDashboard({ slug, section, lang }: ProjectDashboardProps) {
       <div className="flex flex-col gap-8">
         <SectionNav sections={project.sections as unknown as string[]} projectSlug={project.id} sectionTitles={metaSectionTitles} projectTitle={title} initialSection={section} />
         <PageHeader title={title} description={description} tags={project.tags} lastUpdated={lastUpdated} />
-        <div className="flex flex-col gap-8">
-          {sections.map((sec, index) => {
-            const isInitial = section ? sec.id === section : index === 0;
-            return <Section key={sec.id} section={sec} projectSlug={project.id} initialInView={isInitial} />;
-          })}
-        </div>
+        <div className="flex flex-col gap-8">{renderSections()}</div>
       </div>
     </>
   );

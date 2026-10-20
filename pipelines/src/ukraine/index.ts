@@ -1,9 +1,16 @@
-import type { BudgetDebtSectionData } from '@graphs/types/ukraine/budget-and-debt';
-import type { TradeCategoriesSectionData, TradeCategoryId, TradeCategoryTuple } from '@graphs/types/ukraine/trade-categories';
-import type { TradePartnersSectionData, TradePartnerTuple } from '@graphs/types/ukraine/trade-partners';
-import type { TradeStructureSectionData } from '@graphs/types/ukraine/trade-structure';
+import type {
+  MacroGrowthSectionData,
+  MacroSectionData,
+  TradeCategoriesSectionData,
+  TradeCategoryId,
+  TradeCategoryTuple,
+  TradePartnersSectionData,
+  TradePartnerTuple,
+  TradeStructureSectionData,
+  UkraineDataset,
+} from '@graphs/types/ukraine';
 import XLSX, { type WorkSheet } from 'xlsx';
-import { exportProjectSections, getPipelineDataPath } from '@/utils/dataset';
+import { exportDataset, getPipelineDataPath } from '@/utils/dataset';
 import { fileExists, readJson, writeJson } from '@/utils/fs';
 import { fetchBinaryWithMeta, fetchHeadMeta, fetchWithRetry, isRemoteMetaEqual, type RemoteFileMeta } from '@/utils/http';
 import { getLogger, isUpdate, isVerbose, runWithLogger } from '@/utils/logger';
@@ -23,16 +30,88 @@ interface UkrainePipelineCache {
   meta?: Record<string, RemoteFileMeta>;
   rates: Record<string, Record<string, number>>;
   sections: {
-    'budget-and-debt': BudgetDebtSectionData;
+    macro: MacroSectionData;
+    'macro-growth': MacroGrowthSectionData;
     'trade-structure': TradeStructureSectionData;
     'trade-partners': TradePartnersSectionData;
     'trade-categories': TradeCategoriesSectionData;
   };
 }
 
-/** Exports section datasets for ukraine. */
+/** Precomputes Year-over-Year (YoY %) growth rates in USD for key macroeconomic indicators across full calendar years. */
+function computeMacroGrowthData(macro: MacroSectionData): MacroGrowthSectionData {
+  const fullYearIndices = macro.years
+    .map((y, idx) => ({ y, idx }))
+    .filter(({ y }) => y < 2026)
+    .map(({ idx }) => idx);
+
+  const growthIndices = fullYearIndices.slice(1);
+  const years = growthIndices.map((i) => macro.years[i]);
+
+  const calcYoy = (vals: (number | null)[], prevI: number, currI: number): number | null => {
+    const prev = vals[prevI];
+    const curr = vals[currI];
+    if (prev == null || curr == null || prev <= 0) return null;
+    return round(((curr - prev) / prev) * 100, 1);
+  };
+
+  const calcDiff = (vals: (number | null)[], prevI: number, currI: number): number | null => {
+    const prev = vals[prevI];
+    const curr = vals[currI];
+    if (prev == null || curr == null || prev <= 0) return null;
+    return round(curr - prev, 1);
+  };
+
+  const externalFinVals = macro.grants.map((g, i) => g + macro.loans[i]);
+
+  return {
+    years,
+    gdpYoy: growthIndices.map((i) => calcYoy(macro.gdp, i - 1, i)),
+    gdpDiff: growthIndices.map((i) => calcDiff(macro.gdp, i - 1, i)),
+    gdpVal: growthIndices.map((i) => macro.gdp[i]),
+    realGdpYoy: growthIndices.map((i) => (macro.realGdpGrowth ? macro.realGdpGrowth[i] : null)),
+    domesticRevYoy: growthIndices.map((i) => calcYoy(macro.domesticRev, i - 1, i)),
+    domesticRevDiff: growthIndices.map((i) => calcDiff(macro.domesticRev, i - 1, i)),
+    domesticRevVal: growthIndices.map((i) => macro.domesticRev[i]),
+    externalFinYoy: growthIndices.map((i) => calcYoy(externalFinVals, i - 1, i)),
+    externalFinDiff: growthIndices.map((i) => calcDiff(externalFinVals, i - 1, i)),
+    externalFinVal: growthIndices.map((i) => round(externalFinVals[i], 1)),
+    defenseYoy: growthIndices.map((i) => calcYoy(macro.defense, i - 1, i)),
+    defenseDiff: growthIndices.map((i) => calcDiff(macro.defense, i - 1, i)),
+    defenseVal: growthIndices.map((i) => macro.defense[i]),
+    totalExpYoy: growthIndices.map((i) => calcYoy(macro.totalExp, i - 1, i)),
+    totalExpDiff: growthIndices.map((i) => calcDiff(macro.totalExp, i - 1, i)),
+    totalExpVal: growthIndices.map((i) => macro.totalExp[i]),
+    govDebtYoy: growthIndices.map((i) => calcYoy(macro.govDebt, i - 1, i)),
+    govDebtDiff: growthIndices.map((i) => calcDiff(macro.govDebt, i - 1, i)),
+    govDebtVal: growthIndices.map((i) => (macro.govDebt[i] > 0 ? macro.govDebt[i] : null)),
+    privateDebtYoy: growthIndices.map((i) => calcYoy(macro.privateDebt, i - 1, i)),
+    privateDebtDiff: growthIndices.map((i) => calcDiff(macro.privateDebt, i - 1, i)),
+    privateDebtVal: growthIndices.map((i) => (macro.privateDebt[i] > 0 ? macro.privateDebt[i] : null)),
+  };
+}
+
+/** Exports unified dataset for ukraine. */
 async function exportUkraine(sections: UkrainePipelineCache['sections']): Promise<void> {
-  await exportProjectSections('ukraine', sections);
+  if (sections.macro) {
+    sections['macro-growth'] = computeMacroGrowthData(sections.macro);
+  }
+  const minYear = Math.min(sections.macro.years[0], sections['trade-structure'].years[0], sections['trade-partners'].years[0], sections['trade-categories'].years[0]);
+  const maxYear = Math.max(
+    sections.macro.years[sections.macro.years.length - 1],
+    sections['trade-structure'].years[sections['trade-structure'].years.length - 1],
+    sections['trade-partners'].years[sections['trade-partners'].years.length - 1],
+    sections['trade-categories'].years[sections['trade-categories'].years.length - 1],
+  );
+  const defaultPeriod: [number, number] = [sections.macro.years[Math.max(0, sections.macro.years.length - 6)], sections.macro.years[sections.macro.years.length - 1]];
+
+  const dataset: UkraineDataset = {
+    ...sections,
+    minYear,
+    maxYear,
+    defaultPeriod,
+  };
+  await exportDataset('ukraine', dataset);
 }
 
 /** Fetches monthly average USD/UAH exchange rates from NBU API, reusing cached historical rates. */
@@ -232,25 +311,36 @@ function loadDebtData(quarterlyWb: XLSX.WorkBook, targetYears: number[], annualW
   return result;
 }
 
-/** Parses in-memory GDP workbook to extract Nominal GDP in billion UAH. */
-function loadGdpData(gdpWb: XLSX.WorkBook, targetYears: number[]): Record<number, number> {
+interface GdpDataResult {
+  nominal: Record<number, number>;
+  realGrowth: Record<number, number>;
+}
+
+/** Parses in-memory GDP workbook to extract Nominal GDP in billion UAH and Real GDP YoY growth %. */
+function loadGdpData(gdpWb: XLSX.WorkBook, targetYears: number[]): GdpDataResult {
   const sheetName = gdpWb.SheetNames.find((s: string) => s.includes('GDP_')) || gdpWb.SheetNames[0];
   const sheet = gdpWb.Sheets[sheetName];
-  if (!sheet) return {};
+  if (!sheet) return { nominal: {}, realGrowth: {} };
   const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, blankrows: true, defval: null }) as unknown[][];
 
   const yearsRow = (rows[1] || []).slice(2);
   const gdpRow = (rows[4] || []).slice(2);
+  const realRow = (rows[7] || []).slice(2);
 
-  const result: Record<number, number> = {};
+  const nominal: Record<number, number> = {};
+  const realGrowth: Record<number, number> = {};
   for (let i = 0; i < yearsRow.length; i++) {
     const y = parseInt(String(yearsRow[i]), 10);
     const v = parseFloat(String(gdpRow[i]));
     if (!Number.isNaN(y) && targetYears.includes(y) && !Number.isNaN(v) && v > 0) {
-      result[y] = v / 1000.0;
+      nominal[y] = v / 1000.0;
+    }
+    const r = parseFloat(String(realRow[i]));
+    if (!Number.isNaN(y) && targetYears.includes(y) && !Number.isNaN(r)) {
+      realGrowth[y] = round(r - 100, 1);
     }
   }
-  return result;
+  return { nominal, realGrowth };
 }
 
 interface MonthlyTradePartialResult {
@@ -709,7 +799,7 @@ export async function runUkrainePipeline(forceUpdate = false, verbose?: boolean)
         }
       }
 
-      const hasValidDataset = Boolean(existingCache?.sections?.['budget-and-debt']?.years?.length) && Boolean(existingCache?.sections?.['trade-structure']?.years?.length);
+      const hasValidDataset = Boolean(existingCache?.sections?.macro?.years?.length) && Boolean(existingCache?.sections?.['trade-structure']?.years?.length);
 
       const allUrls = [URL_BUDGET, URL_TRADE, URL_TRADE_M, URL_DEBT_Q, URL_DEBT_Y, URL_GDP];
 
@@ -814,7 +904,7 @@ export async function runUkrainePipeline(forceUpdate = false, verbose?: boolean)
       const { ratesByMonth: rates, updatedCache: ratesCache } = await getMonthlyExchangeRates(yearsMonths, existingCache?.rates, forceUpdate);
 
       const debtUahByYear = loadDebtData(debtWb, budgetYears, debtAnnualWb);
-      const gdpUahByYear = loadGdpData(gdpWb, budgetYears);
+      const { nominal: gdpUahByYear, realGrowth: realGdpGrowthByYear } = loadGdpData(gdpWb, budgetYears);
 
       const defenseVals: number[] = [];
       const otherExpVals: number[] = [];
@@ -827,6 +917,7 @@ export async function runUkrainePipeline(forceUpdate = false, verbose?: boolean)
       const govDebtVals: number[] = [];
       const privDebtVals: number[] = [];
       const gdpList: (number | null)[] = [];
+      const realGdpGrowthList: (number | null)[] = [];
       const weightedRates: number[] = [];
       const yearLabels: string[] = [];
       const balances: number[] = [];
@@ -891,6 +982,7 @@ export async function runUkrainePipeline(forceUpdate = false, verbose?: boolean)
         const gdpUah = gdpUahByYear[year];
         const gdpUsd = gdpUah != null && weightedRate > 0 ? round(gdpUah / weightedRate, 1) : null;
         gdpList.push(gdpUsd);
+        realGdpGrowthList.push(realGdpGrowthByYear[year] ?? null);
 
         const dVal = round(defUsdSum, 1);
         const oVal = round(othersUsdSum, 1);
@@ -924,12 +1016,13 @@ export async function runUkrainePipeline(forceUpdate = false, verbose?: boolean)
 
       const trade = loadTradeData(tradeWb, tradeMonthlyWb);
 
-      const budgetDebtSectionData: BudgetDebtSectionData = {
+      const macroSectionData: MacroSectionData = {
         years: budgetYears,
         yearLabels,
         rates: weightedRates,
         balances,
         gdp: gdpList,
+        realGdpGrowth: realGdpGrowthList,
         expGdpPct,
         revGdpPct,
         debtGdpPct,
@@ -976,8 +1069,11 @@ export async function runUkrainePipeline(forceUpdate = false, verbose?: boolean)
         categoryImports: trade.categoryImports,
       };
 
+      const macroGrowthSectionData = computeMacroGrowthData(macroSectionData);
+
       const sections = {
-        'budget-and-debt': budgetDebtSectionData,
+        macro: macroSectionData,
+        'macro-growth': macroGrowthSectionData,
         'trade-structure': tradeStructureSectionData,
         'trade-partners': tradePartnersSectionData,
         'trade-categories': tradeCategoriesSectionData,

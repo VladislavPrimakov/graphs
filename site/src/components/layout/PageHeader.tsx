@@ -1,7 +1,7 @@
 import type React from 'react';
 import { ClockIcon } from '@/components/icons';
 import { TagBadge } from '@/components/ui/TagBadge';
-import type { ProjectTag } from '@/types';
+import type { ProjectTag } from '@/utils/project';
 import { useFormat, useTranslation } from '@/utils/provider';
 
 /** Props for the PageHeader component. */

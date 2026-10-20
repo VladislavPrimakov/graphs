@@ -1,10 +1,12 @@
 import path from 'node:path';
-import type { AttackDataGroup } from '@graphs/types/war-rf-ua/attacks';
+import type { AttackDataGroup } from '@graphs/types/war-rf-ua/strikes';
 import { fileExists, readJson, writeJson } from '@/utils/fs';
 import { fetchWithRetry } from '@/utils/http';
 import { getLogger } from '@/utils/logger';
 import { round, sum } from '@/utils/math';
-import { PIPELINES_SRC_DIR } from '@/utils/paths';
+import { loadEnv, PIPELINES_SRC_DIR } from '@/utils/paths';
+
+loadEnv();
 
 const DATA_RF_PATH = path.resolve(PIPELINES_SRC_DIR, 'war-rf-ua/data-attacks-rf.json');
 const KAGGLE_DATASET = 'piterfm/massive-missile-attacks-on-ukraine';
@@ -196,7 +198,7 @@ export function parseRfAttacksFromCsv(rawCsv: string, rawDict: string): AttackDa
   const dailyDates = Object.keys(dailyLaunched).sort();
   const dailyLabels = dailyDates.map((d) => {
     const parts = d.split('-');
-    return `${parts[2]}.${parts[1]}`;
+    return `${parts[2]}.${parts[1]}.${parts[0].slice(-2)}`;
   });
 
   const dailyUavs = dailyDates.map((d) => dailyLaunched[d].UAVs || 0);
@@ -289,16 +291,31 @@ export function parseRfAttacksFromCsv(rawCsv: string, rawDict: string): AttackDa
   };
 }
 
-/** Runs the RF air attacks parser using local data-rf.json snapshot or syncs with Kaggle API if requested. */
+/** Fetches latest dataset version number from Kaggle API metadata endpoint. */
+async function getKaggleDatasetVersion(token: string): Promise<number | null> {
+  try {
+    const res = await fetch(`https://www.kaggle.com/api/v1/datasets/view/${KAGGLE_DATASET}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (res.ok) {
+      const data = (await res.json()) as { currentVersionNumber?: number };
+      return data.currentVersionNumber ?? null;
+    }
+  } catch {
+    // Network / token failure
+  }
+  return null;
+}
+
+/** Runs the RF air attacks parser using local data-attacks-rf.json snapshot or syncs with Kaggle API if newer version available or forced. */
 export async function parseRfAttacks(forceUpdate = false): Promise<AttackDataGroup> {
   const logger = getLogger();
   const hasSnapshot = await fileExists(DATA_RF_PATH);
+  let snapshot: AttackDataGroup | null = null;
 
-  if (!forceUpdate && hasSnapshot) {
+  if (hasSnapshot) {
     try {
-      const snapshot = await readJson<AttackDataGroup>(DATA_RF_PATH);
-      logger.debug(`Loaded RF attacks snapshot from ${path.basename(DATA_RF_PATH)}`);
-      return snapshot;
+      snapshot = await readJson<AttackDataGroup>(DATA_RF_PATH);
     } catch (e) {
       logger.warn(`Failed reading ${DATA_RF_PATH}: ${e}`);
     }
@@ -306,26 +323,44 @@ export async function parseRfAttacks(forceUpdate = false): Promise<AttackDataGro
 
   const token = process.env.KAGGLE_API_TOKEN;
   if (!token) {
-    if (hasSnapshot) {
-      logger.debug('KAGGLE_API_TOKEN not found. Reusing committed data-rf.json snapshot.');
-      return await readJson<AttackDataGroup>(DATA_RF_PATH);
+    if (snapshot) {
+      logger.debug('KAGGLE_API_TOKEN not found. Reusing committed data-attacks-rf.json snapshot.');
+      return snapshot;
     }
-    throw new Error('KAGGLE_API_TOKEN not found and data-rf.json snapshot is missing.');
+    throw new Error('KAGGLE_API_TOKEN not found and data-attacks-rf.json snapshot is missing.');
+  }
+
+  let latestVersion: number | null = null;
+  if (!forceUpdate && snapshot) {
+    latestVersion = await getKaggleDatasetVersion(token);
+    if (latestVersion && snapshot.meta?.versionNumber && snapshot.meta.versionNumber >= latestVersion) {
+      logger.debug(`RF attacks snapshot is up to date (Kaggle version ${latestVersion})`);
+      return snapshot;
+    }
   }
 
   logger.debug('Syncing latest RF attacks data from Kaggle API...');
   const [rawCsv, rawDict] = await Promise.all([fetchKaggleFile('missile_attacks_daily.csv', token), fetchKaggleFile('missiles_and_uavs.csv', token)]);
 
   if (!rawCsv || !rawDict) {
-    if (hasSnapshot) {
-      logger.warn('Failed to download Kaggle files. Reusing existing data-rf.json snapshot.');
-      return await readJson<AttackDataGroup>(DATA_RF_PATH);
+    if (snapshot) {
+      logger.warn('Failed to download Kaggle files. Reusing existing data-attacks-rf.json snapshot.');
+      return snapshot;
     }
-    throw new Error('Failed to download Kaggle datasets and data-rf.json snapshot is missing.');
+    throw new Error('Failed to download Kaggle datasets and data-attacks-rf.json snapshot is missing.');
+  }
+
+  if (latestVersion == null) {
+    latestVersion = await getKaggleDatasetVersion(token);
   }
 
   const attackGroup = parseRfAttacksFromCsv(rawCsv, rawDict);
+  attackGroup.meta = {
+    versionNumber: latestVersion ?? undefined,
+    lastUpdated: new Date().toISOString(),
+  };
+
   await writeJson(DATA_RF_PATH, attackGroup, 0);
-  logger.debug(`Updated ${path.basename(DATA_RF_PATH)} with latest Kaggle attacks data`);
+  logger.debug(`Updated ${path.basename(DATA_RF_PATH)} with latest Kaggle attacks data (v${latestVersion ?? 'unknown'})`);
   return attackGroup;
 }

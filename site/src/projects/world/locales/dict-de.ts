@@ -1,6 +1,9 @@
 import type { dict as enDict } from './dict-en';
 
 export const dict: typeof enDict = {
+  countries: 'Länder',
+  searchCountry: 'Land suchen',
+  noCountriesFound: 'Keine Länder gefunden',
   gdpPpp: {
     title: 'BIP nach KKP (konstante Preise 2021 $)',
   },

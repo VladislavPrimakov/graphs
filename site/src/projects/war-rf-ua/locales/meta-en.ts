@@ -1,4 +1,4 @@
-import type { LocaleProjectMeta } from '@/types';
+import type { ProjectLocaleMeta } from '@/utils/project';
 
 export const meta = {
   title: 'War RF-UA',
@@ -8,9 +8,8 @@ export const meta = {
     'frontline-dynamics': 'Frontline Dynamics',
     'losses-map': 'Losses Map',
     'losses-timeline': 'Loss Dynamics',
-    'category-losses': 'Category Losses',
-    'equipment-breakdown': 'Model Breakdown',
-    'uav-strikes': 'UAV Attacks',
-    'missile-strikes': 'Missile Strikes',
+    'losses-breakdown': 'Model Breakdown',
+    'strikes-uav': 'UAV Attacks',
+    'strikes-missile': 'Missile Strikes',
   },
-} satisfies LocaleProjectMeta;
+} satisfies ProjectLocaleMeta;
