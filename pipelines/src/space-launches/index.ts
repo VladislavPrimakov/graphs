@@ -1,8 +1,13 @@
-import type { AvgPayloadSectionData } from '@graphs/types/space-launches/avg-payload';
-import type { FailureRatesSectionData } from '@graphs/types/space-launches/failure-rates';
-import type { LaunchCostsSectionData } from '@graphs/types/space-launches/launch-costs';
-import type { PayloadCapacitySectionData } from '@graphs/types/space-launches/payload-capacity';
-import { exportProjectSections, getPipelineDataPath } from '@/utils/dataset';
+import type {
+  AvgPayloadSectionData,
+  FailureRatesSectionData,
+  LaunchCostsSectionData,
+  PayloadCapacitySectionData,
+  SpaceEntityMeta,
+  SpaceLaunchesDataset,
+  SpaceLaunchesToolbarMeta,
+} from '@graphs/types/space-launches';
+import { exportDataset, getPipelineDataPath } from '@/utils/dataset';
 import { fileExists, readJson, writeJson } from '@/utils/fs';
 import { fetchWithRetry } from '@/utils/http';
 import { getLogger, isUpdate, isVerbose, runWithLogger } from '@/utils/logger';
@@ -41,9 +46,46 @@ export interface SpaceLaunchesPipelineCache {
   };
 }
 
-/** Exports section datasets for space-launches. */
-async function exportSpaceLaunches(sections: SpaceLaunchesPipelineCache['sections']): Promise<void> {
-  await exportProjectSections('space-launches', sections);
+/** Builds project-level toolbar metadata across all space launches charts. */
+function buildSpaceToolbarMeta(launches: StoredLaunch[], sections: SpaceLaunchesPipelineCache['sections']): SpaceLaunchesToolbarMeta {
+  const entityLaunches = new Map<string, number>();
+  for (const item of launches) {
+    const r = item.region;
+    if (r && r !== 'Others') {
+      entityLaunches.set(r, (entityLaunches.get(r) || 0) + 1);
+    }
+  }
+
+  // Collect all unique entities appearing across all section charts
+  const allEntities = new Set<string>();
+  for (const r of sections['payload-capacity']?.regions || []) allEntities.add(r);
+  for (const r of sections['avg-payload']?.regions || []) allEntities.add(r);
+  for (const r of sections['launch-costs']?.decadeCosts?.regions || []) allEntities.add(r);
+  for (const r of sections['failure-rates']?.regions || []) allEntities.add(r);
+
+  // Preserve priority ranking order from payload-capacity
+  const orderedRegions = sections['payload-capacity']?.regions || Array.from(allEntities);
+  const entities: SpaceEntityMeta[] = orderedRegions
+    .filter((code) => allEntities.has(code))
+    .map((code) => ({
+      code,
+      launches: entityLaunches.get(code) || 0,
+    }));
+
+  return {
+    totalLaunches: launches.length,
+    entities,
+  };
+}
+
+/** Exports unified dataset for space-launches. */
+async function exportSpaceLaunches(sections: SpaceLaunchesPipelineCache['sections'], launches: StoredLaunch[]): Promise<void> {
+  const toolbarMeta = buildSpaceToolbarMeta(launches, sections);
+  const dataset: SpaceLaunchesDataset = {
+    ...sections,
+    ...toolbarMeta,
+  };
+  await exportDataset('space-launches', dataset);
 }
 
 interface LaunchRegionInput {
@@ -228,18 +270,18 @@ export async function runSpaceLaunchesPipeline(forceUpdate = false, verbose?: bo
 
             if (latestRemoteLaunch?.id === cache.meta.lastLaunchId && preflightCount === cache.meta.remoteCount) {
               logger.info(`Remote sources unchanged (${cache.launches.length.toLocaleString()} launches up to ${latestRemoteLaunch?.net?.slice(0, 10)}). Using cached dataset.`);
-              await exportSpaceLaunches(cache.sections);
+              await exportSpaceLaunches(cache.sections, cache.launches);
               return;
             }
             logger.info('New upstream data detected. Fetching recent launches...');
           } else {
             logger.warn(`Space Devs API preflight returned HTTP ${res.status}. Using cached dataset.`);
-            await exportSpaceLaunches(cache.sections);
+            await exportSpaceLaunches(cache.sections, cache.launches);
             return;
           }
         } catch (err) {
           logger.warn(`Space Devs API unreachable (${err}). Using cached dataset.`);
-          await exportSpaceLaunches(cache.sections);
+          await exportSpaceLaunches(cache.sections, cache.launches);
           return;
         }
       }
@@ -835,7 +877,7 @@ export async function runSpaceLaunchesPipeline(forceUpdate = false, verbose?: bo
         },
         0,
       );
-      await exportSpaceLaunches(sections);
+      await exportSpaceLaunches(sections, allSorted);
       logger.success(`Exported space-launches datasets (${allLaunches.length.toLocaleString()} launches, ${allYears[0]}–${allYears[allYears.length - 1]})`);
     },
     verbose,

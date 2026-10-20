@@ -3,8 +3,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./*": "./*/*.ts",
-    "./*/*": "./*/*"
+    "./*": "./*/index.ts",
+    "./*/*": "./*/*.ts"
   },
   "scripts": {
     "check": "biome check --write",

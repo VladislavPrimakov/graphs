@@ -1,6 +1,7 @@
-import type { KpiCardSpec, SemanticColor } from '@/types';
 import { cn } from '@/utils/cn';
+import type { SemanticColor } from '@/utils/color';
 import { resolveColor } from '@/utils/color';
+import type { KpiCardSpec } from '@/utils/project';
 import { useFormat } from '@/utils/provider';
 
 /** Props for rendering metric KPI summary cards. */
@@ -33,7 +34,7 @@ export const KpiCard: React.FC<KpiCardProps> = ({ label, value, valueColor = 'de
 /** Props for the responsive KpiRow layout component. */
 export interface KpiRowProps {
   /** Array of KPI metric specifications to render in a horizontal row. */
-  kpis: KpiCardSpec[];
+  kpis?: KpiCardSpec[];
   /** Optional additional CSS class names. @default '' */
   className?: string;
 }
@@ -44,8 +45,8 @@ export const KpiRow: React.FC<KpiRowProps> = ({ kpis, className }) => {
 
   return (
     <div className={cn('flex flex-wrap gap-4', className)}>
-      {kpis.map((kpi, idx) => (
-        <KpiCard key={kpi.id || `${kpi.label}-${idx}`} label={kpi.label} value={kpi.value} valueColor={kpi.valueColor} className="flex-1 min-w-40" />
+      {kpis.map((kpi) => (
+        <KpiCard key={kpi.label} label={kpi.label} value={kpi.value} valueColor={kpi.valueColor} className="flex-1 min-w-40" />
       ))}
     </div>
   );

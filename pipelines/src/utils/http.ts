@@ -1,12 +1,34 @@
 import { getLogger } from '@/utils/logger';
 
+/** Structured HTTP execution error containing status code and response payload. */
+export class HttpError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly url: string,
+    public readonly body: string = '',
+  ) {
+    super(`HTTP ${status} for ${url}${body ? `: ${body}` : ''}`);
+    this.name = 'HttpError';
+  }
+
+  /** Returns true if error status or message indicates that daily or call volume quota has been exceeded. */
+  get isQuotaExhausted(): boolean {
+    const text = this.body.toLowerCase();
+    return (
+      (this.status === 403 && (text.includes('quota') || text.includes('volume') || text.includes('replenished') || !text)) ||
+      (this.status === 429 && (text.includes('quota') || text.includes('volume') || text.includes('replenished'))) ||
+      text.includes('call volume quota') ||
+      text.includes('quota will be replenished')
+    );
+  }
+}
+
 /** Fetches a URL with retry logic, custom headers, and timeout. */
 export async function fetchWithRetry(url: string, options: RequestInit & { retries?: number; backoffMs?: number; timeoutMs?: number } = {}): Promise<Response> {
   const { retries = 3, backoffMs = 1000, timeoutMs = 30000, headers, ...rest } = options;
   const logger = getLogger();
 
   const defaultHeaders = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
     Accept: 'application/json, text/plain, */*',
     ...headers,
   };
@@ -29,8 +51,33 @@ export async function fetchWithRetry(url: string, options: RequestInit & { retri
         return res;
       }
 
-      if (res.status === 429 || res.status >= 500) {
-        const wait = backoffMs * 2 ** (attempt - 1);
+      if (res.status === 401 || res.status === 403) {
+        const body = await res.text().catch(() => '');
+        throw new HttpError(res.status, url, body);
+      }
+
+      if (res.status === 429) {
+        const body = await res.text().catch(() => '');
+        const err = new HttpError(res.status, url, body);
+        if (err.isQuotaExhausted || attempt === retries) {
+          throw err;
+        }
+        const retryAfter = res.headers.get('retry-after');
+        const parsedWait = retryAfter ? Number.parseInt(retryAfter, 10) * 1000 : 0;
+        const jitter = Math.floor(Math.random() * 50);
+        const wait = Math.max(parsedWait || backoffMs * 2 ** (attempt - 1) + jitter, 1000);
+        logger.warn(`HTTP 429: Retrying ${url} in ${wait}ms (attempt ${attempt}/${retries})...`);
+        await new Promise((resolve) => setTimeout(resolve, wait));
+        continue;
+      }
+
+      if (res.status >= 500) {
+        if (attempt === retries) {
+          const body = await res.text().catch(() => '');
+          throw new HttpError(res.status, url, body);
+        }
+        const jitter = Math.floor(Math.random() * 50);
+        const wait = backoffMs * 2 ** (attempt - 1) + jitter;
         logger.warn(`HTTP ${res.status}: Retrying ${url} in ${wait}ms (attempt ${attempt}/${retries})...`);
         await new Promise((resolve) => setTimeout(resolve, wait));
         continue;
@@ -38,6 +85,9 @@ export async function fetchWithRetry(url: string, options: RequestInit & { retri
 
       return res;
     } catch (err: unknown) {
+      if (err instanceof HttpError) {
+        throw err;
+      }
       lastError = err instanceof Error ? err : new Error(String(err));
       if (attempt < retries) {
         const wait = backoffMs * 2 ** (attempt - 1);

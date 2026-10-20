@@ -1,5 +1,6 @@
 import stringHash from 'string-hash';
-import type { Language } from './provider';
+import { resolveAdditionalRegionName } from './format-locale';
+import type { Language } from './language';
 
 /* -------------------------------------------------------------------------- */
 /* 1. Measurement Units & CLDR Schemas                                        */
@@ -141,14 +142,28 @@ export function formatRatio(lang: Language, a: number, b = 1, digits = 1): strin
 
 /** Formats an ISO date string or Date instance into a localized date string. */
 function formatDate(lang: Language, date: string | Date, options?: Intl.DateTimeFormatOptions): string {
-  const d = typeof date === 'string' ? new Date(date) : date;
+  let d: Date;
+  if (typeof date === 'string') {
+    const parts = date.split('-').map(Number);
+    if (parts.length === 3 && !Number.isNaN(parts[0]) && !Number.isNaN(parts[1]) && !Number.isNaN(parts[2])) {
+      d = new Date(parts[0], parts[1] - 1, parts[2]);
+    } else if (parts.length === 2 && !Number.isNaN(parts[0]) && !Number.isNaN(parts[1])) {
+      d = new Date(parts[0], parts[1] - 1, 1);
+    } else if (parts.length === 1 && !Number.isNaN(parts[0])) {
+      d = new Date(parts[0], 0, 1);
+    } else {
+      d = new Date(date);
+    }
+  } else {
+    d = date;
+  }
   if (Number.isNaN(d.getTime())) return String(date);
-  return getDateTimeFormat(lang, {
+  const defaultOptions: Intl.DateTimeFormatOptions = {
     day: 'numeric',
     month: 'short',
     year: 'numeric',
-    ...options,
-  }).format(d);
+  };
+  return getDateTimeFormat(lang, options ? { ...options } : defaultOptions).format(d);
 }
 
 /** Formats a numeric value into compact localized notation (e.g., 1.5M, 1,5 млн). */
@@ -298,6 +313,8 @@ const REGION_COLORS: Record<string, string> = {
   EU: '#8b5cf6', // European Union
   AEC: '#10b981', // Asia ex-China
   ROW: '#94a3b8', // Rest of World
+  Others: '#94a3b8',
+  OTHERS: '#94a3b8',
 
   // Key European & Trade Partners
   PL: '#0284c7', // Poland
@@ -345,34 +362,16 @@ function getRegionDisplayNames(lang: Language): Intl.DisplayNames {
   return dn;
 }
 
-const REGIONAL_NAMES: Record<Language, Record<string, string>> = {
-  en: {
-    AEC: 'Asia ex-China',
-    ROW: 'Rest of World',
-  },
-  ru: {
-    AEC: 'Азия без Китая',
-    ROW: 'Остальной мир',
-  },
-  uk: {
-    AEC: 'Азія без Китаю',
-    ROW: 'Решта світу',
-  },
-  de: {
-    AEC: 'Asien ohne China',
-    ROW: 'Rest der Welt',
-  },
-};
-
-/** Resolves localized country or region name via native browser Intl.DisplayNames in the requested locale with regional overrides. */
+/** Resolves localized country or region name via native browser Intl.DisplayNames in the requested locale with historical and regional overrides. */
 function getLocalizedRegionName(lang: Language, regionCode?: string): string {
   if (!regionCode) return '';
-  const alias = REGIONAL_NAMES[lang]?.[regionCode];
-  if (alias) return alias;
+  const upper = regionCode.toUpperCase();
+  const override = resolveAdditionalRegionName(lang, upper) || resolveAdditionalRegionName(lang, regionCode);
+  if (override) return override;
 
   try {
     const dn = getRegionDisplayNames(lang);
-    return dn.of(regionCode) || regionCode;
+    return dn.of(upper) || regionCode;
   } catch {
     return regionCode;
   }
@@ -386,11 +385,15 @@ function getRegionColor(regionCode?: string): string {
   if (!regionCode) {
     return DEFAULT_REGION_COLOR;
   }
+  const upper = regionCode.toUpperCase();
+  if (REGION_COLORS[upper]) {
+    return REGION_COLORS[upper];
+  }
   if (REGION_COLORS[regionCode]) {
     return REGION_COLORS[regionCode];
   }
 
-  const idx = stringHash(regionCode) % DYNAMIC_PALETTE.length;
+  const idx = stringHash(upper) % DYNAMIC_PALETTE.length;
   return DYNAMIC_PALETTE[idx];
 }
 

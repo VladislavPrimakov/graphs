@@ -1,4 +1,4 @@
-import type { LocaleProjectMeta } from '@/types';
+import type { ProjectLocaleMeta } from '@/utils/project';
 
 export const meta = {
   title: 'Space Launches',
@@ -9,4 +9,4 @@ export const meta = {
     'launch-costs': 'Cost per Kg',
     'failure-rates': 'Failure Rates',
   },
-} satisfies LocaleProjectMeta;
+} satisfies ProjectLocaleMeta;

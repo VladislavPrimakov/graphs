@@ -1,4 +1,4 @@
-import type { WarLossCategory } from '@graphs/types/war-rf-ua/categories';
+import type { WarLossCategory } from '@graphs/types/war-rf-ua/losses';
 
 export const dict = {
   timeline: {
@@ -33,8 +33,10 @@ export const dict = {
     subtitle: 'Interactive visualization of 19,000+ photo- and video-verified equipment losses',
     allSides: 'All Sides',
     allCategories: 'All Categories',
-    searchPlaceholder: 'Search model (e.g. T-90M, BMP-3, Ka-52)...',
-    selectedModels: 'Selected Models',
+    categories: 'Categories',
+    noCategoriesFound: 'No categories found',
+    models: 'Models',
+    allModels: 'All Models',
     noModelsFound: 'No models found',
     losses: 'verified losses',
     model: 'Model',
@@ -94,9 +96,5 @@ export const dict = {
     rfAdvance: 'Russian Advance',
     uaLiberated: 'Ukrainian Liberation',
     netMonthlyChange: 'Net Monthly Change',
-    kpis: {
-      currentRfControl: 'Consensus RF Control',
-      currentUaControl: 'Consensus UA Control',
-    },
   },
 };

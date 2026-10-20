@@ -2,9 +2,11 @@
 export const budgetColors = {
   defense: '#b91c1c',
   otherExp: '#475569',
+  totalExp: '#dc2626',
   domesticRev: '#16a34a',
   grants: '#d97706',
   loans: '#facc15',
+  externalFin: '#d97706',
   debt: '#64748b',
   govDebt: '#4f46e5',
   privateDebt: '#94a3b8',

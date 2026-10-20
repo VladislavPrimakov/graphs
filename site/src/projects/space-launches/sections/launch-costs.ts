@@ -1,56 +1,43 @@
-import type { LaunchCostsSectionData } from '@graphs/types/space-launches/launch-costs';
-import { chartSection, type SectionBuilder } from '@/types';
+import { createChart } from '@/components/sections/SectionChart';
 import { chartOption, zipRecords } from '@/utils/chart-builder';
-import type { dict } from '../locales/dict-en';
+import type { Section } from '../project';
 
 /** Section builder for Launch Costs to LEO by Decade chart. */
-export const launchCostsSection: SectionBuilder<LaunchCostsSectionData, typeof dict> = ({ t, fmt, tokens }) => {
-  return chartSection({
-    id: 'launch-costs',
-    title: t.proj.launchCosts.title,
-    sources: [
-      { name: 'CSIS Aerospace Security Project & BryceTech', url: 'https://aerospace.csis.org/data/space-launch-cost/' },
-      { name: 'The Space Devs — Launch Library 2 API', url: 'https://ll.thespacedevs.com/2.3.0/launches/' },
-    ],
-    controls: (data) => {
-      const regionCount = Object.keys(data.decadeCosts.series).length;
-      return [
-        {
-          id: 'topN',
-          type: 'slider',
-          min: Math.min(3, regionCount),
-          max: regionCount,
-          defaultValue: Math.min(7, regionCount),
-          label: t.common.top,
-        },
-      ] as const;
-    },
-    buildView: (data, values) => {
-      const summary = data.summary;
-      const costRegions = Object.keys(data.decadeCosts.series);
-      const topN = values.topN;
-      const activeCostRegions = costRegions.slice(0, topN);
+export const launchCostsSection: Section = ({ t, fmt, tokens }) => ({
+  id: 'launch-costs',
+  title: t.proj.launchCosts.title,
+  sources: [
+    { name: 'CSIS Aerospace Security Project & BryceTech', url: 'https://aerospace.csis.org/data/space-launch-cost/' },
+    { name: 'The Space Devs — Launch Library 2 API', url: 'https://ll.thespacedevs.com/2.3.0/launches/' },
+  ],
+  buildView: ({ spaceLaunches }, { launches }) => {
+    const data = spaceLaunches['launch-costs'];
+    const summary = data.summary;
+    const costRegions = Object.keys(data.decadeCosts.series);
+    const selectedRegions = launches?.countries?.length ? (launches.countries as string[]).filter((r) => costRegions.includes(r)) : costRegions;
+    const activeCostRegions = selectedRegions.length > 0 ? selectedRegions : costRegions;
 
-      return {
-        kpisTop: [
-          {
-            label: `${t.proj.launchCosts.kpis.bestAvgCost} (${fmt.decade(summary.bestDecadeAvgCostDecade)})`,
-            value: fmt.per(fmt.currency(summary.bestDecadeAvgCostPerKg), 'mass-kilogram'),
-            valueColor: 'success',
-          },
-          {
-            label: `${t.proj.launchCosts.kpis.costReduction} (${fmt.decade(summary.worstDecadeAvgCostDecade)}: ${fmt.per(fmt.currency(summary.worstDecadeAvgCostPerKg), 'mass-kilogram')} → ${fmt.decade(summary.bestDecadeAvgCostDecade)}: ${fmt.per(fmt.currency(summary.bestDecadeAvgCostPerKg), 'mass-kilogram')})`,
-            value: `${summary.costReductionFactor}×`,
-            valueColor: 'primary',
-          },
-          {
-            label: `${t.proj.launchCosts.kpis.lowestCost} (${fmt.region(summary.lowestCostRegion)}, ${fmt.decade(summary.lowestCostDecade)})`,
-            value: fmt.per(fmt.currency(summary.lowestCostPerKg), 'mass-kilogram'),
-            valueColor: 'info',
-          },
-        ],
-        option: chartOption({
-          title: { text: `${t.proj.launchCosts.title} (${t.common.top} ${topN})` },
+    return {
+      kpisTop: [
+        {
+          label: `${t.proj.launchCosts.kpis.bestAvgCost} (${fmt.decade(summary.bestDecadeAvgCostDecade)})`,
+          value: fmt.per(fmt.currency(summary.bestDecadeAvgCostPerKg), 'mass-kilogram'),
+          valueColor: 'success',
+        },
+        {
+          label: `${t.proj.launchCosts.kpis.costReduction} (${fmt.decade(summary.worstDecadeAvgCostDecade)}: ${fmt.per(fmt.currency(summary.worstDecadeAvgCostPerKg), 'mass-kilogram')} → ${fmt.decade(summary.bestDecadeAvgCostDecade)}: ${fmt.per(fmt.currency(summary.bestDecadeAvgCostPerKg), 'mass-kilogram')})`,
+          value: `${summary.costReductionFactor}×`,
+          valueColor: 'primary',
+        },
+        {
+          label: `${t.proj.launchCosts.kpis.lowestCost} (${fmt.region(summary.lowestCostRegion)}, ${fmt.decade(summary.lowestCostDecade)})`,
+          value: fmt.per(fmt.currency(summary.lowestCostPerKg), 'mass-kilogram'),
+          valueColor: 'info',
+        },
+      ],
+      content: createChart(
+        chartOption({
+          title: { text: t.proj.launchCosts.title },
           tooltip: {
             type: 'axis',
             header: ({ dataIndex }) => {
@@ -115,7 +102,7 @@ export const launchCostsSection: SectionBuilder<LaunchCostsSectionData, typeof d
             },
           ],
         }),
-      };
-    },
-  });
-};
+      ),
+    };
+  },
+});

@@ -1,4 +1,4 @@
-import type { LocaleProjectMeta } from '@/types';
+import type { ProjectLocaleMeta } from '@/utils/project';
 
 export const meta = {
   title: 'AI Tokens',
@@ -7,4 +7,4 @@ export const meta = {
     'tokens-by-region': 'Throughput by Region',
     'tokens-by-company': 'Throughput by Company',
   },
-} satisfies LocaleProjectMeta;
+} satisfies ProjectLocaleMeta;

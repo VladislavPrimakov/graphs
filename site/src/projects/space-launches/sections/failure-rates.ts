@@ -1,51 +1,40 @@
-import type { FailureRatesSectionData } from '@graphs/types/space-launches/failure-rates';
-import { chartSection, type SectionBuilder } from '@/types';
+import { createChart } from '@/components/sections/SectionChart';
 import { chartOption, zipRecords } from '@/utils/chart-builder';
-import type { dict } from '../locales/dict-en';
+import type { Section } from '../project';
 
 /** Section builder for Launch Failure Rates by Decade chart. */
-export const failureRatesSection: SectionBuilder<FailureRatesSectionData, typeof dict> = ({ t, fmt, tokens }) => {
-  return chartSection({
-    id: 'failure-rates',
-    title: t.proj.failureRates.title,
-    sources: [{ name: 'The Space Devs — Launch Library 2 API', url: 'https://ll.thespacedevs.com/2.3.0/launches/' }],
-    controls: (data) =>
-      [
-        {
-          id: 'topN',
-          type: 'slider',
-          min: Math.min(3, data.regions.length),
-          max: data.regions.length,
-          defaultValue: Math.min(7, data.regions.length),
-          label: t.common.top,
-        },
-      ] as const,
-    buildView: (data, values) => {
-      const summary = data.summary;
-      const allRegions = data.regions;
-      const topN = values.topN;
-      const activeRegions = allRegions.slice(0, topN);
+export const failureRatesSection: Section = ({ t, fmt, tokens }) => ({
+  id: 'failure-rates',
+  title: t.proj.failureRates.title,
+  sources: [{ name: 'The Space Devs — Launch Library 2 API', url: 'https://ll.thespacedevs.com/2.3.0/launches/' }],
+  buildView: ({ spaceLaunches }, { launches }) => {
+    const data = spaceLaunches['failure-rates'];
+    const summary = data.summary;
+    const allRegions = data.regions;
+    const selectedRegions = launches?.countries?.length ? (launches.countries as string[]).filter((r) => allRegions.includes(r)) : allRegions;
+    const activeRegions = selectedRegions.length > 0 ? selectedRegions : allRegions;
 
-      return {
-        kpisTop: [
-          {
-            label: `${t.proj.failureRates.kpis.bestGlobalDecadeReliability} (${fmt.decade(summary.bestDecadeGlobalReliabilityDecade)})`,
-            value: fmt.percent(summary.bestDecadeGlobalReliabilityRate),
-            valueColor: 'success',
-          },
-          {
-            label: `${t.proj.failureRates.kpis.reliabilityGrowth} (${fmt.decade(summary.worstDecadeReliabilityDecade)}: ${fmt.percent(summary.worstDecadeReliabilityRate)} → ${fmt.decade(summary.bestDecadeGlobalReliabilityDecade)}: ${fmt.percent(summary.bestDecadeGlobalReliabilityRate)})`,
-            value: `${summary.reliabilityGrowthFactor}×`,
-            valueColor: 'primary',
-          },
-          {
-            label: `${t.proj.failureRates.kpis.bestDecadeReliability} (${fmt.region(summary.bestDecadeReliabilityRegion)}, ${fmt.decade(summary.bestDecadeReliabilityDecade)})`,
-            value: fmt.percent(summary.bestDecadeReliabilityRate),
-            valueColor: 'info',
-          },
-        ],
-        option: chartOption({
-          title: { text: `${t.proj.failureRates.title} (${t.common.top} ${topN})` },
+    return {
+      kpisTop: [
+        {
+          label: `${t.proj.failureRates.kpis.bestGlobalDecadeReliability} (${fmt.decade(summary.bestDecadeGlobalReliabilityDecade)})`,
+          value: fmt.percent(summary.bestDecadeGlobalReliabilityRate),
+          valueColor: 'success',
+        },
+        {
+          label: `${t.proj.failureRates.kpis.reliabilityGrowth} (${fmt.decade(summary.worstDecadeReliabilityDecade)}: ${fmt.percent(summary.worstDecadeReliabilityRate)} → ${fmt.decade(summary.bestDecadeGlobalReliabilityDecade)}: ${fmt.percent(summary.bestDecadeGlobalReliabilityRate)})`,
+          value: `${summary.reliabilityGrowthFactor}×`,
+          valueColor: 'primary',
+        },
+        {
+          label: `${t.proj.failureRates.kpis.bestDecadeReliability} (${fmt.region(summary.bestDecadeReliabilityRegion)}, ${fmt.decade(summary.bestDecadeReliabilityDecade)})`,
+          value: fmt.percent(summary.bestDecadeReliabilityRate),
+          valueColor: 'info',
+        },
+      ],
+      content: createChart(
+        chartOption({
+          title: { text: t.proj.failureRates.title },
           tooltip: {
             type: 'axis',
             header: ({ dataIndex }) => {
@@ -113,7 +102,7 @@ export const failureRatesSection: SectionBuilder<FailureRatesSectionData, typeof
             },
           ],
         }),
-      };
-    },
-  });
-};
+      ),
+    };
+  },
+});

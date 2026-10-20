@@ -1,9 +1,17 @@
 import path from 'node:path';
-import { WAR_LOSS_CATEGORIES, type WarLossCategory } from '@graphs/types/war-rf-ua/categories';
-import type { LossCategoryChartData, LossCategoryItem, LossSummaryData } from '@graphs/types/war-rf-ua/category-losses';
-import type { LossCategoryDetailData, LossEquipmentModel } from '@graphs/types/war-rf-ua/equipment-breakdown';
-import type { LossesMapSectionData, LossMapPoint } from '@graphs/types/war-rf-ua/losses-map';
-import type { LossOverallTimelineData, LossTimelineBreakdownItem } from '@graphs/types/war-rf-ua/losses-timeline';
+import {
+  type LossCategoryChartData,
+  type LossCategoryDetailData,
+  type LossCategoryItem,
+  type LossEquipmentModel,
+  type LossesMapSectionData,
+  type LossMapPoint,
+  type LossOverallTimelineData,
+  type LossSummaryData,
+  type LossTimelineBreakdownItem,
+  WAR_LOSS_CATEGORIES,
+  type WarLossCategory,
+} from '@graphs/types/war-rf-ua/losses';
 import { XMLParser } from 'fast-xml-parser';
 import { fileExists, readJson, writeJson } from '@/utils/fs';
 import { fetchWithRetry } from '@/utils/http';
@@ -246,7 +254,7 @@ function extractSources(htmlOrText?: string): { posts: number[]; sources: string
   const urlRegex = /https?:\/\/[^\s"'<>]+/gi;
   for (const m of htmlOrText.matchAll(urlRegex)) {
     const u = m[0].replace(/[.,;)]+$/, '');
-    if (!u.includes('lost_warinua') && !u.includes('lostarmour') && !u.includes('google.com/maps') && !sources.includes(u)) {
+    if (!u.includes('lost_warinua') && !u.includes('lostarmour') && !u.includes('google.com') && !u.includes('usercontent') && !sources.includes(u)) {
       sources.push(u);
     }
   }
@@ -430,7 +438,13 @@ function classifyPlacemarks(placemarks: RawPlacemark[], rules: ClassificationRul
 
     // Merge any proof links from nazva if nazva was a URL
     const posts = [...(pm.posts || [])];
-    const sources = [...(pm.sources || [])];
+    const rawSources = pm.sources || [];
+    const sources: string[] = [];
+    for (const s of rawSources) {
+      if (!s.includes('google.com') && !s.includes('usercontent') && !sources.includes(s)) {
+        sources.push(s);
+      }
+    }
     if (pm.nazva && (pm.nazva.startsWith('http') || pm.nazva.includes('t.me'))) {
       const { posts: extraPosts, sources: extraSources } = extractSources(pm.nazva);
       for (const p of extraPosts) {
@@ -485,10 +499,16 @@ function aggregateLossesData(records: ParsedRecord[], totalPlacemarks: number): 
     monthlyCategoryTotals[p] = Object.fromEntries(WAR_LOSS_CATEGORIES.map((c) => [c, { rf: 0, ua: 0 }])) as Record<WarLossCategory, { rf: number; ua: number }>;
   }
 
+  const periodIndexMap = new Map(periods.map((p, idx) => [p, idx]));
+
   const modelCounts: Record<WarLossCategory, { rf: Record<string, number>; ua: Record<string, number> }> = Object.fromEntries(WAR_LOSS_CATEGORIES.map((c) => [c, { rf: {}, ua: {} }])) as Record<
     WarLossCategory,
     { rf: Record<string, number>; ua: Record<string, number> }
   >;
+
+  const modelMonthlyCounts: Record<WarLossCategory, { rf: Record<string, number[]>; ua: Record<string, number[]> }> = Object.fromEntries(
+    WAR_LOSS_CATEGORIES.map((c) => [c, { rf: {}, ua: {} }]),
+  ) as Record<WarLossCategory, { rf: Record<string, number[]>; ua: Record<string, number[]> }>;
 
   const uniqueModels = new Set<string>();
 
@@ -502,6 +522,16 @@ function aggregateLossesData(records: ParsedRecord[], totalPlacemarks: number): 
       }
 
       modelCounts[r.category][sideKey][r.name] = (modelCounts[r.category][sideKey][r.name] || 0) + 1;
+
+      if (!modelMonthlyCounts[r.category][sideKey][r.name]) {
+        modelMonthlyCounts[r.category][sideKey][r.name] = new Array(periods.length).fill(0);
+      }
+      if (r.period) {
+        const pIdx = periodIndexMap.get(r.period);
+        if (pIdx !== undefined) {
+          modelMonthlyCounts[r.category][sideKey][r.name][pIdx]++;
+        }
+      }
     }
     uniqueModels.add(r.name);
   }
@@ -519,10 +549,18 @@ function aggregateLossesData(records: ParsedRecord[], totalPlacemarks: number): 
   const byCategory: Record<WarLossCategory, LossCategoryDetailData> = Object.fromEntries(
     WAR_LOSS_CATEGORIES.map((cat) => {
       const rfModels: LossEquipmentModel[] = Object.entries(modelCounts[cat].rf)
-        .map(([name, count]) => ({ name, count }))
+        .map(([name, count]) => ({
+          name,
+          count,
+          periods: modelMonthlyCounts[cat].rf[name] || new Array(periods.length).fill(0),
+        }))
         .sort((a, b) => b.count - a.count);
       const uaModels: LossEquipmentModel[] = Object.entries(modelCounts[cat].ua)
-        .map(([name, count]) => ({ name, count }))
+        .map(([name, count]) => ({
+          name,
+          count,
+          periods: modelMonthlyCounts[cat].ua[name] || new Array(periods.length).fill(0),
+        }))
         .sort((a, b) => b.count - a.count);
       return [cat, { models: { rf: rfModels, ua: uaModels } }];
     }),

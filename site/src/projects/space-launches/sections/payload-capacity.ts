@@ -1,16 +1,16 @@
-import type { PayloadCapacitySectionData } from '@graphs/types/space-launches/payload-capacity';
-import { chartSection, type SectionBuilder } from '@/types';
+import { createChart } from '@/components/sections/SectionChart';
 import { chartOption, zipRecords } from '@/utils/chart-builder';
-import type { dict } from '../locales/dict-en';
+import type { Section } from '../project';
 
 /** Section builder for Annual Payload Capacity to Orbit chart. */
-export const payloadCapacitySection: SectionBuilder<PayloadCapacitySectionData, typeof dict> = ({ t, fmt }) => {
-  return chartSection({
-    id: 'payload-capacity',
-    title: t.proj.payloadCapacity.title,
-    sources: [{ name: 'The Space Devs — Launch Library 2 API', url: 'https://ll.thespacedevs.com/2.3.0/launches/' }],
-    controls: (data) =>
-      [
+export const payloadCapacitySection: Section = ({ t, fmt }) => ({
+  id: 'payload-capacity',
+  title: t.proj.payloadCapacity.title,
+  sources: [{ name: 'The Space Devs — Launch Library 2 API', url: 'https://ll.thespacedevs.com/2.3.0/launches/' }],
+  toolbars: [
+    {
+      id: 'capacity',
+      controls: [
         {
           id: 'mode',
           type: 'toggle',
@@ -21,55 +21,51 @@ export const payloadCapacitySection: SectionBuilder<PayloadCapacitySectionData, 
             { value: 'share', label: `${t.common.share} (%)` },
           ],
         },
-        {
-          id: 'topN',
-          type: 'slider',
-          min: Math.min(3, data.regions.length),
-          max: data.regions.length,
-          defaultValue: Math.min(7, data.regions.length),
-          label: t.common.top,
-        },
       ] as const,
-    buildView: (data, values) => {
-      const summary = data.summary;
-      const allRegions = data.regions;
-      const isShare = values.mode === 'share';
-      const topN = values.topN;
-      const activeRegions = allRegions.slice(0, topN);
+    },
+  ] as const,
+  buildView: ({ spaceLaunches }, { launches, capacity }) => {
+    const data = spaceLaunches['payload-capacity'];
+    const summary = data.summary;
+    const allRegions = data.regions;
+    const isShare = capacity?.mode === 'share';
+    const selectedRegions = launches?.countries?.length ? (launches.countries as string[]).filter((r) => allRegions.includes(r)) : allRegions;
+    const activeRegions = selectedRegions.length > 0 ? selectedRegions : allRegions;
 
-      const activeYearTotals = data.payloadCapacity.years.map((_, yearIdx) => {
-        let mass = 0;
-        let launches = 0;
-        for (const r of activeRegions) {
-          mass += data.payloadCapacity.series[r]?.[yearIdx] || 0;
-          launches += data.payloadCapacity.launches?.[r]?.[yearIdx] || 0;
-        }
-        return {
-          mass: Math.round(mass * 10) / 10,
-          launches,
-        };
-      });
-
+    const activeYearTotals = data.payloadCapacity.years.map((_, yearIdx) => {
+      let mass = 0;
+      let launches = 0;
+      for (const r of activeRegions) {
+        mass += data.payloadCapacity.series[r]?.[yearIdx] || 0;
+        launches += data.payloadCapacity.launches?.[r]?.[yearIdx] || 0;
+      }
       return {
-        kpisTop: [
-          {
-            label: t.proj.payloadCapacity.kpis.totalLaunches,
-            value: fmt.number(summary.totalAttempts),
-            valueColor: 'success',
-          },
-          {
-            label: t.proj.payloadCapacity.kpis.totalPayload,
-            value: fmt.unit(summary.totalPayloadTons, 'mass-tonne'),
-            valueColor: 'primary',
-          },
-          {
-            label: `${t.proj.payloadCapacity.kpis.leaderShare} (${fmt.region(summary.leaderAllTimeRegion)})`,
-            value: `${fmt.unit(summary.leaderAllTimeMassTons, 'mass-tonne')} (${fmt.percent(summary.leaderAllTimeShare)})`,
-            valueColor: 'info',
-          },
-        ],
-        option: chartOption({
-          title: { text: `${t.proj.payloadCapacity.title} (${t.common.top} ${topN})` },
+        mass: Math.round(mass * 10) / 10,
+        launches,
+      };
+    });
+
+    return {
+      kpisTop: [
+        {
+          label: t.proj.payloadCapacity.kpis.totalLaunches,
+          value: fmt.number(summary.totalAttempts),
+          valueColor: 'success',
+        },
+        {
+          label: t.proj.payloadCapacity.kpis.totalPayload,
+          value: fmt.unit(summary.totalPayloadTons, 'mass-tonne'),
+          valueColor: 'primary',
+        },
+        {
+          label: `${t.proj.payloadCapacity.kpis.leaderShare} (${fmt.region(summary.leaderAllTimeRegion)})`,
+          value: `${fmt.unit(summary.leaderAllTimeMassTons, 'mass-tonne')} (${fmt.percent(summary.leaderAllTimeShare)})`,
+          valueColor: 'info',
+        },
+      ],
+      content: createChart(
+        chartOption({
+          title: { text: t.proj.payloadCapacity.title },
           dataZoom: [{ type: 'slider' }, { type: 'inside' }],
           tooltip: {
             type: 'axis',
@@ -129,7 +125,7 @@ export const payloadCapacitySection: SectionBuilder<PayloadCapacitySectionData, 
             };
           }),
         }),
-      };
-    },
-  });
-};
+      ),
+    };
+  },
+});

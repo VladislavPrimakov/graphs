@@ -14,12 +14,13 @@
     "build:pipeline": "bun --filter @graphs/pipelines --silent build",
     "build:site": "bun --filter @graphs/site build",
     "preview": "bun --filter @graphs/site preview",
-    "generate:og": "bun --filter @graphs/site generate:og"
+    "generate:og": "bun --filter @graphs/site generate:og",
+    "test:ci": "pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/test-ci.ps1"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.14",
-    "@types/bun": "^1.2.0",
-    "knip": "^6.39.0",
+    "@biomejs/biome": "2.5.15",
+    "@types/bun": "^1.4.3",
+    "knip": "^6.42.1",
     "typescript": "^5.9.3"
   }
 }

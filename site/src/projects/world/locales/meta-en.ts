@@ -1,4 +1,4 @@
-import type { LocaleProjectMeta } from '@/types';
+import type { ProjectLocaleMeta } from '@/utils/project';
 
 export const meta = {
   title: 'World',
@@ -11,4 +11,4 @@ export const meta = {
     'clean-power': 'Clean Power',
     'electricity-per-capita': 'Electricity per Capita',
   },
-} satisfies LocaleProjectMeta;
+} satisfies ProjectLocaleMeta;

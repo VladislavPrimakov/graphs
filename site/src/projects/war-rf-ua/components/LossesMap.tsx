@@ -1,25 +1,17 @@
 import type { FeatureCollection, Point as GeoJsonPoint } from 'geojson';
 import { type GeoJSONSource, type LayerSpecification, type MapLayerMouseEvent, Map as MapLibreMap, NavigationControl, Popup } from 'maplibre-gl';
 import type React from 'react';
-import { startTransition, useEffect, useEffectEvent, useRef } from 'react';
+import { useEffect, useEffectEvent, useRef } from 'react';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import type { WarLossCategory } from '@graphs/types/war-rf-ua/categories';
-import type { LossesMapSectionData, LossMapPoint } from '@graphs/types/war-rf-ua/losses-map';
-import { FilterPills } from '@/components/ui/FilterPills';
-import { SearchSelect, type SearchSelectItem } from '@/components/ui/SearchSelect';
-import { TimelineScrubber } from '@/components/ui/TimelineScrubber';
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/ToggleGroup';
+import type { LossesMapSectionData, LossMapPoint, WarLossCategory, WarLossesFilterState } from '@graphs/types/war-rf-ua/losses';
 import { getMapTileStyle, registerFallbackDot } from '@/utils/map-builder';
 import { useFormat, useTheme, useTranslation } from '@/utils/provider';
 import { renderTooltipTablePopup } from '@/utils/tooltip-builder';
-import { resetLossesFilters, setLossesFilterState, useLossesFilters } from '../losses-filter-store';
 import { lossColors } from '../tokens';
 import type { WarLossesDict } from '../types';
-import { CategoryIcon } from './CategoryIcon';
 import { registerCategoryMarkers } from './category-markers';
 
 /** Parses post IDs or external URLs defensively from GeoJSON properties. */
-
 function parseList<T>(val: unknown): T[] {
   if (Array.isArray(val)) return val;
   if (typeof val === 'string') {
@@ -34,7 +26,7 @@ function parseList<T>(val: unknown): T[] {
 /** Renders external proof links with platform labels. */
 function renderSourceButtons(posts: unknown, sources: unknown, sourceLabel: string): string {
   const postUrls = parseList<number>(posts).map((id) => `https://t.me/lost_warinua/${id}`);
-  const extUrls = parseList<string>(sources).filter((u) => !u.includes('google.com') && !u.includes('usercontent'));
+  const extUrls = parseList<string>(sources);
   const allUrls = [...postUrls, ...extUrls];
   if (!allUrls.length) return '';
 
@@ -125,43 +117,14 @@ function pointsToGeoJson(points: LossMapPoint[]): FeatureCollection<GeoJsonPoint
   };
 }
 
-/** Resolves continuous sequential month list covering the entire dataset span dynamically from points. */
-function getMapTimelinePeriods(points: LossMapPoint[]): string[] {
-  let minMonth = '';
-  let maxMonth = '';
-  for (const p of points) {
-    const d = p[5];
-    if (d && d.length >= 7) {
-      const m = d.slice(0, 7);
-      if (!minMonth || m < minMonth) minMonth = m;
-      if (!maxMonth || m > maxMonth) maxMonth = m;
-    }
-  }
-  if (!minMonth || !maxMonth) return [];
-
-  const [startYear, startM] = minMonth.split('-').map(Number);
-  const [endYear, endM] = maxMonth.split('-').map(Number);
-  const list: string[] = [];
-  let y = startYear;
-  let m = startM;
-  while (y < endYear || (y === endYear && m <= endM)) {
-    list.push(`${y}-${String(m).padStart(2, '0')}`);
-    m++;
-    if (m > 12) {
-      m = 1;
-      y++;
-    }
-  }
-  return list;
-}
-
 export interface LossesMapProps {
   data: LossesMapSectionData;
   t: WarLossesDict;
+  filters?: WarLossesFilterState;
 }
 
-export const LossesMap: React.FC<LossesMapProps> = ({ data, t }) => {
-  const { resolvedTheme, tokens } = useTheme();
+export const LossesMap: React.FC<LossesMapProps> = ({ data, t, filters }) => {
+  const { resolvedTheme } = useTheme();
   const {
     t: { common: tCommon },
   } = useTranslation();
@@ -175,137 +138,46 @@ export const LossesMap: React.FC<LossesMapProps> = ({ data, t }) => {
   const mapSourceLoadedRef = useRef(false);
   const activePopupRef = useRef<Popup | null>(null);
 
-  // Filters state coordinated via shared reactive store
-  const { selectedSide, selectedCategories, selectedModels, dateFrom, dateTo, hasActiveFilters } = useLossesFilters();
+  // Extract filter dimensions directly from coordinated toolbar store
+  const selectedSide = filters?.side ?? 'all';
+  const selectedCategories = filters?.categories ?? [];
+  const selectedModels = filters?.models ?? [];
+  const [dateFrom, dateTo] = filters?.period ?? [];
 
-  useEffect(() => {
-    setLossesFilterState({
-      mapData: {
-        points: data.points,
-        categories: data.categories,
-        models: data.models,
-        sides: data.sides,
-      },
-    });
-  }, [data]);
-
-  // Primary filter criteria
   const hasSide = selectedSide !== 'all';
   const sideIdx = selectedSide === 'rf' ? 0 : selectedSide === 'ua' ? 1 : selectedSide === 'unk' ? 2 : -1;
   const hasCategoryFilter = selectedCategories.length > 0;
   const hasModelFilter = selectedModels.length > 0;
 
-  // Base date scoping
-  const dateFilteredPoints = data.points.filter((p) => {
+  const allowedCatIndices = hasCategoryFilter ? new Set(selectedCategories.map((c) => data.categories.indexOf(c as WarLossCategory)).filter((i) => i !== -1)) : null;
+  const allowedModelIndices = hasModelFilter ? new Set(selectedModels.map((m) => data.models.indexOf(m)).filter((i) => i !== -1)) : null;
+
+  const filteredPoints = data.points.filter((p) => {
+    if (hasSide && p[2] !== sideIdx) return false;
+    if (allowedCatIndices && !allowedCatIndices.has(p[3])) return false;
+    if (allowedModelIndices && !allowedModelIndices.has(p[4])) return false;
+
     if (dateFrom || dateTo) {
       if (!p[5]) return false;
-      const pointDateFrom = p[5].length === 7 ? `${p[5]}-31` : p[5];
-      const pointDateTo = p[5].length === 7 ? `${p[5]}-01` : p[5];
-      if (dateFrom && pointDateFrom < dateFrom) return false;
-      if (dateTo && pointDateTo > dateTo) return false;
+      const pointDate = p[5];
+      if (dateFrom) {
+        const fromKey = dateFrom.length === 7 ? dateFrom : dateFrom.slice(0, 7);
+        if (pointDate.slice(0, 7) < fromKey) return false;
+        if (dateFrom.length > 7 && pointDate.length > 7 && pointDate < dateFrom) return false;
+      }
+      if (dateTo) {
+        const toKey = dateTo.length === 7 ? dateTo : dateTo.slice(0, 7);
+        if (pointDate.slice(0, 7) > toKey) return false;
+        if (dateTo.length > 7 && pointDate.length > 7 && pointDate > dateTo) return false;
+      }
     }
+
     return true;
   });
 
-  // Single-pass coordinated facet counts accumulation
-  const sideCounts = { all: 0, rf: 0, ua: 0, unk: 0 };
-  const categoryCounts = new Map<number, number>();
-  const modelCounts = new Map<number, number>();
-  let allCategoriesCount = 0;
-  const filteredPoints: LossMapPoint[] = [];
-
-  for (const p of dateFilteredPoints) {
-    const pSide = p[2];
-    const pCat = p[3];
-    const pModel = p[4];
-
-    const matchSide = !hasSide || pSide === sideIdx;
-    const matchCat = !hasCategoryFilter || selectedCategories.includes(pCat);
-    const matchModel = !hasModelFilter || selectedModels.includes(pModel);
-
-    // 1. Side counts (respects active date, category, and model filters)
-    if (matchCat && matchModel) {
-      sideCounts.all++;
-      if (pSide === 0) sideCounts.rf++;
-      else if (pSide === 1) sideCounts.ua++;
-      else if (pSide === 2) sideCounts.unk++;
-    }
-
-    // 2. Category counts (respects active date, side, and model filters)
-    if (matchSide && matchModel) {
-      allCategoriesCount++;
-      categoryCounts.set(pCat, (categoryCounts.get(pCat) || 0) + 1);
-    }
-
-    // 3. Model counts (respects active date and side - searches across all models)
-    if (matchSide) {
-      modelCounts.set(pModel, (modelCounts.get(pModel) || 0) + 1);
-    }
-
-    // 4. Final filtered points (all active filters matched)
-    if (matchSide && matchCat && matchModel) {
-      filteredPoints.push(p);
-    }
-  }
-
-  // Map each model index to its primary category identifier
-  const modelCategoryMap = new Map<number, WarLossCategory>();
-  for (const p of data.points) {
-    if (!modelCategoryMap.has(p[4])) {
-      modelCategoryMap.set(p[4], data.categories[p[3]]);
-    }
-  }
-
-  const availableModels: SearchSelectItem[] = data.models.map((name, idx) => {
-    const cat = modelCategoryMap.get(idx);
-    return {
-      value: idx,
-      label: name,
-      count: modelCounts.get(idx) || 0,
-      icon: cat ? <CategoryIcon category={cat} className="h-3 w-auto shrink-0" /> : undefined,
-    };
-  });
-
-  const addModel = (idx: number) => {
-    startTransition(() => {
-      setLossesFilterState({
-        selectedModels: selectedModels.includes(idx) ? selectedModels : [...selectedModels, idx],
-      });
-    });
-  };
-
-  const removeModel = (idx: number) => {
-    startTransition(() => {
-      setLossesFilterState({
-        selectedModels: selectedModels.filter((i) => i !== idx),
-      });
-    });
-  };
-
-  const clearAllModels = () => {
-    startTransition(() => {
-      setLossesFilterState({ selectedModels: [] });
-    });
-  };
-
-  // Derive continuous timeline month sequence and background data density
-  const timelinePeriods = getMapTimelinePeriods(data.points);
-  const periodIndexMap = new Map<string, number>(timelinePeriods.map((p, i) => [p, i]));
-
-  const timelineDensity = new Array(timelinePeriods.length).fill(0);
-  for (const p of data.points) {
-    if (hasSide && p[2] !== sideIdx) continue;
-    if (hasCategoryFilter && !selectedCategories.includes(p[3])) continue;
-    if (hasModelFilter && !selectedModels.includes(p[4])) continue;
-    if (!p[5] || p[5].length < 7) continue;
-    const m = p[5].slice(0, 7);
-    const idx = periodIndexMap.get(m);
-    if (idx !== undefined) {
-      timelineDensity[idx]++;
-    }
-  }
-
   const geojson = pointsToGeoJson(filteredPoints);
+  const geojsonRef = useRef(geojson);
+  geojsonRef.current = geojson;
 
   // Map click interaction handlers via React 19 useEffectEvent
   const handleClusterClick = useEffectEvent(async (e: MapLayerMouseEvent, map: MapLibreMap) => {
@@ -372,31 +244,31 @@ export const LossesMap: React.FC<LossesMapProps> = ({ data, t }) => {
     activePopupRef.current = popup;
   });
 
-  // Initialize MapLibre GL map
-  // biome-ignore lint/correctness/useExhaustiveDependencies: geojson is only used to seed initial source; filter updates are applied via setData() in dedicated effect
+  // Primary map instance lifecycle effect
   useEffect(() => {
-    if (!mapContainerRef.current || mapRef.current) return;
+    if (!mapContainerRef.current) return;
 
     const map = new MapLibreMap({
       container: mapContainerRef.current,
       style: getMapTileStyle(resolvedTheme),
-      center: [36.8, 48.2],
+      center: [36.5, 48.0],
       zoom: 6,
+      minZoom: 4,
       maxZoom: 18,
-      minZoom: 3,
+      attributionControl: false,
     });
 
-    registerFallbackDot(map, tokens.text.dim);
-    map.addControl(new NavigationControl({ showCompass: true, showZoom: true }), 'top-right');
+    map.addControl(new NavigationControl({ showCompass: false }), 'top-right');
 
-    map.on('load', () => {
-      registerCategoryMarkers(map, data.categories as readonly WarLossCategory[]);
+    map.on('load', async () => {
+      await registerCategoryMarkers(map, data.categories);
+      registerFallbackDot(map, 'marker-dot');
 
       map.addSource('losses', {
         type: 'geojson',
-        data: geojson,
+        data: geojsonRef.current,
         cluster: true,
-        clusterMaxZoom: 10,
+        clusterMaxZoom: 13,
         clusterRadius: 25,
         clusterProperties: {
           rf_count: ['+', ['case', ['==', ['get', 'side'], 0], 1, 0]],
@@ -453,7 +325,7 @@ export const LossesMap: React.FC<LossesMapProps> = ({ data, t }) => {
       mapRef.current = null;
       mapSourceLoadedRef.current = false;
     };
-  }, [data, resolvedTheme, tokens.text.dim]);
+  }, [data, resolvedTheme]);
 
   // Update GeoJSON source when filters change (preserves camera position and zoom)
   useEffect(() => {
@@ -469,113 +341,8 @@ export const LossesMap: React.FC<LossesMapProps> = ({ data, t }) => {
     }
   }, [geojson]);
 
-  const resetAllFilters = () => {
-    startTransition(() => {
-      resetLossesFilters();
-    });
-  };
-
   return (
     <div className="flex flex-col gap-2 min-h-145">
-      {/* Header & Filter Controls Bar */}
-      <div className="flex flex-col gap-1.5">
-        {/* Primary Controls Row: Side Toggle & Model Search */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 items-center">
-          {/* Faction / Side Toggle */}
-          <ToggleGroup
-            type="single"
-            value={selectedSide}
-            onValueChange={(val) => {
-              if (val) {
-                startTransition(() => {
-                  setLossesFilterState({ selectedSide: val as 'all' | 'rf' | 'ua' | 'unk' });
-                });
-              }
-            }}
-            className="w-full flex items-center h-7.5 p-0.5"
-          >
-            <ToggleGroupItem value="all" className="flex-1 h-full py-0 px-2 flex items-center justify-center text-center gap-1 text-[11px]">
-              <span>{t.map.allSides}</span>
-              <span className="tabular-nums text-[10px] opacity-75">({fmt.number(sideCounts.all)})</span>
-            </ToggleGroupItem>
-            <ToggleGroupItem value="rf" className="flex-1 h-full py-0 px-2 flex items-center justify-center text-center gap-1 text-[11px]">
-              <span>RF</span>
-              <span className="tabular-nums text-[10px] opacity-75">({fmt.number(sideCounts.rf)})</span>
-            </ToggleGroupItem>
-            <ToggleGroupItem value="ua" className="flex-1 h-full py-0 px-2 flex items-center justify-center text-center gap-1 text-[11px]">
-              <span>UA</span>
-              <span className="tabular-nums text-[10px] opacity-75">({fmt.number(sideCounts.ua)})</span>
-            </ToggleGroupItem>
-            <ToggleGroupItem value="unk" title={unkName} className="flex-1 h-full py-0 px-2 flex items-center justify-center text-center gap-1 text-[11px]">
-              <span>?</span>
-              <span className="tabular-nums text-[10px] opacity-75">({fmt.number(sideCounts.unk)})</span>
-            </ToggleGroupItem>
-          </ToggleGroup>
-
-          {/* Search Model by Name via SearchSelect */}
-          <SearchSelect
-            items={availableModels}
-            selectedValues={selectedModels}
-            onSelect={(item) => addModel(Number(item.value))}
-            placeholder={t.map.searchPlaceholder}
-            emptyLabel={t.map.noModelsFound}
-          />
-        </div>
-
-        {/* Category Pills Strip & Reset Action */}
-        <div className="flex items-center justify-between gap-2">
-          <div className="min-w-0 flex-1">
-            <FilterPills
-              items={data.categories.map((catKey, idx) => ({
-                id: idx,
-                label: t.categories.items[catKey] || catKey,
-                icon: <CategoryIcon category={catKey} className="h-3 w-auto shrink-0" />,
-                count: categoryCounts.get(idx) || 0,
-              }))}
-              selected={selectedCategories}
-              onChange={(cats) => {
-                startTransition(() => {
-                  setLossesFilterState({ selectedCategories: cats });
-                });
-              }}
-              allLabel={t.map.allCategories}
-              allCount={allCategoriesCount}
-            />
-          </div>
-          {hasActiveFilters && (
-            <button type="button" onClick={resetAllFilters} className="text-xs text-content-muted hover:text-accent-primary transition-colors underline cursor-pointer shrink-0">
-              {tCommon.reset}
-            </button>
-          )}
-        </div>
-
-        {/* Selected Model Badges Strip (matching category pill styling) */}
-        {selectedModels.length > 0 && (
-          <div className="flex flex-wrap items-center gap-1">
-            <span className="text-[11px] font-bold text-content-muted mr-1">{t.map.selectedModels}:</span>
-            {selectedModels.map((mIdx) => {
-              const name = data.models[mIdx] || t.timeline.unrecognized;
-              const count = modelCounts.get(mIdx) || 0;
-              return (
-                <button
-                  key={mIdx}
-                  type="button"
-                  onClick={() => removeModel(mIdx)}
-                  className="tag-pill transition-all cursor-pointer inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] bg-accent-glow text-accent-primary border-accent-primary/40 font-bold shadow-xs hover:border-status-danger/50 hover:text-status-danger hover:bg-status-danger/10 select-none"
-                  title={name}
-                >
-                  <span className="leading-none">{name}</span>
-                  <span className="tabular-nums text-[10px] leading-none opacity-75">({fmt.number(count)})</span>
-                </button>
-              );
-            })}
-            <button type="button" onClick={clearAllModels} className="text-[11px] text-content-muted hover:text-accent-primary transition-colors underline cursor-pointer ml-1">
-              {tCommon.clear}
-            </button>
-          </div>
-        )}
-      </div>
-
       {/* Map Container */}
       <div className="relative w-full h-145 rounded-xl overflow-hidden border border-border-subtle bg-surface-base/90 shadow-inner">
         <div ref={mapContainerRef} className="w-full h-full" />
@@ -595,21 +362,6 @@ export const LossesMap: React.FC<LossesMapProps> = ({ data, t }) => {
             <span className="text-content-secondary">{unkName}</span>
           </div>
         </div>
-      </div>
-
-      {/* Timeline Scrubber (Bottom Time Controls Bar) */}
-      <div className="control-panel p-2">
-        <TimelineScrubber
-          periods={timelinePeriods}
-          density={timelineDensity}
-          dateFrom={dateFrom}
-          dateTo={dateTo}
-          onChange={({ dateFrom: nextFrom, dateTo: nextTo }) => {
-            startTransition(() => {
-              setLossesFilterState({ dateFrom: nextFrom, dateTo: nextTo });
-            });
-          }}
-        />
       </div>
     </div>
   );

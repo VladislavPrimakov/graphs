@@ -5,7 +5,7 @@ import UA from 'country-flag-icons/react/3x2/UA';
 import { createContext, useContext, useEffect, useSyncExternalStore } from 'react';
 import { useHref, useLocation, useNavigate } from 'react-router';
 import type { LocaleCommon as commonEn } from '@/locales/common-en';
-import type { ProjectMeta, ProjectTag } from '@/types';
+import type { CatalogProject, ProjectTag } from '@/utils/project';
 import { getThemeColors, type ResolvedTheme, type ThemeColors, type ThemeSetting } from '../styles/tokens';
 import { type CldrLocaleUnits, createFormat, type LocalizedFormatters } from './format';
 
@@ -19,25 +19,17 @@ const THEME_CHANGE_EVENT = 'graphs-theme-change';
 /** Custom DOM event name dispatched when active language setting changes in the active tab. */
 const LANG_CHANGE_EVENT = 'graphs-lang-change';
 
+import { DEFAULT_LANGUAGE, type Language, NON_DEFAULT_LANGUAGES, SUPPORTED_LANGUAGE_CODES } from './language';
+
+export { DEFAULT_LANGUAGE, type Language, NON_DEFAULT_LANGUAGES, SUPPORTED_LANGUAGE_CODES };
+
 /** Map of language codes to metadata descriptors (SSoT for supported locales). */
 export const LANGUAGE_MAP = {
   en: { label: 'English', Flag: GB },
   ru: { label: 'Русский', Flag: RU },
   uk: { label: 'Українська', Flag: UA },
   de: { label: 'Deutsch', Flag: DE },
-} as const;
-
-/** Supported ISO 639-1 language codes across frontend visualization dashboards. */
-export type Language = keyof typeof LANGUAGE_MAP;
-
-/** Default fallback language when no prefix is specified in the URL path. */
-export const DEFAULT_LANGUAGE: Language = 'en';
-
-/** Canonical list of all supported ISO 639-1 language codes. */
-export const SUPPORTED_LANGUAGE_CODES: Language[] = Object.keys(LANGUAGE_MAP) as Language[];
-
-/** Non-default languages requiring a localized URL route prefix. */
-export const NON_DEFAULT_LANGUAGES: Language[] = SUPPORTED_LANGUAGE_CODES.filter((code) => code !== DEFAULT_LANGUAGE);
+} as const satisfies Record<Language, { label: string; Flag: typeof GB }>;
 
 /** Type schema for common UI dictionary. */
 export type LocaleCommonDict = typeof commonEn;
@@ -58,7 +50,7 @@ export interface AppContextValue {
   /** Current active language code. */
   lang: Language;
   /** Localized project catalog descriptors for the active language. */
-  projects: ProjectMeta[];
+  projects: CatalogProject[];
   /** Translation namespaces. */
   t: {
     /** Common UI localized strings dictionary. */
@@ -81,7 +73,7 @@ export interface AppProviderProps {
   lang: Language;
   common: LocaleCommonDict;
   cldr?: CldrLocaleUnits;
-  projects: ProjectMeta[];
+  projects: CatalogProject[];
   children: React.ReactNode;
 }
 
@@ -378,7 +370,7 @@ export function useFormat(): LocalizedFormatters {
 }
 
 /** React hook accessing localized project catalog descriptors. */
-export function useCatalog(): ProjectMeta[] {
+export function useCatalog(): CatalogProject[] {
   const ctx = useContext(AppContext);
   return ctx?.projects ?? [];
 }

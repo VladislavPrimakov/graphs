@@ -1,7 +1,9 @@
 import { fileExists, readJson } from '@/utils/fs';
 import { getLogger, isUpdate, isVerbose } from '@/utils/logger';
 import { getMetadataPath } from '@/utils/paths';
+
 import { runAiTokensPipeline } from './ai-tokens/index';
+import { runCountryPipeline } from './country/index';
 import { runSpaceLaunchesPipeline } from './space-launches/index';
 import { runUkrainePipeline } from './ukraine/index';
 import { runWarRfUaPipeline } from './war-rf-ua/index';
@@ -16,6 +18,10 @@ const PIPELINES: PipelineTask[] = [
   {
     name: 'ai-tokens',
     run: ({ update, verbose }) => runAiTokensPipeline(update, verbose),
+  },
+  {
+    name: 'country',
+    run: ({ update, verbose }) => runCountryPipeline(update, verbose),
   },
   {
     name: 'ukraine',
@@ -69,7 +75,7 @@ export async function runAllPipelines(options: { update?: boolean; verbose?: boo
   if (await fileExists(metaPath)) {
     try {
       const metadata = await readJson<Record<string, string>>(metaPath);
-      logger.debug(`Verified site/src/data/metadata.json (${Object.keys(metadata).length} projects registered)`);
+      logger.debug(`Verified site/public/data/metadata.json (${Object.keys(metadata).length} projects registered)`);
     } catch (e) {
       logger.warn(`Failed to parse metadata.json: ${e}`);
     }

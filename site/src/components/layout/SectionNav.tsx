@@ -3,8 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { cn } from '@/utils/cn';
 import { usePath } from '@/utils/provider';
-import { startScrollLock } from '@/utils/useInView';
-import { SECTION_DATA_ATTR, useScrollSpy } from '@/utils/useScrollSpy';
+import { scrollToSection, useScrollSpy } from '@/utils/viewport';
 
 /** Props for the SectionNav outline component. */
 export interface SectionNavProps {
@@ -26,11 +25,11 @@ export const SectionNav: React.FC<SectionNavProps> = ({ sections, projectSlug, s
   const containerRef = useRef<HTMLElement>(null);
   const { getHref } = usePath();
 
-  const activeId = useScrollSpy({
-    initialId: initialSection,
-    getHref: (id) => (id ? getHref(`/${projectSlug}/${id}`) : getHref(`/${projectSlug}`)),
-    resolveTitle: (id) => (id && sectionTitles[id] ? `${projectTitle} — ${sectionTitles[id]}` : projectTitle),
-  });
+  const activeId = useScrollSpy(
+    (id) => (id ? getHref(`/${projectSlug}/${id}`) : getHref(`/${projectSlug}`)),
+    initialSection,
+    (id) => (id && sectionTitles[id] ? `${projectTitle} — ${sectionTitles[id]}` : projectTitle),
+  );
 
   useEffect(() => {
     setPortalTarget(document.getElementById('header-section-nav'));
@@ -82,12 +81,8 @@ export const SectionNav: React.FC<SectionNavProps> = ({ sections, projectSlug, s
             href={targetHref}
             data-nav-section={sectionId}
             onClick={(e) => {
-              const target = document.querySelector<HTMLElement>(`[${SECTION_DATA_ATTR}="${sectionId}"], #${CSS.escape(sectionId)}`);
-              if (target) {
-                e.preventDefault();
-                startScrollLock(sectionId);
-                target.scrollIntoView({ behavior: 'smooth' });
-              }
+              e.preventDefault();
+              scrollToSection(sectionId, 'smooth');
             }}
             className={cn('nav-pill shrink-0 whitespace-nowrap', isActive ? 'nav-pill-active' : 'nav-pill-idle')}
           >

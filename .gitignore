@@ -23,9 +23,9 @@ Thumbs.db
 *.tmp
 *.log
 *.png
-!site/public/og/*.png
 
-# Ephemeral build-time datasets
+# Ephemeral build-time datasets & OpenGraph preview cards
 site/public/data/
+site/public/og/
 
 .env

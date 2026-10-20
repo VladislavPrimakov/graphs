@@ -1,17 +1,17 @@
-import type { Project, SectionBuilder } from '@/types';
+import type { AiTokensDataset } from '@graphs/types/ai-tokens/data';
+import { defineProject, loadDataset, type ProjectSection } from '@/utils/project';
 import type { dict } from './locales/dict-en';
 import { meta } from './meta';
 
-const modules = import.meta.glob<Record<string, SectionBuilder<unknown, typeof dict>>>('./sections/*.ts', { eager: true });
+const data = {
+  aiTokens: () => loadDataset<AiTokensDataset>('ai-tokens', 'data.json'),
+};
+
+export type Section = ProjectSection<typeof data, typeof dict>;
 
 /** Project specification for AI token inference throughput dashboard. */
-export const project: Project<'ai-tokens', typeof dict> = {
-  ...meta,
-  buildSections: (ctx) =>
-    meta.sections.map((id) => {
-      const mod = modules[`./sections/${id}.ts`];
-      if (!mod) throw new Error(`Section module missing: ./sections/${id}.ts`);
-      const builder = Object.values(mod)[0];
-      return builder(ctx);
-    }),
-};
+export const project = defineProject({
+  meta,
+  data,
+  sections: import.meta.glob('./sections/*.ts', { eager: true }),
+});

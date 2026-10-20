@@ -1,7 +1,9 @@
 import type { dict as enDict } from './dict-en';
 
 export const dict: typeof enDict = {
-  budgetAndDebt: {
+  countries: 'Страны',
+  noCountriesFound: 'Страны не найдены',
+  macro: {
     title: 'Исполнение госбюджета и динамика внешнего долга',
     domesticRevenues: 'Собственные доходы',
     defenseSpending: 'Военные расходы',
@@ -14,6 +16,22 @@ export const dict: typeof enDict = {
     nominalGdp: 'Номинальный ВВП',
     fxRate: 'Курс USD',
     gdp: 'ВВП',
+  },
+  macroGrowth: {
+    title: 'Динамика макроэкономического роста (YoY в USD)',
+    gdp: 'Номинальный ВВП',
+    realGdp: 'Реальный ВВП (физ. объём)',
+    domesticRev: 'Собственные доходы',
+    externalFin: 'Внешнее финансирование (гранты и кредиты)',
+    defense: 'Военные расходы',
+    totalExp: 'Все расходы бюджета',
+    govDebt: 'Государственный внешний долг',
+    privateDebt: 'Частный внешний долг',
+    gdpShort: 'ВВП',
+    realGdpShort: 'Реал. ВВП',
+    domesticRevShort: 'Доходы',
+    totalExpShort: 'Расходы',
+    govDebtShort: 'Долг',
   },
   tradeStructure: {
     title: 'Структура внешней торговли (товары и услуги)',

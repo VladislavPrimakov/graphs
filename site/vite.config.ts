@@ -58,7 +58,6 @@ export default defineConfig(({ command }) => ({
     alias: {
       '@graphs/types': path.resolve(__dirname, '../types'),
       '@': path.resolve(__dirname, './src'),
-      '@data': path.resolve(__dirname, './src/data'),
     },
   },
   build: {

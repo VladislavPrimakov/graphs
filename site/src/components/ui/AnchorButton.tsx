@@ -24,7 +24,8 @@ export const AnchorButton: React.FC<AnchorButtonProps> = ({ sectionId, projectSl
     e.preventDefault();
     if (!sectionId) return;
     const href = projectSlug ? getHref(`/${projectSlug}/${sectionId}`) : `${window.location.pathname.replace(/\/+$/, '')}/${sectionId}`;
-    const url = `${window.location.origin}${href}`;
+    const search = typeof window !== 'undefined' ? window.location.search : '';
+    const url = `${window.location.origin}${href}${search}`;
     navigator.clipboard
       .writeText(url)
       .then(() => {

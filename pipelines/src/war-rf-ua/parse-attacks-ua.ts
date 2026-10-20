@@ -1,5 +1,5 @@
 import path from 'node:path';
-import type { AttackDataGroup } from '@graphs/types/war-rf-ua/attacks';
+import type { AttackDataGroup } from '@graphs/types/war-rf-ua/strikes';
 import * as cheerio from 'cheerio';
 import { fileExists, readJson, writeJson } from '@/utils/fs';
 import { fetchWithRetry } from '@/utils/http';
@@ -302,7 +302,7 @@ async function getLatestPostId(): Promise<number> {
   } catch (e) {
     logger.warn(`Failed to fetch channel main page: ${e}`);
   }
-  return 30000;
+  return 0;
 }
 
 function generateChunks(startId: number, endId: number, numChunks: number): Array<[number, number, number]> {
@@ -429,7 +429,7 @@ async function crawlChunk(chunkIdx: number, chunkStart: number, chunkEnd: number
   return chunkReports;
 }
 
-export async function crawlTelegram(dataFile: string, fullUpdate: boolean = false, threads: number = 16): Promise<UaInterceptionReport[]> {
+export async function crawlTelegram(dataFile: string, _fullUpdate: boolean = false, threads: number = 16): Promise<UaInterceptionReport[]> {
   let snapshot: UaAttacksSnapshot = {
     meta: { lastPostId: 0, lastCrawledAt: '', count: 0 },
     reports: [],
@@ -446,26 +446,13 @@ export async function crawlTelegram(dataFile: string, fullUpdate: boolean = fals
 
   const existingReports = snapshot.reports || [];
   const latestId = await getLatestPostId();
-
-  let startId = 1;
-  if (snapshot.meta.lastPostId > 0 && !fullUpdate) {
-    if (snapshot.meta.lastPostId >= latestId) {
-      logger.debug(`Telegram reports up to date (latest post ID: ${latestId})`);
-      return existingReports;
-    }
-    startId = snapshot.meta.lastPostId + 1;
-    logger.debug(`Incremental mode: crawling from post ${startId} to ${latestId}...`);
-  } else if (snapshot.meta.lastPostId > 0) {
-    // On update (-u), crawl incrementally from last crawled post
-    if (snapshot.meta.lastPostId >= latestId) {
-      logger.debug(`Telegram reports up to date (latest post ID: ${latestId})`);
-      return existingReports;
-    }
-    startId = snapshot.meta.lastPostId + 1;
-    logger.debug(`Incremental update: crawling new posts ${startId} to ${latestId}...`);
-  } else {
-    logger.debug(`Crawling from post 1 to ${latestId}...`);
+  if (latestId <= 0 || (snapshot.meta.lastPostId > 0 && snapshot.meta.lastPostId >= latestId)) {
+    logger.debug(`Telegram reports up to date (latest post ID: ${latestId})`);
+    return existingReports;
   }
+
+  const startId = snapshot.meta.lastPostId > 0 ? snapshot.meta.lastPostId + 1 : 1;
+  logger.debug(`Crawling new posts ${startId} to ${latestId}...`);
 
   const chunks = generateChunks(startId, latestId, threads);
   const totalPosts = latestId - startId + 1;
@@ -538,7 +525,7 @@ export function processAndAuditData(reports: UaInterceptionReport[]): AttackData
   }
 
   const sortedDates = Object.keys(dailyByDate).sort();
-  const dailyLabels = sortedDates.map((d) => `${d.split('-')[2]}.${d.split('-')[1]}`);
+  const dailyLabels = sortedDates.map((d) => `${d.split('-')[2]}.${d.split('-')[1]}.${d.split('-')[0].slice(-2)}`);
   const dailyUavs = sortedDates.map((d) => dailyByDate[d].uavs);
   const dailyBallistic = sortedDates.map((d) => dailyByDate[d].ballistic);
   const dailyCruise = sortedDates.map((d) => dailyByDate[d].cruise);
@@ -653,21 +640,6 @@ export function processAndAuditData(reports: UaInterceptionReport[]): AttackData
 export async function parseUaAttacks(dataPath?: string, forceUpdate: boolean = false, threads: number = 16): Promise<AttackDataGroup> {
   const defaultFile = path.resolve(PIPELINES_SRC_DIR, 'war-rf-ua/data-attacks-ua.json');
   const targetFile = dataPath || defaultFile;
-
-  let reports: UaInterceptionReport[] = [];
-  if (!forceUpdate && (await fileExists(targetFile))) {
-    try {
-      const snapshot = await readJson<UaAttacksSnapshot>(targetFile);
-      reports = snapshot.reports || [];
-      logger.debug(`Loaded ${reports.length} reports from ${path.basename(targetFile)}`);
-    } catch (e) {
-      logger.warn(`Failed reading ${targetFile}: ${e}`);
-    }
-  }
-
-  if (reports.length === 0 || forceUpdate) {
-    reports = await crawlTelegram(targetFile, forceUpdate, threads);
-  }
-
+  const reports = await crawlTelegram(targetFile, forceUpdate, threads);
   return processAndAuditData(reports);
 }

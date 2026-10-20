@@ -5,6 +5,84 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-10-21
+
+### Tooling & Types
+
+#### Added
+- Added `@graphs/types/country` schema definitions exporting `CountryProfileData`, `CountryToolbarMeta`, `CountryCategoryTuple`, and structural trade classification constants.
+- Added unified dataset and toolbar metadata schemas across `@graphs/types/ukraine`, `@graphs/types/war-rf-ua`, `@graphs/types/space-launches`, and `@graphs/types/world`.
+- Added `test:country` and `generate:countries` scripts in `pipelines/package.json`.
+- Added `scripts/test-ci.ps1` local CI emulation script via `act` and registered `test:ci` script in root `package.json`.
+- Added `@radix-ui/react-popover`, `lodash-es`, `query-string`, and `react-day-picker` dependencies in `site/package.json`.
+- Added automated Playwright Chromium setup and `generate:og` preview generation in `.github/workflows/deploy.yml`.
+
+#### Changed
+- Consolidated project type exports into unified subpath entry points `@graphs/types/<slug>` (`./*/index.ts`) in `types/package.json`.
+- Migrated linter and formatter configuration to unified root `biome.json`.
+- Upgraded `bun` to `1.4.3`, `@biomejs/biome` to `2.5.15`, `knip` to `6.42.1`, and `@types/bun` to `1.4.3`.
+- Relocated project metadata from `site/src/data/metadata.json` to ephemeral `site/public/data/metadata.json` with direct relative imports.
+- Gitignored `site/public/og/` and untracked pre-rendered binary PNG assets, treating OpenGraph previews as ephemeral build-time artifacts.
+
+#### Removed
+- Removed scattered per-section type declaration files in `types/<slug>/` in favor of consolidated `types/<slug>/index.ts` modules.
+- Removed legacy frontend contract definitions in `site/src/types/` in favor of `@graphs/types` schemas.
+- Removed obsolete `generate:constants` scripts from `package.json` and `pipelines/package.json`.
+
+#### Fixed
+- Fixed `actions/checkout` version reference in `.github/workflows/deploy.yml`.
+
+---
+
+### Pipelines (@graphs/pipelines)
+
+#### Added
+- Added `country` ETL pipeline in `pipelines/src/country/index.ts` processing UN Comtrade merchandise (HS chapters), commercial services (EBOPS 2002), and IMF World Economic Outlook macroeconomic indicators across 192 sovereign nations from 1990 to present.
+- Added 1.0-second request pacer queue (`COMTRADE_PACER_DELAY_MS = 1000`) and daily quota circuit breaker preventing UN Comtrade HTTP 429 rate limit drops.
+- Added `fetchAvailabilityCatalog` pre-flight integration querying `getDa/C/A/HS`, `getDa/S/A/EB`, and IMF WEO release metadata to track dataset checksums and incrementally refresh only updated country data.
+- Added explicit `null` cache contract distinguishing confirmed absent upstream streams (`null`) from unqueried streams (`undefined`).
+- Added `cache.test.ts` and `regions.test.ts` test suites verifying incremental invalidation, chunking, and multilingual region parsing.
+- Added `computeMacroGrowthData` in `pipelines/src/ukraine/index.ts` precomputing annual YoY % growth dynamics in USD across GDP, revenue, expenditures, and external debt.
+- Added `exportProjectMeta` and `exportDataset` in `pipelines/src/utils/dataset.ts` for unified project-level dataset and toolbar metadata exports.
+
+#### Changed
+- Renamed exported section datasets: `budget-and-debt` to `macro`, `equipment-breakdown` to `losses-breakdown`, `missile-strikes` to `strikes-missile`, and `uav-strikes` to `strikes-uav`.
+- Extended `war-rf-ua` frontline dynamics with pre-invasion territorial capture baseline (`2022-02-23`) and precomputed monthly category matrices and model timelines in `toolbar-meta.json`.
+- Exported unified project datasets for `ai-tokens`, `space-launches`, `ukraine`, and `world` directly to `site/public/data/<slug>/data.json`.
+
+#### Fixed
+- Fixed that `fetchWithRetry` repeatedly retried on exhausted API call quotas, adding `HttpError` with immediate termination on HTTP 401/403 and `Retry-After` header parsing.
+
+---
+
+### Site (@graphs/site)
+
+#### Added
+- Added `country` dashboard slice in `site/src/projects/country/` with `#macro`, `#macro-growth`, `#trade-structure`, `#trade-categories`, and `#trade-partners` sections across 4 locales (`en`, `ru`, `uk`, `de`).
+- Added `#macro-growth` section in `site/src/projects/ukraine/sections/macro-growth.ts` rendering YoY growth rates and absolute annual increments for budget and debt indicators.
+- Added coordinated dashboard toolbar architecture (`site/src/components/ui/ControlBar.tsx`) supporting shared filtering across multiple sections with reactive store binding (`site/src/utils/store.ts`).
+- Added polymorphic `SearchSelect` component supporting both single and multi-selection modes with count badges and keyboard navigation.
+- Added `TimelineScrubber` component with daily, monthly, and yearly granularities and calendar `DatePickerPopover`.
+- Added `resolveEffectiveMax` in `site/src/utils/chart-builder.ts` for automated outlier gap clipping on line and bar chart axes.
+- Added `resolveAdditionalRegionName` in `site/src/utils/format-locale.ts` for historical and non-standard sovereign entity localization across all supported languages.
+
+#### Changed
+- Consolidated `useInView.ts` and `useScrollSpy.ts` into a unified `site/src/utils/viewport.ts` module with coordinated intersection observation and programmatic scroll locking during navigation.
+- Standardized uniform section contract in `defineSection`, unifying polymorphic `buildView` views across charts, grids, and maps.
+- Restructured `war-rf-ua` dashboard into synchronized sections (`#frontline-map`, `#frontline-dynamics`, `#losses-map`, `#losses-breakdown`, `#losses-timeline`, `#strikes-missile`, `#strikes-uav`) linked to coordinated timeline scrubber and category filters.
+- Streamlined `SectionChart.tsx` to rely on container `ResizeObserver` with `requestAnimationFrame` debouncing, replacing multi-ref `IntersectionObserver` tracking with a smooth opacity cross-fade on initial canvas mount.
+
+#### Removed
+- Removed hardcoded project catalog registry in `site/src/projects/registry.ts` in favor of dynamic `import.meta.glob` discovery.
+- Removed standalone `useInView.ts` and `useScrollSpy.ts` hooks in favor of unified `site/src/utils/viewport.ts`.
+- Removed unused `onReady` prop from `SectionChart.tsx`.
+
+#### Fixed
+- Fixed that `generate:og` preview images captured sticky dashboard toolbars, section control bars, anchor buttons, and deep-link scroll offsets, adding comprehensive control hiding, initial scroll reset to (0, 0), and pre-clean of stale PNG assets in `site/public/og/`.
+- Fixed that `formatDate` in `site/src/utils/format.ts` shifted calendar days due to UTC timezone offsets when parsing ISO date strings.
+- Fixed that `exportChartAsPng` in `site/src/utils/chart-builder.ts` clipped line series `endLabel` indicators by invoking `adjustChartLayout` prior to canvas export.
+---
+
 ## [1.2.4] - 2026-10-13
 
 ### Tooling & Types

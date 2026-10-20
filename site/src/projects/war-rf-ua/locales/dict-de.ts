@@ -33,8 +33,10 @@ export const dict: typeof enDict = {
     subtitle: 'Interaktive Visualisierung von über 19.000 foto- und videobestätigten Ausrüstungsverlusten',
     allSides: 'Alle Seiten',
     allCategories: 'Alle Kategorien',
-    searchPlaceholder: 'Modell suchen (z. B. T-90M, BMP-3, Ka-52)...',
-    selectedModels: 'Ausgewählte Modelle',
+    categories: 'Kategorien',
+    noCategoriesFound: 'Keine Kategorien gefunden',
+    models: 'Modelle',
+    allModels: 'Alle Modelle',
     noModelsFound: 'Keine Modelle gefunden',
     losses: 'bestätigte Verluste',
     model: 'Modell',
@@ -94,9 +96,5 @@ export const dict: typeof enDict = {
     rfAdvance: 'Russischer Vorstoß',
     uaLiberated: 'Ukrainische Befreiung',
     netMonthlyChange: 'Monatliche Nettoveränderung',
-    kpis: {
-      currentRfControl: 'Konsens RF-Kontrolle',
-      currentUaControl: 'Konsens Ukraine-Kontrolle',
-    },
   },
 };

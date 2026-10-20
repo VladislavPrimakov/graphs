@@ -33,8 +33,10 @@ export const dict: typeof enDict = {
     subtitle: 'Інтерактивна візуалізація понад 19 000 фото- та відеопідтверджених втрат техніки',
     allSides: 'Всі сторони',
     allCategories: 'Всі категорії',
-    searchPlaceholder: 'Пошук моделі (напр. T-90M, BMP-3, Ka-52)...',
-    selectedModels: 'Обрані моделі',
+    categories: 'Категорії',
+    noCategoriesFound: 'Категорії не знайдено',
+    models: 'Моделі',
+    allModels: 'Всі моделі',
     noModelsFound: 'Моделей не знайдено',
     losses: 'підтверджених втрат',
     model: 'Модель',
@@ -94,9 +96,5 @@ export const dict: typeof enDict = {
     rfAdvance: 'Просування РФ',
     uaLiberated: 'Визволено Україною',
     netMonthlyChange: 'Чиста зміна за місяць',
-    kpis: {
-      currentRfControl: 'Консенсус контролю РФ',
-      currentUaControl: 'Консенсус контролю України',
-    },
   },
 };

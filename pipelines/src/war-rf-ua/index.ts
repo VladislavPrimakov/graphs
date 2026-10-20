@@ -1,6 +1,6 @@
-import type { FrontlineDynamicsDaily, FrontlineDynamicsMonthly, FrontlineDynamicsSectionData, FrontlineDynamicsSummary } from '@graphs/types/war-rf-ua/frontline-dynamics';
-import type { FrontlineTimelinePoint, WarFrontlineDataset } from '@graphs/types/war-rf-ua/frontline-map';
-import { exportProjectSections } from '@/utils/dataset';
+import type { FrontlineDynamicsMonthly, FrontlineDynamicsSectionData, FrontlineTimelinePoint, WarFrontlineDataset } from '@graphs/types/war-rf-ua/frontline';
+import type { WarFrontlineToolbarMeta, WarLossModelMeta, WarRfUaToolbarMeta } from '@graphs/types/war-rf-ua/toolbar-meta';
+import { exportDataset } from '@/utils/dataset';
 import { getLogger, isUpdate, isVerbose, runWithLogger } from '@/utils/logger';
 import { round } from '@/utils/math';
 import { parseRfAttacks } from './parse-attacks-rf';
@@ -81,7 +81,7 @@ function buildUnifiedDaily(
   });
 
   const allDates = Array.from(new Set([...Object.keys(rfDict), ...Object.keys(uaDict)])).sort();
-  const labels = allDates.map((d) => `${d.split('-')[2]}.${d.split('-')[1]}`);
+  const labels = allDates.map((d) => `${d.split('-')[2]}.${d.split('-')[1]}.${d.split('-')[0].slice(-2)}`);
 
   return {
     dates: allDates,
@@ -112,13 +112,6 @@ function buildFrontlineDynamics(frontline: WarFrontlineDataset): FrontlineDynami
     }
   }
 
-  let prevRf = timeline[0]?.consensusRfKm2 ?? 0;
-  for (let i = 0; i < timeline.length; i++) {
-    const curRf = timeline[i].consensusRfKm2;
-    timeline[i].deltaKm2 = i === 0 ? 0 : round(curRf - prevRf, 1);
-    prevRf = curRf;
-  }
-
   const monthMap = new Map<string, FrontlineTimelinePoint[]>();
   for (const pt of timeline) {
     const m = pt.date.slice(0, 7);
@@ -140,8 +133,6 @@ function buildFrontlineDynamics(frontline: WarFrontlineDataset): FrontlineDynami
   const monthlyRfAdvance: number[] = [];
   const monthlyUaLiberated: number[] = [];
 
-  let prevMonthEndRf = months.length > 0 ? (monthMap.get(months[0])?.[0]?.consensusRfKm2 ?? 0) : 0;
-
   for (const m of months) {
     const pts = monthMap.get(m) || [];
     const endPt = pts[pts.length - 1];
@@ -158,60 +149,22 @@ function buildFrontlineDynamics(frontline: WarFrontlineDataset): FrontlineDynami
     monthlyDsOccupied.push(dsEnd);
     monthlyLaClaimed.push(laEnd);
 
-    const netDelta = round(rfEnd - prevMonthEndRf, 1);
-    monthlyNetChange.push(netDelta);
-
     let rfAdv = 0;
     let uaLib = 0;
     for (const pt of pts) {
       if (pt.deltaKm2 > 0) rfAdv += pt.deltaKm2;
       else if (pt.deltaKm2 < 0) uaLib += Math.abs(pt.deltaKm2);
     }
+    // Include initial invasion territorial capture for 2022-04 (from 2022-02-23 pre-war baseline)
+    if (m === '2022-04' && timeline[0]) {
+      const invasionCapture = Math.max(0, rfEnd - timeline[0].consensusRfKm2);
+      rfAdv = round(invasionCapture + uaLib, 1);
+    }
+    const netDelta = round(rfAdv - uaLib, 1);
+    monthlyNetChange.push(netDelta);
     monthlyRfAdvance.push(round(rfAdv, 1));
     monthlyUaLiberated.push(round(uaLib, 1));
-
-    prevMonthEndRf = rfEnd;
   }
-
-  let peakRfKm2 = 0;
-  let peakRfDate = '';
-  for (const pt of timeline) {
-    if (pt.consensusRfKm2 > peakRfKm2) {
-      peakRfKm2 = pt.consensusRfKm2;
-      peakRfDate = pt.date;
-    }
-  }
-
-  const latestPt = timeline[timeline.length - 1] || {
-    date: frontline.summary.latestDate,
-    consensusRfKm2: frontline.summary.consensusRfKm2,
-    consensusUaKm2: frontline.summary.consensusUaKm2,
-    disputedKm2: frontline.summary.disputedKm2,
-  };
-
-  const currentRfKm2 = latestPt.consensusRfKm2;
-  const currentUaKm2 = latestPt.consensusUaKm2;
-  const currentDisputedKm2 = latestPt.disputedKm2;
-
-  const idx30d = Math.max(0, timeline.length - 31);
-  const pt30d = timeline[idx30d];
-  const netChange30dKm2 = pt30d ? round(currentRfKm2 - pt30d.consensusRfKm2, 1) : 0;
-
-  const summary: FrontlineDynamicsSummary = {
-    latestDate: latestPt.date,
-    totalUkraineKm2,
-    currentRfKm2,
-    currentRfPct: round((currentRfKm2 / totalUkraineKm2) * 100, 2),
-    currentUaKm2,
-    currentUaPct: round((currentUaKm2 / totalUkraineKm2) * 100, 2),
-    currentDisputedKm2,
-    currentDisputedPct: round((currentDisputedKm2 / totalUkraineKm2) * 100, 2),
-    peakRfKm2,
-    peakRfDate,
-    peakRfPct: round((peakRfKm2 / totalUkraineKm2) * 100, 2),
-    liberatedFromPeakKm2: round(Math.max(0, peakRfKm2 - currentRfKm2), 1),
-    netChange30dKm2,
-  };
 
   const monthly: FrontlineDynamicsMonthly = {
     months,
@@ -230,18 +183,7 @@ function buildFrontlineDynamics(frontline: WarFrontlineDataset): FrontlineDynami
     uaLiberatedKm2: monthlyUaLiberated,
   };
 
-  const daily: FrontlineDynamicsDaily = {
-    dates: timeline.map((p) => p.date),
-    labels: timeline.map((p) => `${p.date.split('-')[2]}.${p.date.split('-')[1]}`),
-    consensusRfKm2: timeline.map((p) => p.consensusRfKm2),
-    consensusUaKm2: timeline.map((p) => p.consensusUaKm2),
-    disputedKm2: timeline.map((p) => p.disputedKm2),
-    dsOccupiedKm2: timeline.map((p) => p.dsOccupiedKm2),
-    laClaimedKm2: timeline.map((p) => p.laClaimedKm2),
-    deltaKm2: timeline.map((p) => p.deltaKm2),
-  };
-
-  return { summary, monthly, daily };
+  return { monthly };
 }
 
 /** Runs the unified War RF-UA ETL Pipeline (losses, air strikes, frontline). */
@@ -277,6 +219,108 @@ export async function runWarRfUaPipeline(forceUpdate = false, verbose?: boolean)
       const frontline = await parseFrontline(forceUpdate);
       const frontlineDynamics = buildFrontlineDynamics(frontline);
 
+      const frontlinePeriods = frontline.timeline.map((p) => p.date);
+      const frontlineDensity = frontline.timeline.map((p) => (p.deltaKm2 != null ? round(Math.abs(p.deltaKm2), 1) : 0));
+      const frontlineMeta: WarFrontlineToolbarMeta = {
+        minDate: frontlinePeriods[0] || '2023-01-28',
+        maxDate: frontlinePeriods[frontlinePeriods.length - 1] || '2023-01-28',
+        periods: frontlinePeriods,
+        density: frontlineDensity,
+      };
+
+      const lossesDensity = losses.periods.map((_, i) => (losses.overallTimeline.rf[i] || 0) + (losses.overallTimeline.ua[i] || 0));
+
+      const periodIndexMap = new Map(losses.periods.map((p, i) => [p, i]));
+      const matrix: number[][][] = Array.from({ length: losses.periods.length }, () => [new Array(15).fill(0), new Array(15).fill(0), new Array(15).fill(0)]);
+
+      interface ModelAccumulator {
+        id: number;
+        name: string;
+        cat: number;
+        count: number;
+        rf: number;
+        ua: number;
+        unk: number;
+        timelineMap: Map<number, [number, number, number]>;
+      }
+
+      const modelStats = new Map<number, ModelAccumulator>();
+      for (let i = 0; i < losses.map.models.length; i++) {
+        modelStats.set(i, {
+          id: i,
+          name: losses.map.models[i],
+          cat: 0,
+          count: 0,
+          rf: 0,
+          ua: 0,
+          unk: 0,
+          timelineMap: new Map(),
+        });
+      }
+
+      for (const p of losses.map.points) {
+        const sideIdx = p[2];
+        const catIdx = p[3];
+        const modelIdx = p[4];
+        const dateStr = p[5];
+        const pKey = dateStr ? dateStr.slice(0, 7) : '';
+        const pIdx = periodIndexMap.get(pKey);
+        if (pIdx !== undefined && sideIdx >= 0 && sideIdx <= 2 && catIdx >= 0 && catIdx < 15) {
+          matrix[pIdx][sideIdx][catIdx]++;
+        }
+
+        const m = modelStats.get(modelIdx);
+        if (m) {
+          m.cat = catIdx;
+          m.count++;
+          if (sideIdx === 0) m.rf++;
+          else if (sideIdx === 1) m.ua++;
+          else m.unk++;
+
+          if (pIdx !== undefined) {
+            let t = m.timelineMap.get(pIdx);
+            if (!t) {
+              t = [0, 0, 0];
+              m.timelineMap.set(pIdx, t);
+            }
+            if (sideIdx >= 0 && sideIdx <= 2) {
+              t[sideIdx]++;
+            }
+          }
+        }
+      }
+
+      const toolbarModels: WarLossModelMeta[] = Array.from(modelStats.values())
+        .map((m) => {
+          const timeline: number[] = [];
+          for (const [pIdx, [rf, ua, unk]] of m.timelineMap.entries()) {
+            timeline.push(pIdx, rf, ua, unk);
+          }
+          return {
+            id: m.id,
+            name: m.name,
+            cat: m.cat,
+            count: m.count,
+            rf: m.rf,
+            ua: m.ua,
+            unk: m.unk,
+            timeline,
+          };
+        })
+        .sort((a, b) => b.count - a.count);
+
+      const toolbarMeta: WarRfUaToolbarMeta = {
+        frontline: frontlineMeta,
+        losses: {
+          periods: losses.periods,
+          density: lossesDensity,
+          models: toolbarModels,
+          matrix,
+        },
+      };
+
+      await exportDataset('war-rf-ua', toolbarMeta, 'toolbar-meta.json');
+
       const totalStrikes =
         rfData.summary.uavs.total + rfData.summary.ballistic.total + rfData.summary.cruise.total + uaData.summary.uavs.total + uaData.summary.ballistic.total + uaData.summary.cruise.total;
 
@@ -286,39 +330,36 @@ export async function runWarRfUaPipeline(forceUpdate = false, verbose?: boolean)
         );
       }
 
-      await exportProjectSections('war-rf-ua', {
-        'frontline-map': {
+      await exportDataset(
+        'war-rf-ua',
+        {
           summary: frontline.summary,
           timeline: frontline.timeline,
           layers: frontline.layers,
         },
-        'frontline-dynamics': frontlineDynamics,
-        'losses-map': losses.map,
-        'losses-timeline': {
+        'frontline-map.json',
+      );
+      await exportDataset('war-rf-ua', frontlineDynamics, 'frontline-dynamics.json');
+      await exportDataset('war-rf-ua', losses.map, 'losses-map.json');
+      await exportDataset(
+        'war-rf-ua',
+        {
           periods: losses.periods,
+          summary: losses.summary,
           overallTimeline: losses.overallTimeline,
-          summary: losses.summary,
-        },
-        'category-losses': {
-          categoryChart: losses.categoryChart,
-          summary: losses.summary,
-        },
-        'equipment-breakdown': {
           byCategory: losses.byCategory,
-          periods: losses.periods,
-          summary: losses.summary,
         },
-        'uav-strikes': {
+        'losses.json',
+      );
+      await exportDataset(
+        'war-rf-ua',
+        {
           rfAttacks: attacks.rfAttacks,
           uaAttacks: attacks.uaAttacks,
           unifiedTimeline: attacks.unifiedTimeline,
         },
-        'missile-strikes': {
-          rfAttacks: attacks.rfAttacks,
-          uaAttacks: attacks.uaAttacks,
-          unifiedTimeline: attacks.unifiedTimeline,
-        },
-      });
+        'strikes.json',
+      );
 
       if (forceUpdate) {
         logger.success(

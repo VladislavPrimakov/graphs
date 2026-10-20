@@ -1,19 +1,18 @@
 import { writeJson } from '@/utils/fs';
 import { updateMetadata } from '@/utils/metadata';
-import { getPipelineDataPath, getSiteSectionDataPath } from '@/utils/paths';
+import { getPipelineDataPath, getSiteDataPath, getSiteProjectMetaPath } from '@/utils/paths';
 
-export { getPipelineDataPath, getSiteSectionDataPath };
+export { getPipelineDataPath, getSiteDataPath, getSiteProjectMetaPath };
 
-/** Exports a single section dataset JSON to site/public/data/<slug>/<sectionId>/<fileName>. */
-export async function exportSectionDataset(slug: string, sectionId: string, dataset: unknown, fileName = 'data.json'): Promise<void> {
-  const filePath = getSiteSectionDataPath(slug, sectionId, fileName);
+/** Exports a project dataset JSON directly to site/public/data/<slug>/<fileName>. */
+export async function exportDataset(slug: string, dataset: unknown, fileName = 'data.json'): Promise<void> {
+  const filePath = getSiteDataPath(slug, fileName);
   await writeJson(filePath, dataset, 0);
+  await updateMetadata(slug);
 }
 
-/** Exports all section datasets for a project and updates metadata.json timestamp. */
-export async function exportProjectSections(slug: string, sections: Record<string, unknown>): Promise<void> {
-  for (const [sectionId, data] of Object.entries(sections)) {
-    await exportSectionDataset(slug, sectionId, data);
-  }
-  await updateMetadata(slug);
+/** Exports project-level toolbar metadata JSON to site/public/data/<slug>/<fileName>. */
+export async function exportProjectMeta(slug: string, metadata: unknown, fileName = 'toolbar-meta.json'): Promise<void> {
+  const filePath = getSiteProjectMetaPath(slug, fileName);
+  await writeJson(filePath, metadata, 0);
 }

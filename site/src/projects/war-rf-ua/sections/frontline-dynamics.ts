@@ -1,7 +1,8 @@
-import type { FrontlineDynamicsSectionData } from '@graphs/types/war-rf-ua/frontline-dynamics';
+import type { FrontlineDynamicsSectionData } from '@graphs/types/war-rf-ua/frontline';
 import type { SeriesOption } from 'echarts';
-import { chartSection, type SectionBuilder } from '@/types';
-import { chartOption, createBarSeries, zipRecords } from '@/utils/chart-builder';
+import { createChart } from '@/components/sections/SectionChart';
+import { chartOption, createBarSeries, resolveEffectiveMax, zipRecords } from '@/utils/chart-builder';
+import { defineSection, loadDataset, type ProjectContext } from '@/utils/project';
 import type { dict } from '../locales/dict-en';
 import { frontlineColors } from '../tokens';
 
@@ -12,43 +13,44 @@ interface PointWithPct {
 }
 
 /** Section builder for Frontline & Territorial Dynamics chart. */
-export const frontlineDynamicsSection: SectionBuilder<FrontlineDynamicsSectionData, typeof dict> = ({ t, fmt }) => {
-  return chartSection({
+export const frontlineDynamicsSection = defineSection(({ t, fmt }: ProjectContext<typeof dict>) => {
+  return {
     id: 'frontline-dynamics',
     title: t.proj.frontlineDynamics.titleNetChange,
     sources: [
       { name: 'DeepStateMAP', url: 'https://deepstatemap.live' },
       { name: 'LostArmour', url: 'https://lostarmour.info/map' },
     ],
-    controls: (data) =>
-      [
-        {
-          id: 'metric',
-          type: 'toggle',
-          defaultValue: 'netChange',
-          label: t.common.metric,
-          options: [
-            { value: 'netChange', label: t.proj.frontlineDynamics.netChange },
-            { value: 'area', label: t.proj.frontlineDynamics.area },
-            { value: 'share', label: t.common.share },
-          ],
-        },
-        {
-          id: 'years',
-          type: 'range-slider',
-          min: data.monthly.years[0],
-          max: data.monthly.years[data.monthly.years.length - 1],
-          defaultValue: [data.monthly.years[0], data.monthly.years[data.monthly.years.length - 1]],
-          label: t.common.period,
-        },
-      ] as const,
-    buildView: (data, values) => {
-      const { summary, monthly } = data;
-      const [startYear, endYear] = values.years;
+    data: {
+      dynamics: () => loadDataset<FrontlineDynamicsSectionData>('war-rf-ua', 'frontline-dynamics.json'),
+    },
+    toolbars: [
+      {
+        id: 'dynamics',
+        controls: [
+          {
+            id: 'metric',
+            type: 'toggle',
+            defaultValue: 'netChange',
+            label: t.common.metric,
+            options: [
+              { value: 'netChange', label: t.proj.frontlineDynamics.netChange },
+              { value: 'area', label: t.proj.frontlineDynamics.area },
+            ],
+          },
+        ] as const,
+      },
+    ] as const,
+    buildView: ({ dynamics: data }, { dynamics, frontline }) => {
+      const { monthly } = data;
+      const metric = dynamics?.metric ?? 'netChange';
+      const [dateFrom, dateTo] = frontline?.period ?? [monthly.months[0], monthly.months[monthly.months.length - 1]];
+      const fromMonth = dateFrom ? dateFrom.slice(0, 7) : monthly.months[0];
+      const toMonth = dateTo ? dateTo.slice(0, 7) : monthly.months[monthly.months.length - 1];
 
       const monthIndices = monthly.months
-        .map((m, idx) => ({ year: Number.parseInt(m.split('-')[0], 10), idx }))
-        .filter((item) => item.year >= startYear && item.year <= endYear)
+        .map((m, idx) => ({ month: m, idx }))
+        .filter((item) => item.month >= fromMonth && item.month <= toMonth)
         .map((item) => item.idx);
 
       const visibleLabels = monthIndices.map((i) => monthly.labels[i]);
@@ -61,98 +63,41 @@ export const frontlineDynamicsSection: SectionBuilder<FrontlineDynamicsSectionDa
       const filteredConsensusUaPct = monthIndices.map((i) => monthly.consensusUaPct[i]);
       const filteredDisputedPct = monthIndices.map((i) => monthly.disputedPct[i]);
 
-      const kpisTop = [
-        {
-          label: t.proj.frontlineDynamics.kpis.currentRfControl,
-          value: `${fmt.number(summary.currentRfKm2)} km² (${fmt.percent(summary.currentRfPct, { maximumFractionDigits: 2 })})`,
-          valueColor: frontlineColors.consensusRf,
-        },
-        {
-          label: t.proj.frontlineDynamics.kpis.currentUaControl,
-          value: `${fmt.number(summary.currentUaKm2)} km² (${fmt.percent(summary.currentUaPct, { maximumFractionDigits: 2 })})`,
-          valueColor: frontlineColors.consensusUa,
-        },
-      ];
-
-      if (values.metric === 'share') {
-        const series: SeriesOption[] = [
-          {
-            id: 'consensus_rf_pct',
-            name: t.proj.frontlineDynamics.consensusRf,
-            type: 'line',
-            smooth: true,
-            color: frontlineColors.consensusRf,
-            data: zipRecords({
-              value: filteredConsensusRfPct,
-              km2: filteredConsensusRf,
-            }),
-            areaStyle: { opacity: 0.2 },
-            lineStyle: { width: 2.5 },
-          },
-          {
-            id: 'disputed_pct',
-            name: t.proj.frontlineDynamics.disputed,
-            type: 'line',
-            smooth: true,
-            color: frontlineColors.disputed,
-            data: zipRecords({
-              value: filteredDisputedPct,
-              km2: filteredDisputed,
-            }),
-            areaStyle: { opacity: 0.2 },
-            lineStyle: { width: 2 },
-          },
-          {
-            id: 'consensus_ua_pct',
-            name: t.proj.frontlineDynamics.consensusUa,
-            type: 'line',
-            smooth: true,
-            color: frontlineColors.consensusUa,
-            data: zipRecords({
-              value: filteredConsensusUaPct,
-              km2: filteredConsensusUa,
-            }),
-            areaStyle: { opacity: 0.15 },
-            lineStyle: { width: 2 },
-          },
-        ];
-
-        return {
-          title: t.proj.frontlineDynamics.titleShare,
-          kpisTop,
-          option: chartOption({
-            title: { text: t.proj.frontlineDynamics.titleShare },
-            tooltip: {
-              type: 'axis',
-              header: ({ dataIndex }) => `${t.common.period}: ${visibleMonths[dataIndex]}`,
-              row: ({ seriesName, value, data: rowData }) => {
-                const item = rowData as PointWithPct | undefined;
-                const km2Str = item?.km2 != null ? ` (${fmt.number(item.km2)} km²)` : '';
-                return {
-                  label: seriesName,
-                  value: `${fmt.percent(value, { maximumFractionDigits: 2 })}${km2Str}`,
-                };
-              },
-            },
-            xAxis: {
-              type: 'category',
-              data: visibleLabels,
-            },
-            yAxis: {
-              type: 'value',
-              name: '%',
-              min: 0,
-              max: 100,
-            },
-            series,
-          }),
-        };
-      }
-
-      if (values.metric === 'netChange') {
+      if (metric === 'netChange') {
         const rfAdvances = monthIndices.map((i) => monthly.rfAdvanceKm2[i]);
         const uaLiberated = monthIndices.map((i) => monthly.uaLiberatedKm2[i]);
         const netChanges = monthIndices.map((i) => monthly.netChangeKm2[i]);
+
+        // Discard the single maximum outlier bar to keep regular months readable
+        const yMax =
+          resolveEffectiveMax(rfAdvances, {
+            ratio: 2.5,
+            headroom: 1.25,
+            roundStep: 500,
+            fallbackMin: 1000,
+            alwaysClamp: true,
+          }) ?? 1000;
+
+        const maxUaLib = Math.max(...uaLiberated, 0);
+        const yMin = -Math.max(1000, Math.ceil((maxUaLib * 1.1) / 500) * 500);
+
+        const barData = rfAdvances.map((adv) => {
+          const isClamped = adv > yMax;
+          return {
+            value: isClamped ? yMax : adv,
+            realValue: adv,
+            isClamped,
+          };
+        });
+
+        const netData = netChanges.map((net) => {
+          const isClamped = net > yMax;
+          return {
+            value: isClamped ? yMax : net,
+            realValue: net,
+            isClamped,
+          };
+        });
 
         const series: SeriesOption[] = [
           createBarSeries({
@@ -160,9 +105,13 @@ export const frontlineDynamicsSection: SectionBuilder<FrontlineDynamicsSectionDa
             name: t.proj.frontlineDynamics.rfAdvance,
             stack: 'net',
             color: frontlineColors.consensusRf,
-            data: zipRecords({
-              value: rfAdvances,
-            }),
+            data: barData,
+            formatLabel: ({ item }) => {
+              if (item?.isClamped) {
+                return `+${fmt.number(Math.round(item.realValue / 1000))}k km² ⚡`;
+              }
+              return undefined;
+            },
           }),
           createBarSeries({
             id: 'ua_liberated',
@@ -180,42 +129,44 @@ export const frontlineDynamicsSection: SectionBuilder<FrontlineDynamicsSectionDa
             smooth: true,
             color: frontlineColors.netChange,
             lineStyle: { width: 2.5 },
-            data: zipRecords({
-              value: netChanges,
-            }),
+            data: netData,
           },
         ];
 
         return {
           title: t.proj.frontlineDynamics.titleNetChange,
-          kpisTop,
-          option: chartOption({
-            title: { text: t.proj.frontlineDynamics.titleNetChange },
-            tooltip: {
-              type: 'axis',
-              header: ({ dataIndex }) => `${t.common.period}: ${visibleMonths[dataIndex]}`,
-              row: ({ seriesName, value, seriesId }) => {
-                const sign = seriesId === 'ua_liberated' || (seriesId === 'net_change' && value < 0) ? '' : value > 0 ? '+' : '';
-                const displayVal = seriesId === 'ua_liberated' ? `-${fmt.number(Math.abs(value))}` : `${sign}${fmt.number(value)}`;
-                return {
-                  label: seriesName,
-                  value: `${displayVal} km²`,
-                };
+          content: createChart(
+            chartOption({
+              tooltip: {
+                type: 'axis',
+                header: ({ dataIndex }) => `${t.common.period}: ${visibleMonths[dataIndex]}`,
+                row: ({ seriesName, value, seriesId, data: rowData }) => {
+                  const item = rowData as { realValue?: number } | undefined;
+                  const rawVal = item?.realValue ?? value;
+                  const sign = seriesId === 'ua_liberated' || (seriesId === 'net_change' && rawVal < 0) ? '' : rawVal > 0 ? '+' : '';
+                  const displayVal = seriesId === 'ua_liberated' ? `-${fmt.number(Math.abs(rawVal))}` : `${sign}${fmt.number(rawVal)}`;
+                  return {
+                    label: seriesName,
+                    value: `${displayVal} km²`,
+                  };
+                },
               },
-            },
-            xAxis: {
-              type: 'category',
-              data: visibleLabels,
-            },
-            yAxis: {
-              type: 'value',
-              name: 'km²',
-              axisLabel: {
-                formatter: (val: number) => fmt.number(Math.abs(val)),
+              xAxis: {
+                type: 'category',
+                data: visibleLabels,
               },
-            },
-            series,
-          }),
+              yAxis: {
+                type: 'value',
+                name: 'km²',
+                min: yMin,
+                max: yMax,
+                axisLabel: {
+                  formatter: (val: number) => fmt.number(Math.abs(val)),
+                },
+              },
+              series,
+            }),
+          ),
         };
       }
 
@@ -263,32 +214,32 @@ export const frontlineDynamicsSection: SectionBuilder<FrontlineDynamicsSectionDa
 
       return {
         title: t.proj.frontlineDynamics.titleArea,
-        kpisTop,
-        option: chartOption({
-          title: { text: t.proj.frontlineDynamics.titleArea },
-          tooltip: {
-            type: 'axis',
-            header: ({ dataIndex }) => `${t.common.period}: ${visibleMonths[dataIndex]}`,
-            row: ({ seriesName, value, data: rowData }) => {
-              const item = rowData as PointWithPct | undefined;
-              const pctStr = item?.pct != null ? ` (${fmt.percent(item.pct, { maximumFractionDigits: 2 })})` : '';
-              return {
-                label: seriesName,
-                value: `${fmt.number(value)} km²${pctStr}`,
-              };
+        content: createChart(
+          chartOption({
+            tooltip: {
+              type: 'axis',
+              header: ({ dataIndex }) => `${t.common.period}: ${visibleMonths[dataIndex]}`,
+              row: ({ seriesName, value, data: rowData }) => {
+                const item = rowData as PointWithPct | undefined;
+                const pctStr = item?.pct != null ? ` (${fmt.percent(item.pct, { maximumFractionDigits: 2 })})` : '';
+                return {
+                  label: seriesName,
+                  value: `${fmt.number(value)} km²${pctStr}`,
+                };
+              },
             },
-          },
-          xAxis: {
-            type: 'category',
-            data: visibleLabels,
-          },
-          yAxis: {
-            type: 'value',
-            name: 'km²',
-          },
-          series,
-        }),
+            xAxis: {
+              type: 'category',
+              data: visibleLabels,
+            },
+            yAxis: {
+              type: 'value',
+              name: 'km²',
+            },
+            series,
+          }),
+        ),
       };
     },
-  });
-};
+  };
+});

@@ -8,9 +8,8 @@ export const meta: typeof enMeta = {
     'frontline-dynamics': 'Динаміка фронту',
     'losses-map': 'Карта втрат',
     'losses-timeline': 'Динаміка втрат',
-    'category-losses': 'Втрати за категоріями',
-    'equipment-breakdown': 'Розподіл за моделями',
-    'uav-strikes': 'Атаки БПЛА',
-    'missile-strikes': 'Ракетні удари',
+    'losses-breakdown': 'Розподіл за моделями',
+    'strikes-uav': 'Атаки БПЛА',
+    'strikes-missile': 'Ракетні удари',
   },
 };

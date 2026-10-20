@@ -1,13 +1,12 @@
-import metadata from '@data/metadata.json';
 import { startTransition, useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import { ArrowRightIcon, ClockIcon, FilterIcon } from '@/components/icons';
 import { FilterPills } from '@/components/ui/FilterPills';
 import { TagBadge } from '@/components/ui/TagBadge';
-import { ALL_UNIQUE_TAGS } from '@/projects/registry';
-import type { ProjectTag } from '@/types';
 import { cn } from '@/utils/cn';
+import { ALL_UNIQUE_TAGS, type ProjectTag } from '@/utils/project';
 import { useCatalog, useFormat, usePath, useTranslation } from '@/utils/provider';
+import metadata from '../../public/data/metadata.json';
 
 /** Overview catalog homepage presenting hero banner and tag-filterable project cards. */
 export default function CatalogPage() {

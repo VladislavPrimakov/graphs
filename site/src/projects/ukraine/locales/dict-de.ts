@@ -1,7 +1,9 @@
 import type { dict as enDict } from './dict-en';
 
 export const dict: typeof enDict = {
-  budgetAndDebt: {
+  countries: 'Länder',
+  noCountriesFound: 'Keine Länder gefunden',
+  macro: {
     title: 'Staatlicher Haushaltsvollzug & Dynamik der Auslandsverschuldung',
     domesticRevenues: 'Inlandseinnahmen',
     defenseSpending: 'Verteidigungsausgaben',
@@ -14,6 +16,22 @@ export const dict: typeof enDict = {
     nominalGdp: 'Nominales BIP',
     fxRate: 'USD-Wechselkurs',
     gdp: 'BIP',
+  },
+  macroGrowth: {
+    title: 'Makroökonomische Wachstumsdynamik (YoY in USD)',
+    gdp: 'Nominales BIP',
+    realGdp: 'Reales BIP (Physisches Volumen)',
+    domesticRev: 'Inlandseinnahmen',
+    externalFin: 'Externe Finanzierung (Zuschüsse & Kredite)',
+    defense: 'Verteidigungsausgaben',
+    totalExp: 'Gesamtausgaben',
+    govDebt: 'Staatliche Auslandsschulden',
+    privateDebt: 'Private Auslandsschulden',
+    gdpShort: 'BIP',
+    realGdpShort: 'Reales BIP',
+    domesticRevShort: 'Einnahmen',
+    totalExpShort: 'Ausgaben',
+    govDebtShort: 'Schulden',
   },
   tradeStructure: {
     title: 'Außenhandelsstruktur (Waren & Dienstleistungen)',

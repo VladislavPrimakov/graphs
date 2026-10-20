@@ -3,9 +3,8 @@ import { Suspense, use } from 'react';
 import { Links, Meta, Outlet, Scripts, useLocation } from 'react-router';
 import { SiteLayout } from '@/components/layout/SiteLayout';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
-import { loadCatalog } from '@/projects/registry';
-import type { ProjectMeta } from '@/types';
 import type { CldrLocaleUnits } from '@/utils/format';
+import { type CatalogProject, loadCatalog } from '@/utils/project';
 import { AppProvider, getLanguageFromPath, type Language, type LocaleCommonDict } from '@/utils/provider';
 import './styles/global.css';
 
@@ -15,7 +14,7 @@ const cldrLoaders = import.meta.glob<{ default: CldrLocaleUnits }>('../public/da
 export interface RootLocaleData {
   common: LocaleCommonDict;
   cldr: CldrLocaleUnits;
-  projects: ProjectMeta[];
+  projects: CatalogProject[];
 }
 
 const rootLocaleCache = new Map<Language, Promise<RootLocaleData>>();

@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
-import { AI_COMPANY_IDS, type AiCompanyId, type CompanySeriesItem } from '@graphs/types/ai-tokens/tokens-by-company';
-import type { RegionSeriesItem } from '@graphs/types/ai-tokens/tokens-by-region';
-import { exportProjectSections, getPipelineDataPath } from '@/utils/dataset';
+import { AI_COMPANY_IDS, type AiCompanyId, type CompanySeriesItem, type RegionSeriesItem } from '@graphs/types/ai-tokens';
+import { exportDataset, getPipelineDataPath } from '@/utils/dataset';
 import { fileExists, readJson, writeJson } from '@/utils/fs';
 import { fetchHeadMeta, fetchWithRetry, isRemoteMetaEqual, type RemoteFileMeta } from '@/utils/http';
 import { getLogger, isUpdate, isVerbose, runWithLogger } from '@/utils/logger';
@@ -118,10 +117,7 @@ export async function runAiTokensPipeline(forceUpdate = false, verbose?: boolean
         remoteMeta = await fetchHeadMeta(URL_HOME);
         if (remoteMeta && isRemoteMetaEqual(cache.meta.remoteMeta, remoteMeta) && remoteMeta.etag) {
           logger.info('Remote sources unchanged (ETag match). Using cached dataset.');
-          await exportProjectSections('ai-tokens', {
-            'tokens-by-region': { summary: cache.dataset.summary, regions: cache.dataset.regions },
-            'tokens-by-company': { summary: cache.dataset.summary, companies: cache.dataset.companies },
-          });
+          await exportDataset('ai-tokens', cache.dataset);
           return;
         }
       }
@@ -149,10 +145,7 @@ export async function runAiTokensPipeline(forceUpdate = false, verbose?: boolean
 
         if (!forceUpdate && hasValidDataset && cache?.meta?.viewsSha256 === viewsSha256) {
           logger.info('Remote sources unchanged (SHA-256 match). Using cached dataset.');
-          await exportProjectSections('ai-tokens', {
-            'tokens-by-region': { summary: cache.dataset.summary, regions: cache.dataset.regions },
-            'tokens-by-company': { summary: cache.dataset.summary, companies: cache.dataset.companies },
-          });
+          await exportDataset('ai-tokens', cache.dataset);
           return;
         }
 
@@ -160,10 +153,7 @@ export async function runAiTokensPipeline(forceUpdate = false, verbose?: boolean
       } catch (err) {
         if (hasValidDataset && cache) {
           logger.warn(`Network query failed (${err instanceof Error ? err.message : String(err)}). Using cached dataset.`);
-          await exportProjectSections('ai-tokens', {
-            'tokens-by-region': { summary: cache.dataset.summary, regions: cache.dataset.regions },
-            'tokens-by-company': { summary: cache.dataset.summary, companies: cache.dataset.companies },
-          });
+          await exportDataset('ai-tokens', cache.dataset);
           return;
         }
         throw new Error(`Failed to fetch ${URL_HOME} and no valid cache available: ${err}`);
@@ -346,10 +336,7 @@ export async function runAiTokensPipeline(forceUpdate = false, verbose?: boolean
         },
         0,
       );
-      await exportProjectSections('ai-tokens', {
-        'tokens-by-region': { summary: dataset.summary, regions: dataset.regions },
-        'tokens-by-company': { summary: dataset.summary, companies: dataset.companies },
-      });
+      await exportDataset('ai-tokens', dataset);
       logger.success(`Exported ai-tokens datasets (${months.length} months, ${companySeries.length} companies, ${regionSeries.length} regions)`);
     },
     verbose,
