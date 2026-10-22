@@ -1,4 +1,4 @@
-import type { AiCompanyId } from '@graphs/types/ai-tokens';
+import type { AiCompanyId } from '@graphs/shared/types/ai-tokens';
 
 export type { AiCompanyId };
 

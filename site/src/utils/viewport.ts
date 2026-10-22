@@ -133,21 +133,33 @@ export interface UseInViewResult<T extends HTMLElement = HTMLDivElement> {
   ref: React.RefObject<T | null>;
   /** True once the element has entered the viewport boundary. Stays true permanently for lazy loading. */
   hasEnteredView: boolean;
+  /** True while the element is currently within the active viewport boundary. */
+  isInView: boolean;
+  /** Mutable ref reflecting real-time viewport intersection state without triggering re-renders on exit. */
+  inViewRef: React.RefObject<boolean>;
+  /** Subscribes a listener to real-time viewport intersection state changes. */
+  subscribeInView: (listener: (inView: boolean) => void) => () => void;
 }
 
 /**
  * Universal React hook tracking viewport proximity via native IntersectionObserver with programmatic scroll suppression.
- * Automatically disconnects and cleans up all listeners once the element enters the viewport boundary.
+ * Keeps observation active across scroll boundaries to coordinate reactive store updates only when in view.
  */
 export function useInView<T extends HTMLElement = HTMLDivElement>(id: string, initialInView = false): UseInViewResult<T> {
   const ref = useRef<T | null>(null);
   const [hasEnteredView, setHasEnteredView] = useState(initialInView);
   const hasEnteredViewRef = useRef(initialInView);
+  const inViewRef = useRef(initialInView);
+  const inViewListeners = useRef<Set<(inView: boolean) => void>>(new Set());
+
+  const subscribeInView = (listener: (inView: boolean) => void) => {
+    inViewListeners.current.add(listener);
+    return () => {
+      inViewListeners.current.delete(listener);
+    };
+  };
 
   useEffect(() => {
-    // Short-circuit if element has already entered view and permanently triggered lazy loading
-    if (hasEnteredViewRef.current) return;
-
     const el = ref.current;
     if (!el) return;
 
@@ -157,33 +169,37 @@ export function useInView<T extends HTMLElement = HTMLDivElement>(id: string, in
 
     let observer: IntersectionObserver | null = null;
 
-    const cleanup = () => {
-      window.removeEventListener(SCROLL_SETTLED_EVENT, onScrollSettled);
-      if (observer) {
-        observer.disconnect();
-        observer = null;
-      }
-    };
-
-    // Permanently mark visible, notify React state, and immediately tear down observer and listeners
-    const markEntered = () => {
-      if (!hasEnteredViewRef.current) {
-        hasEnteredViewRef.current = true;
-        setHasEnteredView(true);
-        cleanup();
+    const notifyInView = (inView: boolean) => {
+      if (inViewRef.current !== inView) {
+        inViewRef.current = inView;
+        for (const listener of inViewListeners.current) {
+          listener(inView);
+        }
       }
     };
 
     observer = new IntersectionObserver(
       ([entry]) => {
-        if (!entry?.isIntersecting) return;
+        if (!entry) return;
+        const isIntersecting = entry.isIntersecting;
 
         // Suppress intermediate sections during programmatic smooth scroll to prevent canvas lag and data fetching
         if (isScrollActive && id !== activeTargetId) {
+          if (!isIntersecting) {
+            notifyInView(false);
+          }
           return;
         }
 
-        markEntered();
+        if (isIntersecting) {
+          if (!hasEnteredViewRef.current) {
+            hasEnteredViewRef.current = true;
+            setHasEnteredView(true);
+          }
+          notifyInView(true);
+        } else {
+          notifyInView(false);
+        }
       },
       { rootMargin: effectiveRootMargin },
     );
@@ -193,13 +209,19 @@ export function useInView<T extends HTMLElement = HTMLDivElement>(id: string, in
     // Re-check visibility when programmatic scroll settles, catching sections that arrived in the reading zone
     const onScrollSettled = () => {
       const targetEl = ref.current;
-      if (!targetEl || hasEnteredViewRef.current) return;
+      if (!targetEl) return;
       const rect = targetEl.getBoundingClientRect();
       const currentHeaderHeight = getHeaderHeight(targetEl);
       const isVisible = rect.bottom > currentHeaderHeight && rect.top < window.innerHeight + VIEWPORT_BOTTOM_MARGIN;
 
       if (isVisible) {
-        markEntered();
+        if (!hasEnteredViewRef.current) {
+          hasEnteredViewRef.current = true;
+          setHasEnteredView(true);
+        }
+        notifyInView(true);
+      } else {
+        notifyInView(false);
       }
     };
 
@@ -207,10 +229,24 @@ export function useInView<T extends HTMLElement = HTMLDivElement>(id: string, in
       passive: true,
     });
 
-    return cleanup;
+    return () => {
+      window.removeEventListener(SCROLL_SETTLED_EVENT, onScrollSettled);
+      if (observer) {
+        observer.disconnect();
+        observer = null;
+      }
+    };
   }, [id]);
 
-  return { ref, hasEnteredView };
+  return {
+    ref,
+    hasEnteredView,
+    inViewRef,
+    subscribeInView,
+    get isInView() {
+      return inViewRef.current;
+    },
+  };
 }
 
 /**

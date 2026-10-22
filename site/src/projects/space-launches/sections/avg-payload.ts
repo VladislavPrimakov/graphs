@@ -7,11 +7,11 @@ export const avgPayloadSection: Section = ({ t, fmt, tokens }) => ({
   id: 'avg-payload',
   title: t.proj.avgPayload.title,
   sources: [{ name: 'The Space Devs — Launch Library 2 API', url: 'https://ll.thespacedevs.com/2.3.0/launches/' }],
-  buildView: ({ spaceLaunches }, { launches }) => {
-    const data = spaceLaunches['avg-payload'];
+  buildView: ({ spaceLaunchesData }, { launchesStore }) => {
+    const data = spaceLaunchesData['avg-payload'];
     const summary = data.summary;
     const allRegions = data.regions;
-    const selectedRegions = launches?.countries?.length ? (launches.countries as string[]).filter((r) => allRegions.includes(r)) : allRegions;
+    const selectedRegions = launchesStore.countries.length ? (launchesStore.countries as string[]).filter((r) => allRegions.includes(r)) : allRegions;
     const activeRegions = selectedRegions.length > 0 ? selectedRegions : allRegions;
 
     return {

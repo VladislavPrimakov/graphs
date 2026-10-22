@@ -1,4 +1,4 @@
-import { dirname, join } from 'node:path';
+import { dirname } from 'node:path';
 import type {
   DayFrontlineEntry,
   EncodedFrontlineLayers,
@@ -7,15 +7,16 @@ import type {
   FrontlineSummary,
   FrontlineTimelinePoint,
   WarFrontlineDataset,
-} from '@graphs/types/war-rf-ua/frontline';
+} from '@graphs/shared/types/war-rf-ua/frontline';
 import { XMLParser } from 'fast-xml-parser';
 import polygonClipping from 'polygon-clipping';
-import { ensureDir, fileExists, readJson, writeJson } from '@/utils/fs';
+import { ensureDir, fileExists, readJson, writeJsonAsync } from '@/utils/fs';
+import { fetchWithRetry } from '@/utils/http';
 import { getLogger, isUpdate, isVerbose, runWithLogger } from '@/utils/logger';
 import { round } from '@/utils/math';
-import { getSiteDataPath, PIPELINES_SRC_DIR } from '@/utils/paths';
+import { getSiteDataPath } from '@/utils/paths';
 
-const DATA_FRONTLINE_PATH = join(PIPELINES_SRC_DIR, 'war-rf-ua', 'data-frontline.json');
+const DATA_FRONTLINE_PATH = `${import.meta.dir}/data-frontline.json.br`;
 const FRONTLINE_HISTORY_PATH = getSiteDataPath('war-rf-ua', 'frontline-history.json');
 const UKRAINE_TOTAL_KM2 = 603628;
 const BASELINE_DATE = '2022-02-23';
@@ -407,11 +408,13 @@ export async function parseFrontline(forceUpdate = false): Promise<WarFrontlineD
   logger.debug('Fetching latest LostArmour frontline metadata...');
   let latestDate = new Date().toISOString().slice(0, 10);
   try {
-    const laMetaRes = await fetch('https://lostarmour.info/panel/next/api/public/map/kml-meta', {
+    const laMetaRes = await fetchWithRetry('https://lostarmour.info/panel/next/api/public/map/kml-meta', {
       headers: {
         'User-Agent': 'Mozilla/5.0',
         Referer: 'https://lostarmour.info/map',
       },
+      retries: 2,
+      timeoutMs: 8000,
     });
     if (laMetaRes.ok) {
       const meta = (await laMetaRes.json()) as { date?: string };
@@ -423,8 +426,10 @@ export async function parseFrontline(forceUpdate = false): Promise<WarFrontlineD
 
   // 2. Fetch DeepState public history revisions
   logger.debug('Fetching DeepState public revision history...');
-  const dsHistRes = await fetch('https://deepstatemap.live/api/history/public', {
+  const dsHistRes = await fetchWithRetry('https://deepstatemap.live/api/history/public', {
     headers: { 'User-Agent': 'Mozilla/5.0' },
+    retries: 2,
+    timeoutMs: 15000,
   });
   if (!dsHistRes.ok) throw new Error(`Failed to fetch DeepState revisions: HTTP ${dsHistRes.status}`);
   const dsRevisions = (await dsHistRes.json()) as { id: number; createdAt: string }[];
@@ -462,7 +467,7 @@ export async function parseFrontline(forceUpdate = false): Promise<WarFrontlineD
     const needsDeltaEnrichment = existing.timeline.length > 1 && typeof existing.timeline[1].deltaKm2 !== 'number';
     if (needsDeltaEnrichment) {
       existing.timeline = enrichTimelineWithDeltas(existing.timeline);
-      await writeJson(DATA_FRONTLINE_PATH, existing, 0);
+      await writeJsonAsync(DATA_FRONTLINE_PATH, existing);
     }
     if (!(await fileExists(FRONTLINE_HISTORY_PATH))) {
       logger.debug('Public frontline history bundle missing, exporting to site/public/data/war-rf-ua/frontline-history.json...');
@@ -489,8 +494,10 @@ export async function parseFrontline(forceUpdate = false): Promise<WarFrontlineD
       // 1. Fetch LA KML only if date is within LostArmour coverage period
       let laKml = '';
       if (hasLa) {
-        const laRes = await fetch(`https://lostarmour.info/mapinfo/kml/${date}.kml`, {
+        const laRes = await fetchWithRetry(`https://lostarmour.info/mapinfo/kml/${date}.kml`, {
           headers: { 'User-Agent': 'Mozilla/5.0', Referer: 'https://lostarmour.info/map' },
+          retries: 2,
+          timeoutMs: 15000,
         });
         if (!laRes.ok) return null;
         laKml = await laRes.text();
@@ -511,8 +518,10 @@ export async function parseFrontline(forceUpdate = false): Promise<WarFrontlineD
 
       let dsGeo = dsGeoCache.get(revId);
       if (!dsGeo) {
-        const dsRes = await fetch(`https://deepstatemap.live/api/history/${revId}/geojson`, {
+        const dsRes = await fetchWithRetry(`https://deepstatemap.live/api/history/${revId}/geojson`, {
           headers: { 'User-Agent': 'Mozilla/5.0' },
+          retries: 2,
+          timeoutMs: 15000,
         });
         if (!dsRes.ok) return null;
         dsGeo = (await dsRes.json()) as { features?: GeoJsonFeature[] };
@@ -699,33 +708,29 @@ export async function parseFrontline(forceUpdate = false): Promise<WarFrontlineD
       const intermediateTimeline = enrichTimelineWithDeltas(Object.values(existingTimeline));
       const latestPoint = intermediateTimeline[intermediateTimeline.length - 1];
       if (latestPoint && (existing?.layers || lastRawLayers)) {
-        await writeJson(
-          DATA_FRONTLINE_PATH,
-          {
-            summary: {
-              latestDate: latestPoint.date,
-              totalUkraineKm2: UKRAINE_TOTAL_KM2,
-              consensusRfKm2: latestPoint.consensusRfKm2,
-              consensusUaKm2: latestPoint.consensusUaKm2,
-              disputedKm2: latestPoint.disputedKm2,
-              dsOccupiedKm2: latestPoint.dsOccupiedKm2,
-              dsGreyKm2: latestPoint.dsGreyKm2,
-              dsLiberatedKm2: 0,
-              laClaimedKm2: latestPoint.laClaimedKm2,
-              discrepancies: {
-                laClaimsLiberatedKm2: 0,
-                laClaimsGreyKm2: 0,
-                laClaimsUaKm2: 0,
-                dsClaimsOccupiedKm2: 0,
-                neutralGreyKm2: 0,
-              },
+        await writeJsonAsync(DATA_FRONTLINE_PATH, {
+          summary: {
+            latestDate: latestPoint.date,
+            totalUkraineKm2: UKRAINE_TOTAL_KM2,
+            consensusRfKm2: latestPoint.consensusRfKm2,
+            consensusUaKm2: latestPoint.consensusUaKm2,
+            disputedKm2: latestPoint.disputedKm2,
+            dsOccupiedKm2: latestPoint.dsOccupiedKm2,
+            dsGreyKm2: latestPoint.dsGreyKm2,
+            dsLiberatedKm2: 0,
+            laClaimedKm2: latestPoint.laClaimedKm2,
+            discrepancies: {
+              laClaimsLiberatedKm2: 0,
+              laClaimsGreyKm2: 0,
+              laClaimsUaKm2: 0,
+              dsClaimsOccupiedKm2: 0,
+              neutralGreyKm2: 0,
             },
-            timeline: intermediateTimeline,
-            layers: existing?.layers || lastRawLayers!,
-            days: existingDays,
           },
-          0,
-        );
+          timeline: intermediateTimeline,
+          layers: existing?.layers || lastRawLayers!,
+          days: existingDays,
+        });
       }
     }
   }
@@ -796,7 +801,7 @@ export async function parseFrontline(forceUpdate = false): Promise<WarFrontlineD
   };
 
   logger.info(`Saving complete daily frontline dataset (${finalTimeline.length} days, latest: ${finalLatestDate})...`);
-  await writeJson(DATA_FRONTLINE_PATH, finalDataset, 0);
+  await writeJsonAsync(DATA_FRONTLINE_PATH, finalDataset);
 
   logger.info('Exporting frontline history bundle to site/public/data/war-rf-ua/frontline-history.json...');
   await exportFrontlineHistory(sortedDays);
@@ -807,7 +812,7 @@ export async function parseFrontline(forceUpdate = false): Promise<WarFrontlineD
 /** Exports all daily frontline layers as a single compact JSON bundle to site/public/data/war-rf-ua/frontline-history.json */
 async function exportFrontlineHistory(days: Record<string, DayFrontlineEntry>): Promise<void> {
   await ensureDir(dirname(FRONTLINE_HISTORY_PATH));
-  await writeJson(FRONTLINE_HISTORY_PATH, days, 0);
+  await writeJsonAsync(FRONTLINE_HISTORY_PATH, days);
 }
 
 if (import.meta.main) {

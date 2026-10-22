@@ -1,5 +1,5 @@
-import type { LossEquipmentModel, LossesDataset } from '@graphs/types/war-rf-ua/losses';
-import type { WarLossesFilterState } from '@graphs/types/war-rf-ua/toolbar-meta';
+import type { LossEquipmentModel, LossesDataset } from '@graphs/shared/types/war-rf-ua/losses';
+import type { WarLossesFilterState } from '@graphs/shared/types/war-rf-ua/toolbar-meta';
 import { createElement } from 'react';
 import { type BreakdownCategory, type BreakdownList, SectionBreakdown } from '@/components/sections/SectionBreakdown';
 import type { LocalizedFormatters } from '@/utils/format';
@@ -117,10 +117,10 @@ export const lossesBreakdownSection = defineSection(({ t, fmt }: ProjectContext<
   title: t.proj.categories.breakdownTitle,
   sources: [{ name: 'LostArmour / WarInUA (@lost_warinua)', url: 'https://t.me/lost_warinua' }],
   data: {
-    losses: () => loadDataset<LossesDataset>('war-rf-ua', 'losses.json'),
+    lossesData: () => loadDataset<LossesDataset>('war-rf-ua', 'losses.json'),
   },
-  buildView: ({ losses: data }, { losses }) => {
-    const categories = buildCategories(data, t.proj, fmt, losses);
+  buildView: ({ lossesData }, { lossesStore }) => {
+    const categories = buildCategories(lossesData, t.proj, fmt, lossesStore);
 
     return {
       content: createElement(SectionBreakdown, { categories, previewLimit: 5 }),

@@ -1,4 +1,4 @@
-import type { TradeCategoryId } from '@graphs/types/country';
+import type { TradeCategoryId } from '@graphs/shared/types/country';
 
 /** Macroeconomic budget and debt category colors. */
 export const budgetColors = {
@@ -20,23 +20,23 @@ export const tradeColors = {
 
 /** 17 standardized trade macro category colors (10 goods + 7 services). */
 export const tradeCategoryColors: Record<TradeCategoryId, string> = {
-  agriculture: '#10b981',
-  minerals: '#f59e0b',
-  chemicals_plastics: '#8b5cf6',
-  wood_paper: '#8d5b38',
-  textiles_apparel: '#ec4899',
-  stone_glass: '#78716c',
-  metals: '#64748b',
-  machinery_electronics: '#2563eb',
-  transport: '#0284c7',
-  misc_instruments: '#d946ef',
-  services_it: '#6366f1',
-  services_transport: '#0d9488',
-  services_travel: '#f97316',
-  services_financial: '#eab308',
-  services_ip: '#a855f7',
-  services_business: '#06b6d4',
-  services_other: '#94a3b8',
+  ag: '#10b981',
+  mn: '#f59e0b',
+  ch: '#8b5cf6',
+  wd: '#8d5b38',
+  tx: '#ec4899',
+  sg: '#78716c',
+  mt: '#64748b',
+  mc: '#2563eb',
+  tr: '#0284c7',
+  mi: '#d946ef',
+  it: '#6366f1',
+  ts: '#0d9488',
+  tv: '#f97316',
+  fn: '#eab308',
+  ip: '#a855f7',
+  bs: '#06b6d4',
+  os: '#94a3b8',
 };
 
 /** High-contrast distinguishable categorical palette for detailed HS chapters and EBOPS service codes. */

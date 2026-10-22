@@ -1,4 +1,4 @@
-import type { LossesMapSectionData } from '@graphs/types/war-rf-ua/losses';
+import type { LossesMapSectionData } from '@graphs/shared/types/war-rf-ua/losses';
 import { createElement, lazy } from 'react';
 import { defineSection, loadDataset, type ProjectContext } from '@/utils/project';
 import type { dict } from '../locales/dict-en';
@@ -11,9 +11,9 @@ export const lossesMapSection = defineSection(({ t }: ProjectContext<typeof dict
   title: t.proj.map.title,
   sources: [{ name: 'LostArmour / WarInUA (@lost_warinua)', url: 'https://t.me/lost_warinua' }],
   data: {
-    losses: () => loadDataset<LossesMapSectionData>('war-rf-ua', 'losses-map.json'),
+    lossesData: () => loadDataset<LossesMapSectionData>('war-rf-ua', 'losses-map.json'),
   },
-  buildView: ({ losses: data }, { losses }) => ({
-    content: createElement(LossesMap, { data, t: t.proj, filters: losses }),
+  buildView: ({ lossesData }, { lossesStore }) => ({
+    content: createElement(LossesMap, { data: lossesData, t: t.proj, filters: lossesStore }),
   }),
 }));

@@ -16,7 +16,8 @@ export const tokensByCompanySection: Section = ({ t, fmt }) => {
     ],
     toolbars: [
       {
-        id: 'company',
+        id: 'companyStore',
+        urlPrefix: 'company',
         controls: [
           {
             id: 'mode',
@@ -31,9 +32,9 @@ export const tokensByCompanySection: Section = ({ t, fmt }) => {
         ] as const,
       },
     ] as const,
-    buildView: ({ aiTokens }, { company }) => {
-      const { companies } = aiTokens;
-      const isShare = company.mode === 'share';
+    buildView: ({ aiTokensData }, { companyStore }) => {
+      const { companies } = aiTokensData;
+      const isShare = companyStore.mode === 'share';
       return {
         content: createChart(
           chartOption({

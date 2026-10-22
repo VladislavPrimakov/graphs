@@ -1,4 +1,4 @@
-import type { WorldMetricSectionData } from '@graphs/types/world';
+import type { WorldMetricSectionData } from '@graphs/shared/types/world';
 import type { LineSeriesOption } from 'echarts';
 import { createChart } from '@/components/sections/SectionChart';
 import { chartOption } from '@/utils/chart-builder';
@@ -24,12 +24,10 @@ export const createWorldMetricSection =
       id: cfg.id,
       title: cfg.title,
       sources: cfg.sources,
-      buildView: ({ world }, { world: worldStore }) => {
-        const data = (world as unknown as Record<string, WorldMetricSectionData>)[cfg.id];
+      buildView: ({ worldData }, { worldStore }) => {
+        const data = (worldData as unknown as Record<string, WorldMetricSectionData>)[cfg.id];
         const { years, series: chartSeries } = data;
-        const values = worldStore ?? { years: [years[0], years[years.length - 1]], top: 7, countries: [] };
-        const startYear = values.years[0] ?? years[0];
-        const endYear = values.years[1] ?? years[years.length - 1];
+        const [startYear, endYear] = worldStore.years;
 
         const foundStartIdx = years.findIndex((y) => y >= startYear);
         const startIdx = foundStartIdx === -1 ? 0 : foundStartIdx;
@@ -47,10 +45,10 @@ export const createWorldMetricSection =
           return 0;
         };
 
-        const hasSelectedCountries = values.countries.length > 0;
-        const candidateCodes = hasSelectedCountries ? values.countries.filter((code) => chartSeries[code] != null) : Object.keys(chartSeries);
+        const hasSelectedCountries = worldStore.countries.length > 0;
+        const candidateCodes = hasSelectedCountries ? (worldStore.countries as string[]).filter((code) => chartSeries[code] != null) : Object.keys(chartSeries);
 
-        const activeCodes = candidateCodes.sort((a, b) => getRankingValue(chartSeries[b]) - getRankingValue(chartSeries[a])).slice(0, hasSelectedCountries ? candidateCodes.length : values.top);
+        const activeCodes = candidateCodes.sort((a, b) => getRankingValue(chartSeries[b]) - getRankingValue(chartSeries[a])).slice(0, hasSelectedCountries ? candidateCodes.length : worldStore.top);
 
         const formatValue = (val: number) => fmt.number(val, val >= 100 ? { maximumFractionDigits: 0 } : undefined);
 

@@ -23,9 +23,9 @@ export const macroGrowthSection: Section = ({ t, fmt, tokens }) => {
         url: 'https://bank.gov.ua/files/macro/GDP_y.xlsx',
       },
     ],
-    buildView: ({ ukraine: dataset }, { ukraine }) => {
-      const data = dataset['macro-growth'];
-      const [selStartYear, selEndYear] = ukraine?.years ?? [data.years[Math.max(0, data.years.length - 6)], data.years[data.years.length - 1]];
+    buildView: ({ ukraineData }, { ukraineStore }) => {
+      const data = ukraineData['macro-growth'];
+      const [selStartYear, selEndYear] = ukraineStore.years;
       const foundStartIdx = data.years.findIndex((y) => y >= selStartYear);
       const startIdx = foundStartIdx === -1 ? 0 : foundStartIdx;
       const foundEndIdx = data.years.findLastIndex((y) => y <= selEndYear);

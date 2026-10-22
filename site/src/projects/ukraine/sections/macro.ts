@@ -25,8 +25,8 @@ export const macroSection: Section = ({ t, fmt, tokens }) => {
         url: 'https://bank.gov.ua/files/macro/GDP_y.xlsx',
       },
     ],
-    buildView: ({ ukraine: dataset }, { ukraine }) => {
-      const data = dataset.macro;
+    buildView: ({ ukraineData }, { ukraineStore }) => {
+      const data = ukraineData.macro;
       const budgetXAxisData = data.yearLabels.map((label, i) => {
         const rate = data.rates[i];
         const bal = data.balances[i];
@@ -36,8 +36,8 @@ export const macroSection: Section = ({ t, fmt, tokens }) => {
         return `{year|${label}}\n{rate|(${t.proj.macro.fxRate}: ${fmt.number(rate, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})}\n{${balTag}|${t.common.balance}: ${balSign}}`;
       });
 
-      const [selStartYear, selEndYear] = ukraine?.years ?? [data.years[Math.max(0, data.years.length - 6)], data.years[data.years.length - 1]];
-      const showLabels = ukraine?.labels ?? true;
+      const [selStartYear, selEndYear] = ukraineStore.years;
+      const showLabels = ukraineStore.labels;
       const foundStartIdx = data.years.findIndex((y) => y >= selStartYear);
       const startIdx = foundStartIdx === -1 ? 0 : foundStartIdx;
       const foundEndIdx = data.years.findLastIndex((y) => y <= selEndYear);
@@ -99,7 +99,7 @@ export const macroSection: Section = ({ t, fmt, tokens }) => {
                   share: data.defensePct.slice(startIdx, endIdx),
                 }),
                 color: budgetColors.defense,
-                label: { show: showLabels, position: 'inside' },
+                label: { show: showLabels },
                 formatLabel: ({ value, item }) => formatBudgetLabel(value, item.share),
               }),
               createBarSeries({
@@ -111,7 +111,7 @@ export const macroSection: Section = ({ t, fmt, tokens }) => {
                   share: data.otherExpPct.slice(startIdx, endIdx),
                 }),
                 color: budgetColors.otherExp,
-                label: { show: showLabels, position: 'inside' },
+                label: { show: showLabels },
                 formatLabel: ({ value, item }) => formatBudgetLabel(value, item.share),
               }),
               createStackTotalSeries({
@@ -120,7 +120,7 @@ export const macroSection: Section = ({ t, fmt, tokens }) => {
                   value: data.totalExp.slice(startIdx, endIdx),
                   gdpPct: data.expGdpPct.slice(startIdx, endIdx),
                 }),
-                label: { show: showLabels, position: 'top' },
+                label: { show: showLabels },
                 formatTotal: ({ total, item }) => formatGdpLabel(total, item.gdpPct),
               }),
               createBarSeries({
@@ -132,7 +132,7 @@ export const macroSection: Section = ({ t, fmt, tokens }) => {
                   share: data.domesticRevPct.slice(startIdx, endIdx),
                 }),
                 color: budgetColors.domesticRev,
-                label: { show: showLabels, position: 'inside' },
+                label: { show: showLabels },
                 formatLabel: ({ value, item }) => formatBudgetLabel(value, item.share),
               }),
               createBarSeries({
@@ -144,7 +144,7 @@ export const macroSection: Section = ({ t, fmt, tokens }) => {
                   share: data.grantsPct.slice(startIdx, endIdx),
                 }),
                 color: budgetColors.grants,
-                label: { show: showLabels, position: 'inside' },
+                label: { show: showLabels },
                 formatLabel: ({ value, item }) => formatBudgetLabel(value, item.share),
               }),
               createBarSeries({
@@ -156,7 +156,7 @@ export const macroSection: Section = ({ t, fmt, tokens }) => {
                   share: data.loansPct.slice(startIdx, endIdx).map((v) => Math.max(0, v)),
                 }),
                 color: budgetColors.loans,
-                label: { show: showLabels, position: 'inside' },
+                label: { show: showLabels },
                 formatLabel: ({ value, item }) => formatBudgetLabel(value, item.share),
               }),
               createStackTotalSeries({
@@ -165,7 +165,7 @@ export const macroSection: Section = ({ t, fmt, tokens }) => {
                   value: data.totalRevFin.slice(startIdx, endIdx),
                   gdpPct: data.revGdpPct.slice(startIdx, endIdx),
                 }),
-                label: { show: showLabels, position: 'top' },
+                label: { show: showLabels },
                 formatTotal: ({ total, item }) => formatGdpLabel(total, item.gdpPct),
               }),
               createBarSeries({
@@ -177,7 +177,7 @@ export const macroSection: Section = ({ t, fmt, tokens }) => {
                   share: data.govDebtPct.slice(startIdx, endIdx),
                 }),
                 color: budgetColors.govDebt,
-                label: { show: showLabels, position: 'inside' },
+                label: { show: showLabels },
                 formatLabel: ({ value, item }) => formatBudgetLabel(value, item.share),
               }),
               createBarSeries({
@@ -189,7 +189,7 @@ export const macroSection: Section = ({ t, fmt, tokens }) => {
                   share: data.privateDebtPct.slice(startIdx, endIdx),
                 }),
                 color: budgetColors.privateDebt,
-                label: { show: showLabels, position: 'inside' },
+                label: { show: showLabels },
                 formatLabel: ({ value, item }) => formatBudgetLabel(value, item.share),
               }),
               createStackTotalSeries({
@@ -198,7 +198,7 @@ export const macroSection: Section = ({ t, fmt, tokens }) => {
                   value: data.debt.slice(startIdx, endIdx),
                   gdpPct: data.debtGdpPct.slice(startIdx, endIdx),
                 }),
-                label: { show: showLabels, position: 'top' },
+                label: { show: showLabels },
                 formatTotal: ({ total, item }) => formatGdpLabel(total, item.gdpPct),
               }),
               createBarSeries({
@@ -206,7 +206,7 @@ export const macroSection: Section = ({ t, fmt, tokens }) => {
                 name: t.proj.macro.nominalGdp,
                 data: data.gdp.slice(startIdx, endIdx),
                 color: budgetColors.gdp,
-                label: { show: showLabels, position: 'top' },
+                label: { show: showLabels },
                 formatLabel: ({ value }) => fmt.number(value),
               }),
             ],

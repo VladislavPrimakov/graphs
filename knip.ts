@@ -1,7 +1,7 @@
 import type { KnipConfig } from 'knip';
 import { pipelinesKnip } from './pipelines/knip';
+import { sharedKnip } from './shared/knip';
 import { siteKnip } from './site/knip';
-import { typesKnip } from './types/knip';
 
 const config: KnipConfig = {
   ignoreExportsUsedInFile: true,
@@ -17,7 +17,7 @@ const config: KnipConfig = {
   workspaces: {
     site: siteKnip,
     pipelines: pipelinesKnip,
-    types: typesKnip,
+    shared: sharedKnip,
   },
 };
 

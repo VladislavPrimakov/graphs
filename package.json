@@ -6,7 +6,7 @@
   "workspaces": [
     "site",
     "pipelines",
-    "types"
+    "shared"
   ],
   "scripts": {
     "dev": "bun --filter @graphs/site dev",

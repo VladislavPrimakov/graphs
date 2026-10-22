@@ -6,7 +6,7 @@
     "incremental": true,
     "tsBuildInfoFile": "./.cache/tsbuildinfo",
     "paths": {
-      "@graphs/types/*": ["../types/*"],
+      "@graphs/shared/*": ["../shared/src/*"],
       "@/*": ["./src/*"]
     }
   },

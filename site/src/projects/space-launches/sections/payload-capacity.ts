@@ -9,7 +9,8 @@ export const payloadCapacitySection: Section = ({ t, fmt }) => ({
   sources: [{ name: 'The Space Devs — Launch Library 2 API', url: 'https://ll.thespacedevs.com/2.3.0/launches/' }],
   toolbars: [
     {
-      id: 'capacity',
+      id: 'capacityStore',
+      urlPrefix: 'capacity',
       controls: [
         {
           id: 'mode',
@@ -24,12 +25,12 @@ export const payloadCapacitySection: Section = ({ t, fmt }) => ({
       ] as const,
     },
   ] as const,
-  buildView: ({ spaceLaunches }, { launches, capacity }) => {
-    const data = spaceLaunches['payload-capacity'];
+  buildView: ({ spaceLaunchesData }, { launchesStore, capacityStore }) => {
+    const data = spaceLaunchesData['payload-capacity'];
     const summary = data.summary;
     const allRegions = data.regions;
-    const isShare = capacity?.mode === 'share';
-    const selectedRegions = launches?.countries?.length ? (launches.countries as string[]).filter((r) => allRegions.includes(r)) : allRegions;
+    const isShare = capacityStore.mode === 'share';
+    const selectedRegions = launchesStore.countries.length ? (launchesStore.countries as string[]).filter((r) => allRegions.includes(r)) : allRegions;
     const activeRegions = selectedRegions.length > 0 ? selectedRegions : allRegions;
 
     const activeYearTotals = data.payloadCapacity.years.map((_, yearIdx) => {

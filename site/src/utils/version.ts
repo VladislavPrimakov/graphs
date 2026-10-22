@@ -13,10 +13,24 @@ export function getAbsoluteUrl(relPath: string): string {
   return `${SITE_ORIGIN}${base}${cleanRel}`;
 }
 
+/** Structured changelog release entry containing version string and optional release date. */
+export interface ChangelogRelease {
+  version: string;
+  date?: string;
+}
+
 /** Regex pattern matching semantic version release headers in CHANGELOG.md (e.g. '## [1.2.2] - 2026-10-08'). */
-export const CHANGELOG_VERSION_REGEX = /^## \[(\d+\.\d+\.\d+)\]/gm;
+export const CHANGELOG_VERSION_REGEX = /^## \[(\d+\.\d+\.\d+)\](?:\s*-\s*(\d{4}-\d{2}-\d{2}))?/gm;
+
+/** Extracts structured release records with version and optional release date from raw changelog markdown content. */
+export function parseChangelogReleases(rawChangelog: string): ChangelogRelease[] {
+  return [...rawChangelog.matchAll(CHANGELOG_VERSION_REGEX)].map((m) => ({
+    version: m[1],
+    date: m[2],
+  }));
+}
 
 /** Extracts semantic version strings from raw changelog markdown content. */
 export function parseChangelogVersions(rawChangelog: string): string[] {
-  return [...rawChangelog.matchAll(CHANGELOG_VERSION_REGEX)].map((m) => m[1]);
+  return parseChangelogReleases(rawChangelog).map((r) => r.version);
 }

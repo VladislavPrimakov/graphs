@@ -77,8 +77,7 @@ export const SectionBreakdown: React.FC<SectionBreakdownProps> = ({ categories, 
         <div className="flex justify-end -mt-2 mb-3">
           <button type="button" onClick={toggleAllCategories} className="btn-subtle px-2.5 h-7 text-xs text-content-secondary hover:text-content-primary transition-colors flex items-center gap-1.5">
             <ExpandArrowsIcon className="w-3.5 h-3.5 text-accent-primary" />
-            <span className="hidden sm:inline">{allExpanded ? t.common.collapseAllCategories : t.common.expandAllCategories}</span>
-            <span className="sm:hidden">{allExpanded ? t.common.collapse : t.common.expandAll}</span>
+            <span>{allExpanded ? t.common.collapseAllCategories : t.common.expandAllCategories}</span>
           </button>
         </div>
       )}
@@ -113,7 +112,7 @@ export const SectionBreakdown: React.FC<SectionBreakdownProps> = ({ categories, 
                             {list.label}
                             {totalFormatted !== undefined ? `: ${totalFormatted}` : ''}
                           </span>
-                          <span className="text-[11px] font-normal text-content-dim">
+                          <span className="text-2xs font-normal text-content-dim">
                             {list.items.length} {t.common.models}
                           </span>
                         </div>

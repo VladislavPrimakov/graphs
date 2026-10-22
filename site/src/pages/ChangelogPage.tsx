@@ -3,12 +3,12 @@ import { useParams } from 'react-router';
 import NotFoundPage from '@/pages/NotFoundPage';
 import { cn } from '@/utils/cn';
 import { usePath, useTranslation } from '@/utils/provider';
-import { parseChangelogVersions, SITE_VERSION } from '@/utils/version';
+import { type ChangelogRelease, parseChangelogReleases, SITE_VERSION } from '@/utils/version';
 import { SECTION_DATA_ATTR, scrollToSection, useScrollSpy } from '@/utils/viewport';
 
 interface ChangelogData {
   html: string;
-  versions: string[];
+  releases: ChangelogRelease[];
 }
 
 let changelogPromise: Promise<ChangelogData> | null = null;
@@ -17,7 +17,7 @@ function loadChangelog(): Promise<ChangelogData> {
   if (!changelogPromise) {
     changelogPromise = Promise.all([import('../../../CHANGELOG.md?raw'), import('marked')]).then(async ([rawMod, markedMod]) => {
       const changelogRaw = rawMod.default;
-      const versions = parseChangelogVersions(changelogRaw);
+      const releases = parseChangelogReleases(changelogRaw);
 
       const marked = new markedMod.Marked({ gfm: true });
       marked.use({
@@ -41,7 +41,7 @@ function loadChangelog(): Promise<ChangelogData> {
       });
 
       const html = await marked.parse(changelogRaw);
-      return { html, versions };
+      return { html, releases };
     });
   }
   return changelogPromise;
@@ -49,11 +49,11 @@ function loadChangelog(): Promise<ChangelogData> {
 
 interface ChangelogContentProps {
   html: string;
-  versions: string[];
+  releases: ChangelogRelease[];
   normalizedVersion?: string;
 }
 
-function ChangelogContent({ html, versions, normalizedVersion }: ChangelogContentProps) {
+function ChangelogContent({ html, releases, normalizedVersion }: ChangelogContentProps) {
   const { t } = useTranslation();
   const { getHref } = usePath();
 
@@ -87,21 +87,21 @@ function ChangelogContent({ html, versions, normalizedVersion }: ChangelogConten
       <div className="max-w-7xl mx-auto py-6">
         <div className="flex gap-8 items-start justify-center">
           {/* Left balance spacer to guarantee pixel-perfect viewport centering on desktop */}
-          <div className="hidden lg:block w-36 shrink-0 pointer-events-none" aria-hidden="true" />
+          <div className="hidden lg:block w-48 shrink-0 pointer-events-none" aria-hidden="true" />
 
           {/* Main changelog document */}
           <div className="max-w-5xl w-full min-w-0">
-            <div className="card bg-surface-card/60 p-6 shadow-sm">
+            <div className="card p-6">
               {/* biome-ignore lint/security/noDangerouslySetInnerHtml: Sanitized static build markdown content */}
               <div className="changelog-markdown text-sm leading-relaxed" dangerouslySetInnerHTML={{ __html: html }} />
             </div>
           </div>
 
           {/* Right sticky outline TOC (desktop) */}
-          <aside className="hidden lg:block w-36 shrink-0 sticky top-24">
-            <div className="text-[11px] font-bold text-content-muted uppercase tracking-wider mb-2.5 px-3">{t.common.releases}</div>
-            <nav className="flex flex-col border-l border-border-subtle text-xs">
-              {versions.map((ver) => {
+          <aside className="hidden lg:block w-48 shrink-0 sticky top-24">
+            <div className="text-2xs font-bold text-content-muted uppercase tracking-wider mb-2.5 px-3">{t.common.releases}</div>
+            <nav className="grid grid-cols-[max-content_auto] border-l border-border-subtle text-xs">
+              {releases.map(({ version: ver, date }) => {
                 const id = `v${ver}`;
                 const isActive = activeId === id;
                 const targetHref = getHref(`/changelog/${id}`);
@@ -117,13 +117,14 @@ function ChangelogContent({ html, versions, normalizedVersion }: ChangelogConten
                       document.title = `${t.common.changelog} (v${ver})`;
                     }}
                     className={cn(
-                      'px-3 py-1.5 font-mono transition-all',
+                      'col-span-2 grid grid-cols-subgrid px-3 py-1.5 font-mono items-baseline gap-x-2 whitespace-nowrap transition-all',
                       isActive
                         ? 'border-l-2 border-accent-primary -ml-0.5 font-bold text-accent-primary bg-accent-glow/20 rounded-r'
                         : 'text-content-muted hover:text-content-primary hover:border-l hover:border-border-muted -ml-px',
                     )}
                   >
-                    {id}
+                    <span>{id}</span>
+                    {date && <span className={cn('text-2xs font-mono', isActive ? 'text-accent-primary/80' : 'text-content-muted/70')}>({date})</span>}
                   </a>
                 );
               })}
@@ -137,14 +138,14 @@ function ChangelogContent({ html, versions, normalizedVersion }: ChangelogConten
 
 /** Standalone Changelog page rendering continuous release notes with a sticky right outline and scroll-spy active highlights. */
 export default function ChangelogPage() {
-  const { html, versions } = use(loadChangelog());
+  const { html, releases } = use(loadChangelog());
   const { version } = useParams<{ version?: string }>();
 
   const normalizedVersion = version ? (version.startsWith('v') ? version : `v${version}`) : undefined;
 
-  if (normalizedVersion && !versions.some((v) => `v${v}` === normalizedVersion)) {
+  if (normalizedVersion && !releases.some((r) => `v${r.version}` === normalizedVersion)) {
     return <NotFoundPage />;
   }
 
-  return <ChangelogContent html={html} versions={versions} normalizedVersion={normalizedVersion} />;
+  return <ChangelogContent html={html} releases={releases} normalizedVersion={normalizedVersion} />;
 }

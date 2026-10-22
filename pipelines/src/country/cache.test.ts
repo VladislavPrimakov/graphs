@@ -1,37 +1,42 @@
 import { describe, expect, test } from 'bun:test';
 import { COUNTRIES, COUNTRY_BY_CODE, COUNTRY_BY_ID, COUNTRY_BY_ISO3, SUPPORTED_COUNTRIES } from './countries';
-import { CHUNK_SIZE, chunkYears, detectMissingStreams, isCountryComplete, type RawCountryProfile, type RawYearData, REQUIRED_IMF_INDICATORS } from './index';
+import { buildProductionProfile, CHUNK_SIZE, chunkYears, detectMissingStreams, isCountryComplete, type RawCountryProfile, type RawYearData } from './index';
 
 const TEST_YEARS = [2020, 2021, 2022, 2023, 2024];
 
-function createFullYearData(): RawYearData {
+function createFullYearData(year = 2023): RawYearData {
   return {
-    exports: { '01': 1.5, '84': 10.2 },
-    imports: { '01': 0.8, '84': 8.1 },
-    partnerExports: { CA: 50.1, MX: 45.2 },
-    partnerImports: { CA: 40.0, MX: 42.1 },
+    goodsExports: { '01': 1.5, '84': 10.2 },
     servicesExports: { '205': 12.3, '262': 8.9 },
-    servicesImports: { '205': 10.1, '262': 5.4 },
+    servicesImports: { '205': 8.1, '262': 4.5 },
+    partnerGoodsExports: {
+      ca: { '01': 1.5, '84': 10.2 },
+      mx: { '84': 5.0 },
+    },
+    goodsChecksum: 2024102002,
+    servicesChecksum: 2024091501,
+    ngdpd: 100 + year,
+    rpch: 2.5,
+    dpc: 50000,
+    pppgdp: 120 + year,
+    gx: 45.0,
+    ggr: 42.0,
+    ggxcnl: -3.0,
+    ggxwdg: 65.0,
+    pcpipch: 2.1,
+    lur: 4.0,
+    bca: 1.5,
   };
-}
-
-function createFullMacro(years: number[] = TEST_YEARS): RawCountryProfile['macro'] {
-  const macro: RawCountryProfile['macro'] = {};
-  for (const key of REQUIRED_IMF_INDICATORS) {
-    macro[key] = Object.fromEntries(years.map((y) => [String(y), 100 + y]));
-  }
-  return macro;
 }
 
 function createFullProfile(years: number[] = TEST_YEARS): RawCountryProfile {
   const yearsMap: Record<string, RawYearData> = {};
   for (const y of years) {
-    yearsMap[String(y)] = createFullYearData();
+    yearsMap[String(y)] = createFullYearData(y);
   }
   return {
     code: 'us',
     years: yearsMap,
-    macro: createFullMacro(years),
   };
 }
 
@@ -57,26 +62,24 @@ describe('Smart Cache Verification & Invalidation (detectMissingStreams)', () =>
 
   test('condition 3: missing partial years for goods only triggers goods refetch for exact years', () => {
     const profile = createFullProfile(TEST_YEARS);
-    // Delete exports for 2023 and imports for 2024
-    delete profile.years['2023'].exports;
-    delete profile.years['2024'].imports;
+    // Delete goodsExports for 2023 and partnerGoodsExports for 2024
+    delete profile.years['2023'].goodsExports;
+    delete profile.years['2024'].partnerGoodsExports;
 
     const missing = detectMissingStreams(profile, TEST_YEARS);
     expect(missing.goods).toEqual([2023, 2024]);
-    expect(missing.partners).toEqual([]);
     expect(missing.services).toEqual([]);
     expect(missing.needsImf).toBe(false);
     expect(isCountryComplete(profile, TEST_YEARS)).toBe(false);
   });
 
-  test('condition 4: missing partial years for bilateral partners triggers partners refetch', () => {
+  test('condition 4: missing partial years for bilateral partner goods triggers unified goods refetch', () => {
     const profile = createFullProfile(TEST_YEARS);
-    delete profile.years['2021'].partnerExports;
-    delete profile.years['2022'].partnerImports;
+    delete profile.years['2021'].partnerGoodsExports;
+    delete profile.years['2022'].partnerGoodsExports;
 
     const missing = detectMissingStreams(profile, TEST_YEARS);
-    expect(missing.goods).toEqual([]);
-    expect(missing.partners).toEqual([2021, 2022]);
+    expect(missing.goods).toEqual([2021, 2022]);
     expect(missing.services).toEqual([]);
     expect(missing.needsImf).toBe(false);
     expect(isCountryComplete(profile, TEST_YEARS)).toBe(false);
@@ -85,19 +88,31 @@ describe('Smart Cache Verification & Invalidation (detectMissingStreams)', () =>
   test('condition 5: missing partial years for commercial services triggers services refetch', () => {
     const profile = createFullProfile(TEST_YEARS);
     delete profile.years['2020'].servicesExports;
-    delete profile.years['2024'].servicesImports;
+    delete profile.years['2024'].servicesExports;
 
     const missing = detectMissingStreams(profile, TEST_YEARS);
     expect(missing.goods).toEqual([]);
-    expect(missing.partners).toEqual([]);
     expect(missing.services).toEqual([2020, 2024]);
+    expect(missing.needsImf).toBe(false);
+    expect(isCountryComplete(profile, TEST_YEARS)).toBe(false);
+  });
+
+  test('condition 5b: missing partial years for commercial services imports triggers services refetch', () => {
+    const profile = createFullProfile(TEST_YEARS);
+    delete profile.years['2022'].servicesImports;
+
+    const missing = detectMissingStreams(profile, TEST_YEARS);
+    expect(missing.goods).toEqual([]);
+    expect(missing.services).toEqual([2022]);
     expect(missing.needsImf).toBe(false);
     expect(isCountryComplete(profile, TEST_YEARS)).toBe(false);
   });
 
   test('condition 6: missing nominal GDP indicator flags needsImf', () => {
     const profile = createFullProfile(TEST_YEARS);
-    delete profile.macro!.gdpNominalUsd;
+    for (const y of Object.values(profile.years)) {
+      delete y.ngdpd;
+    }
 
     const missing = detectMissingStreams(profile, TEST_YEARS);
     expect(missing.goods).toEqual([]);
@@ -157,11 +172,47 @@ describe('Smart Cache Verification & Invalidation (detectMissingStreams)', () =>
 
   test('condition 9: null nominal GDP indicator flags needsImf to re-query upstream', () => {
     const profile = createFullProfile(TEST_YEARS);
-    profile.macro!.gdpNominalUsd = null;
+    for (const y of Object.values(profile.years)) {
+      y.ngdpd = null;
+    }
 
     const missing = detectMissingStreams(profile, TEST_YEARS);
     expect(missing.needsImf).toBe(true);
     expect(isCountryComplete(profile, TEST_YEARS)).toBe(false);
+  });
+
+  test('condition 10: non-existent upstream catalog years are skipped upfront (no futile queries)', () => {
+    // Upstream catalog only has datasets for 2022 and 2023 for reporter 842
+    const catalog = {
+      goodsChecksums: new Map<string, number>([
+        ['842:2022', 101],
+        ['842:2023', 102],
+      ]),
+      servicesChecksums: new Map<string, number>([['842:2022', 201]]),
+    };
+
+    // Brand new country with no data in cache
+    const missing = detectMissingStreams(undefined, TEST_YEARS, 842, catalog);
+    // TEST_YEARS is [2020, 2021, 2022, 2023, 2024], but only 2022 and 2023 exist upstream!
+    expect(missing.goods).toEqual([2022, 2023]);
+    expect(missing.services).toEqual([2022]);
+  });
+
+  test('condition 11: IMF WEO version change in metadata invalidates macro cache globally', () => {
+    const profile = createFullProfile(TEST_YEARS);
+    const catalog = {
+      goodsChecksums: new Map<string, number>(),
+      servicesChecksums: new Map<string, number>(),
+      imfLastModified: '2026-10-15T12:00:00Z',
+    };
+
+    // When cached timestamp matches upstream catalog: no refetch needed
+    const upToDate = detectMissingStreams(profile, TEST_YEARS, 842, catalog, '2026-10-15T12:00:00Z');
+    expect(upToDate.needsImf).toBe(false);
+
+    // When upstream timestamp is newer than cached timestamp: flags needsImf
+    const outdated = detectMissingStreams(profile, TEST_YEARS, 842, catalog, '2026-04-10T12:00:00Z');
+    expect(outdated.needsImf).toBe(true);
   });
 });
 
@@ -304,5 +355,141 @@ describe('Pipeline Lifecycle & Incremental Progression', () => {
 
     // Zero countries need updating!
     expect(anyCountryNeedsUpdate).toBe(false);
+  });
+});
+
+describe('Production Profile Generator & Symmetrical Imports (buildProductionProfile)', () => {
+  test('reconstructs symmetrical imports from mirror partner exports', () => {
+    // Country A (US) exports 10.0 billion of chapter 84 to Country B (CN) in 2023
+    // Country B (CN) exports 50.0 billion of chapter 85 to Country A (US) in 2023
+    const usProfile: RawCountryProfile = {
+      code: 'us',
+      years: {
+        '2023': {
+          goodsExports: { '84': 10.0 },
+          partnerGoodsExports: {
+            cn: { '84': 10.0 },
+          },
+          ngdpd: 27000,
+        },
+      },
+    };
+
+    const cnProfile: RawCountryProfile = {
+      code: 'cn',
+      years: {
+        '2023': {
+          goodsExports: { '85': 50.0 },
+          partnerGoodsExports: {
+            us: { '85': 50.0 },
+          },
+          ngdpd: 17000,
+        },
+      },
+    };
+
+    const all = { us: usProfile, cn: cnProfile };
+
+    const usProd = buildProductionProfile(usProfile, all);
+    const cnProd = buildProductionProfile(cnProfile, all);
+
+    // US goods export in 2023 is 10.0
+    expect(usProd.timeline[0].exports.goods).toBe(10.0);
+    // US goods import in 2023 must equal China's export to US (50.0)
+    expect(usProd.timeline[0].imports.goods).toBe(50.0);
+
+    // China goods export in 2023 is 50.0
+    expect(cnProd.timeline[0].exports.goods).toBe(50.0);
+    // China goods import in 2023 must equal US export to China (10.0)
+    expect(cnProd.timeline[0].imports.goods).toBe(10.0);
+
+    // Verify US bilateral partner imports list CN with 50.0
+    expect(usProd.timeline[0].imports.partners.CN?.total).toBe(50.0);
+
+    // Verify China bilateral partner imports list US with 10.0
+    expect(cnProd.timeline[0].imports.partners.US?.total).toBe(10.0);
+
+    // Verify detailed trade breakdowns by partner and category for US exports to CN
+    expect(usProd.timeline[0].exports.partners.CN?.macro.mc).toBe(10.0);
+    expect(usProd.timeline[0].exports.partners.CN?.detailed['84']).toBe(10.0);
+
+    // Verify symmetrical detailed trade breakdowns for US imports from CN
+    expect(usProd.timeline[0].imports.partners.CN?.macro.mc).toBe(50.0);
+    expect(usProd.timeline[0].imports.partners.CN?.detailed['85']).toBe(50.0);
+
+    // Symmetrically for China: exports to US
+    expect(cnProd.timeline[0].exports.partners.US?.macro.mc).toBe(50.0);
+    expect(cnProd.timeline[0].exports.partners.US?.detailed['85']).toBe(50.0);
+
+    // Symmetrically for China: imports from US
+    expect(cnProd.timeline[0].imports.partners.US?.macro.mc).toBe(10.0);
+    expect(cnProd.timeline[0].imports.partners.US?.detailed['84']).toBe(10.0);
+  });
+
+  test('calculates multi-category partner breakdowns with descending sort', () => {
+    const rawProfile: RawCountryProfile = {
+      code: 'us',
+      years: {
+        '2023': {
+          goodsExports: { '01': 1.0, '02': 3.0, '84': 6.0 },
+          partnerGoodsExports: {
+            ca: { '01': 1.0, '02': 3.0, '84': 6.0 },
+          },
+          ngdpd: 27000,
+        },
+      },
+    };
+
+    const prod = buildProductionProfile(rawProfile);
+    const ca = prod.timeline[0].exports.partners.CA;
+
+    expect(ca).toBeDefined();
+    expect(ca.total).toBe(10.0);
+
+    // Total = 10.0B
+    // Machinery (ch 84): 6.0B
+    // Agriculture (ch 01 + ch 02): 4.0B
+    expect(ca.macro.mc).toBe(6.0);
+    expect(ca.macro.ag).toBe(4.0);
+
+    // Detailed chapters
+    expect(ca.detailed['84']).toBe(6.0);
+    expect(ca.detailed['02']).toBe(3.0);
+    expect(ca.detailed['01']).toBe(1.0);
+
+    // Verify descending sort order of keys
+    expect(Object.keys(ca.macro)).toEqual(['mc', 'ag']);
+  });
+
+  test('all timeline records match consecutive years and valid unified flows', () => {
+    const profile = createFullProfile([2021, 2022, 2023]);
+    const prod = buildProductionProfile(profile, { us: profile });
+
+    expect(prod.years).toEqual([2021, 2022, 2023]);
+    expect(prod.timeline.length).toBe(3);
+
+    const y0 = prod.timeline[0];
+    expect(y0.year).toBe(2021);
+    expect(y0.exports.goods).toBe(11.7); // 1.5 + 10.2
+    expect(y0.exports.services).toBe(21.2); // 12.3 + 8.9
+    expect(y0.imports.services).toBe(12.6); // 8.1 + 4.5
+    expect(y0.exports.total).toBe(32.9); // 11.7 + 21.2
+
+    // Verify services categories in detailed and macro
+    expect(y0.imports.detailed['205']).toBeDefined();
+    expect(y0.imports.detailed['262']).toBeDefined();
+    expect(y0.imports.macro.ts).toBeDefined();
+    expect(y0.imports.macro.it).toBeDefined();
+
+    expect(prod.activePartners.length).toBeGreaterThan(0);
+    expect(prod.activeMacro.length).toBeGreaterThan(0);
+    expect(prod.activeDetailed.length).toBeGreaterThan(0);
+
+    expect(y0.macro.gdpNominalUsd).toBe(2121);
+    expect(y0.macro.gdpRealGrowthYoy).toBe(2.5);
+    expect(y0.macro.govExpenditurePctGdp).toBe(45.0);
+    expect(y0.macro.govRevenuePctGdp).toBe(42.0);
+    expect(y0.macro.govDebtPctGdp).toBe(65.0);
+    expect(y0.macro.growth).toBeDefined();
   });
 });

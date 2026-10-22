@@ -143,7 +143,7 @@ export const DatePickerPopover: React.FC<DatePickerPopoverProps> = ({ mode, valu
   const stepNextTitle = mode === 'yearly' ? tCommon.nextYearStep : mode === 'monthly' ? tCommon.nextMonth : tCommon.nextDay;
 
   return (
-    <div className="inline-flex items-center rounded-md border border-border-subtle/80 bg-surface-card shadow-2xs">
+    <div className="control-panel inline-flex items-center gap-0 p-0 rounded-md shadow-2xs">
       {/* Step Previous Button */}
       <button
         type="button"
@@ -173,12 +173,7 @@ export const DatePickerPopover: React.FC<DatePickerPopoverProps> = ({ mode, valu
         </Popover.Trigger>
 
         <Popover.Portal>
-          <Popover.Content
-            side="bottom"
-            align="center"
-            sideOffset={6}
-            className="z-50 rounded-xl border border-border-subtle bg-surface-card p-3 shadow-xl backdrop-blur-md animate-in fade-in-0 zoom-in-95 outline-hidden"
-          >
+          <Popover.Content side="bottom" align="center" sideOffset={6} className="z-50 glass-overlay p-3 animate-in fade-in-0 zoom-in-95 outline-hidden">
             {mode === 'daily' ? (
               <DayPicker
                 mode="single"
@@ -229,7 +224,7 @@ export const DatePickerPopover: React.FC<DatePickerPopoverProps> = ({ mode, valu
                       }}
                       className={cn(
                         'px-2 py-1.5 text-xs font-medium rounded-md transition-colors cursor-pointer text-center font-mono capitalize',
-                        isSelected ? 'bg-accent-primary text-white font-semibold shadow-xs' : 'text-content-secondary hover:text-content-primary hover:bg-surface-elevated',
+                        isSelected ? 'bg-accent-primary text-white dark:text-surface-base font-semibold shadow-xs' : 'text-content-secondary hover:text-content-primary hover:bg-surface-elevated',
                         isDisabled && 'opacity-25 pointer-events-none text-content-muted',
                       )}
                     >

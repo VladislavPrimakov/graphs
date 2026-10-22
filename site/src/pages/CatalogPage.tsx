@@ -60,7 +60,7 @@ export default function CatalogPage() {
           </div>
 
           {/* Tag Filter Selector */}
-          <div className="control-panel mb-8 p-3 rounded-2xl bg-surface-card/40 border-border-subtle/80">
+          <div className="card-subtle mb-8 p-3 rounded-2xl bg-surface-card/40 border-border-subtle/80">
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-xs font-semibold text-content-muted mr-1 flex items-center gap-1.5">
                 <FilterIcon className="w-3.5 h-3.5 text-accent-primary" />
@@ -107,7 +107,7 @@ export default function CatalogPage() {
                           })}
                         </div>
                         {lastUpdated && (
-                          <span className="text-[11px] font-medium text-content-dim shrink-0 flex items-center gap-1">
+                          <span className="text-2xs font-medium text-content-dim shrink-0 flex items-center gap-1">
                             <ClockIcon className="w-3.5 h-3.5 text-content-dim" />
                             {fmt.date(lastUpdated)}
                           </span>
@@ -127,7 +127,7 @@ export default function CatalogPage() {
                     <div className="mt-6 pt-4 border-t border-border-subtle/80 space-y-3 text-xs">
                       {proj.sections.length > 0 && (
                         <div className="space-y-1.5">
-                          <span className="text-[11px] font-semibold uppercase tracking-wider text-content-dim block">
+                          <span className="text-2xs font-semibold uppercase tracking-wider text-content-dim block">
                             {proj.sections.length} {t.common.sections}:
                           </span>
                           <div className="flex flex-wrap items-center gap-1.5">

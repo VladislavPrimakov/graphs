@@ -23,9 +23,9 @@ export function getSiteProjectMetaPath(slug: string, fileName = 'toolbar-meta.js
   return path.join(SITE_DATA_DIR, slug, fileName);
 }
 
-/** Returns the absolute path to pipelines/src/<slug>/data.json for a project cache snapshot. */
-export function getPipelineDataPath(slug: string): string {
-  return path.join(PIPELINES_SRC_DIR, slug, 'data.json');
+/** Returns the absolute path to pipelines/src/<slug>/<fileName> for a project cache snapshot. */
+export function getPipelineDataPath(slug: string, fileName = 'data.json.br'): string {
+  return path.join(PIPELINES_SRC_DIR, slug, fileName);
 }
 
 /** Returns the absolute path to site/public/data/metadata.json. */

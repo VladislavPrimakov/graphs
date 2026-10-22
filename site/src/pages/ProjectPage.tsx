@@ -76,7 +76,7 @@ function ProjectDashboard({ slug, section, lang }: ProjectDashboardProps) {
 
     const projectStores: Record<string, ControlStore> = {};
     for (const tb of toolbars) {
-      projectStores[tb.id] = getOrCreateStoreFromControls(tb.id, tb.controls);
+      projectStores[tb.id] = getOrCreateStoreFromControls(tb.id, tb.controls, { urlPrefix: tb.urlPrefix });
     }
 
     interface SectionGroup {
@@ -123,7 +123,7 @@ function ProjectDashboard({ slug, section, lang }: ProjectDashboardProps) {
               projectData={projectData}
               sectionLoaders={project.sectionData}
               initialInView={section ? spec.id === section : index === 0}
-              toolbarStores={groupStores}
+              externalStores={groupStores}
             />
           ))}
         </div>

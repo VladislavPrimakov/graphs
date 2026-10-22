@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Config } from '@react-router/dev/config';
-import { NON_DEFAULT_LANGUAGES } from './src/utils/provider';
+import { NON_DEFAULT_LANGUAGES } from './src/utils/language';
 import { parseChangelogVersions } from './src/utils/version';
 
 const rawBase = process.env.BASE_URL ?? '/graphs';

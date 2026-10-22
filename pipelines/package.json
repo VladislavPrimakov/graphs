@@ -19,7 +19,7 @@
     "run:war-rf-ua": "bun src/war-rf-ua/index.ts"
   },
   "dependencies": {
-    "@graphs/types": "workspace:*",
+    "@graphs/shared": "workspace:*",
     "cheerio": "^1.1.2",
     "consola": "^3.4.2",
     "fast-xml-parser": "^5.4.1",

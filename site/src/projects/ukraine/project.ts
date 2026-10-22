@@ -1,10 +1,11 @@
-import type { UkraineDataset } from '@graphs/types/ukraine/data';
+import type { UkraineDataset } from '@graphs/shared/types/ukraine/data';
+import { CONTROL_DELAYS } from '@/projects/constants';
 import { defineProject, loadDataset, type ProjectSection } from '@/utils/project';
 import type { dict } from './locales/dict-en';
 import { meta } from './meta';
 
 const data = {
-  ukraine: () => loadDataset<UkraineDataset>('ukraine', 'data.json'),
+  ukraineData: () => loadDataset<UkraineDataset>('ukraine', 'data.json'),
 };
 
 export type Section = ProjectSection<typeof data, typeof dict>;
@@ -14,9 +15,9 @@ export const project = defineProject<typeof dict, typeof data>({
   meta,
   data,
   sections: import.meta.glob('./sections/*.ts', { eager: true }),
-  toolbars: ({ ukraine }, { t }) => [
+  toolbars: ({ ukraineData }, { t }) => [
     {
-      id: 'ukraine',
+      id: 'ukraineStore',
       scope: 'all',
       controls: [
         {
@@ -28,10 +29,11 @@ export const project = defineProject<typeof dict, typeof data>({
         {
           id: 'years',
           type: 'range-slider',
-          min: ukraine.minYear,
-          max: ukraine.maxYear,
-          defaultValue: ukraine.defaultPeriod,
+          min: ukraineData.minYear,
+          max: ukraineData.maxYear,
+          defaultValue: ukraineData.defaultPeriod,
           label: t.common.period,
+          debounceMs: CONTROL_DELAYS.slider,
         },
       ],
     },

@@ -1,4 +1,4 @@
-import type { LossesDataset } from '@graphs/types/war-rf-ua/losses';
+import type { LossesDataset } from '@graphs/shared/types/war-rf-ua/losses';
 import { createChart } from '@/components/sections/SectionChart';
 import { chartOption, zipRecords } from '@/utils/chart-builder';
 import { defineSection, type KpiCardSpec, loadDataset, type ProjectContext } from '@/utils/project';
@@ -17,18 +17,18 @@ export const lossesTimelineSection = defineSection(({ t, fmt }: ProjectContext<t
     title: t.proj.timeline.title,
     sources: [{ name: 'LostArmour / WarInUA (@lost_warinua)', url: 'https://t.me/lost_warinua' }],
     data: {
-      losses: () => loadDataset<LossesDataset>('war-rf-ua', 'losses.json'),
+      lossesData: () => loadDataset<LossesDataset>('war-rf-ua', 'losses.json'),
     },
-    buildView: ({ losses: data }, { losses }) => {
-      const { periods, overallTimeline } = data;
-      const toolbar = losses;
+    buildView: ({ lossesData }, { lossesStore }) => {
+      const { periods, overallTimeline } = lossesData;
+      const toolbar = lossesStore;
 
-      const [pFrom, pTo] = toolbar?.period ?? [periods[0], periods[periods.length - 1]];
-      const fromMonth = (pFrom && pFrom.length > 7 ? pFrom.slice(0, 7) : pFrom) || periods[0];
-      const toMonth = (pTo && pTo.length > 7 ? pTo.slice(0, 7) : pTo) || periods[periods.length - 1];
+      const [pFrom, pTo] = toolbar.period;
+      const fromMonth = (pFrom.length > 7 ? pFrom.slice(0, 7) : pFrom) || periods[0];
+      const toMonth = (pTo.length > 7 ? pTo.slice(0, 7) : pTo) || periods[periods.length - 1];
 
-      const selectedSide = toolbar?.side ?? 'all';
-      const selectedCategories = toolbar?.categories ?? [];
+      const selectedSide = toolbar.side;
+      const selectedCategories = (toolbar.categories as string[]) ?? [];
       const hasCatFilter = selectedCategories.length > 0;
 
       const indices = periods

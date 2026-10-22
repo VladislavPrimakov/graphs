@@ -1,6 +1,8 @@
-import type { CountryProfileData, CountryToolbarMeta } from '@graphs/types/country';
+import type { CountryProfileData, CountryToolbarMeta } from '@graphs/shared/types/country';
+import { CONTROL_DELAYS } from '@/projects/constants';
 import { defineProject, loadDataset, type ProjectSection } from '@/utils/project';
 import type { State } from '@/utils/store';
+import { DEFAULT_COUNTRY_CODE } from './constants';
 import type { dict } from './locales/dict-en';
 import { meta } from './meta';
 
@@ -9,11 +11,10 @@ const data = {
 };
 
 const sectionData = {
-  country: (stores?: Record<string, State>) => {
-    const code = (stores?.country?.select as string) || 'us';
+  countryData: (stores?: Record<string, State>) => {
+    const code = (stores?.countryStore?.country as string) || DEFAULT_COUNTRY_CODE;
     return loadDataset<CountryProfileData>('country', `${code.toLowerCase()}.json`);
   },
-  meta: () => loadDataset<CountryToolbarMeta>('country', 'toolbar-meta.json'),
 };
 
 export type Section = ProjectSection<typeof sectionData, typeof dict>;
@@ -26,13 +27,13 @@ export const project = defineProject<typeof dict, typeof data, typeof sectionDat
   sections: import.meta.glob('./sections/*.ts', { eager: true }),
   toolbars: ({ meta: toolbarMeta }, { t, fmt }) => [
     {
-      id: 'country',
+      id: 'countryStore',
       scope: 'all',
       controls: [
         {
-          id: 'select',
+          id: 'country',
           type: 'single-search-select',
-          defaultValue: 'us',
+          defaultValue: DEFAULT_COUNTRY_CODE,
           label: t.proj.country,
           items: toolbarMeta.countries.map((code) => ({
             value: code,
@@ -47,6 +48,7 @@ export const project = defineProject<typeof dict, typeof data, typeof sectionDat
           max: toolbarMeta.maxYear,
           defaultValue: toolbarMeta.defaultPeriod,
           label: t.common.period,
+          debounceMs: CONTROL_DELAYS.slider,
         },
         {
           id: 'labels',

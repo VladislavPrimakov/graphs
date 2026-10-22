@@ -1,5 +1,5 @@
-import { WAR_LOSS_CATEGORIES } from '@graphs/types/war-rf-ua/losses';
-import type { WarRfUaToolbarMeta } from '@graphs/types/war-rf-ua/toolbar-meta';
+import { WAR_LOSS_CATEGORIES } from '@graphs/shared/types/war-rf-ua/losses';
+import type { WarRfUaToolbarMeta } from '@graphs/shared/types/war-rf-ua/toolbar-meta';
 import { createElement } from 'react';
 import { type ControlSearchItem, defineProject, loadDataset, type ProjectSection } from '@/utils/project';
 import { CategoryIcon } from './components/CategoryIcon';
@@ -51,7 +51,8 @@ export const project = defineProject<typeof dict, typeof data>({
   toolbars: ({ toolbarMeta }, { t, fmt }) => {
     return [
       {
-        id: 'frontline',
+        id: 'frontlineStore',
+        urlPrefix: 'frontline',
         scope: ['frontline-map', 'frontline-dynamics'],
         controls: [
           {
@@ -65,7 +66,8 @@ export const project = defineProject<typeof dict, typeof data>({
         ],
       },
       {
-        id: 'losses',
+        id: 'lossesStore',
+        urlPrefix: 'losses',
         scope: ['losses-map', 'losses-timeline', 'losses-breakdown'],
         controls: [
           {
@@ -235,7 +237,8 @@ export const project = defineProject<typeof dict, typeof data>({
         ],
       },
       {
-        id: 'strikes',
+        id: 'strikesStore',
+        urlPrefix: 'strikes',
         scope: ['strikes-uav', 'strikes-missile'],
         controls: [
           {

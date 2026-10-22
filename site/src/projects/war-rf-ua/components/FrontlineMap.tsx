@@ -2,7 +2,7 @@ import { type GeoJSONSource, Map as MapLibreMap, NavigationControl } from 'mapli
 import type React from 'react';
 import { useEffect, useRef, useState } from 'react';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import type { DayFrontlineEntry, FrontlineMapLayers, FrontlineMapSectionData } from '@graphs/types/war-rf-ua/frontline';
+import type { DayFrontlineEntry, FrontlineMapLayers, FrontlineMapSectionData } from '@graphs/shared/types/war-rf-ua/frontline';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { createFillLayer, createLineLayer, decodeMultiPolygon, getMapTileStyle, multiPolygonToGeoJson, registerFallbackDot, UKRAINE_MAP_PRESETS } from '@/utils/map-builder';
 import { useFormat, useTheme } from '@/utils/provider';
@@ -272,13 +272,13 @@ export const FrontlineMap: React.FC<FrontlineMapProps> = ({ data, targetDate: ra
         )}
 
         {/* Floating Dark Glassmorphic Map Legend */}
-        <div className="absolute bottom-4 left-4 z-10 glass-bar rounded-xl p-3.5 text-xs max-w-90 shadow-lg border border-border-subtle/80 flex flex-col gap-2.5 pointer-events-auto">
-          <div className="font-semibold text-content-primary text-[11px] uppercase tracking-wider text-accent-primary">
+        <div className="absolute bottom-4 left-4 z-10 glass-overlay p-3.5 text-xs max-w-90 shadow-lg flex flex-col gap-2.5 pointer-events-auto">
+          <div className="font-semibold text-content-primary text-2xs uppercase tracking-wider text-accent-primary">
             {t.frontline.legendTitle} ({fmt.date(selectedDate)})
           </div>
 
           {/* Territorial Zones */}
-          <div className="flex flex-col gap-1.5 text-[11px]">
+          <div className="flex flex-col gap-1.5 text-2xs">
             <div className="flex items-center justify-between gap-3">
               <span className="flex items-center gap-1.5 min-w-0">
                 <span className="inline-block w-3 h-3 rounded-xs shrink-0 opacity-80 border" style={{ backgroundColor: frontlineColors.consensusRf, borderColor: frontlineColors.consensusRf }} />
@@ -301,7 +301,7 @@ export const FrontlineMap: React.FC<FrontlineMapProps> = ({ data, targetDate: ra
 
             <div className="flex items-center justify-between gap-3">
               <span className="flex items-center gap-1.5 min-w-0">
-                <span className="inline-block w-3 h-3 rounded-xs shrink-0 bg-blue-500/20 border" style={{ borderColor: frontlineColors.consensusUa }} />
+                <span className="inline-block w-3 h-3 rounded-xs shrink-0 bg-accent-glow border" style={{ borderColor: frontlineColors.consensusUa }} />
                 <span className="truncate text-content-secondary">{t.frontline.consensusUa}</span>
               </span>
               <span className="font-medium text-content-primary shrink-0 tabular-nums">
@@ -311,7 +311,7 @@ export const FrontlineMap: React.FC<FrontlineMapProps> = ({ data, targetDate: ra
           </div>
 
           {/* Frontline Lines Section */}
-          <div className="pt-2 border-t border-border-subtle/60 flex flex-col gap-1.5 text-[11px]">
+          <div className="pt-2 border-t border-border-subtle/60 flex flex-col gap-1.5 text-2xs">
             <div className="flex items-center justify-between gap-3">
               <span className="flex items-center gap-2 min-w-0">
                 <span className="inline-block w-4 h-0.5 shrink-0 rounded-full" style={{ backgroundColor: frontlineColors.deepstateLine }} />

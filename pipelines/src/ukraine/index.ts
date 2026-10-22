@@ -8,12 +8,12 @@ import type {
   TradePartnerTuple,
   TradeStructureSectionData,
   UkraineDataset,
-} from '@graphs/types/ukraine';
+} from '@graphs/shared/types/ukraine';
 import XLSX, { type WorkSheet } from 'xlsx';
 import { exportDataset, getPipelineDataPath } from '@/utils/dataset';
-import { fileExists, readJson, writeJson } from '@/utils/fs';
+import { fileExists, readJson, writeJsonAsync } from '@/utils/fs';
 import { fetchBinaryWithMeta, fetchHeadMeta, fetchWithRetry, isRemoteMetaEqual, type RemoteFileMeta } from '@/utils/http';
-import { getLogger, isUpdate, isVerbose, runWithLogger } from '@/utils/logger';
+import { getPipelineLogger, isUpdate, isVerbose, runWithLogger } from '@/utils/logger';
 import { percentage, percentageNullable, round, scaleMagnitude } from '@/utils/math';
 import { resolveRegionCode } from '@/utils/region';
 
@@ -120,7 +120,7 @@ async function getMonthlyExchangeRates(
   cachedRates: Record<string, Record<string, number>> = {},
   forceUpdate = false,
 ): Promise<{ ratesByMonth: Record<string, number>; updatedCache: Record<string, Record<string, number>> }> {
-  const logger = getLogger();
+  const logger = getPipelineLogger('ukraine');
   const currentYear = new Date().getFullYear();
   const ratesByMonth: Record<string, number> = {};
   const updatedCache: Record<string, Record<string, number>> = { ...cachedRates };
@@ -787,8 +787,8 @@ export async function runUkrainePipeline(forceUpdate = false, verbose?: boolean)
   return runWithLogger(
     'ukraine',
     async () => {
-      const logger = getLogger();
-      logger.start('Starting Ukraine ETL pipeline');
+      const logger = getPipelineLogger('ukraine');
+      logger.start('Ukraine');
 
       let existingCache: UkrainePipelineCache | null = null;
       if (await fileExists(DATA_FILE)) {
@@ -818,12 +818,12 @@ export async function runUkrainePipeline(forceUpdate = false, verbose?: boolean)
         const allUnchanged = allUrls.every((url, i) => isRemoteMetaEqual(existingCache.meta?.[url], remoteMetas[i]));
 
         if (allUnchanged) {
-          logger.info('Remote sources unchanged (NBU ETags match). Using cached dataset.');
+          logger.unchanged('NBU ETags match');
           await exportUkraine(existingCache.sections);
           return;
         }
 
-        logger.info('New upstream data detected. Downloading updated workbooks...');
+        logger.detected('Downloading updated workbooks');
       }
 
       let budgetWb: XLSX.WorkBook;
@@ -1079,9 +1079,9 @@ export async function runUkrainePipeline(forceUpdate = false, verbose?: boolean)
         'trade-categories': tradeCategoriesSectionData,
       };
 
-      await writeJson(DATA_FILE, { meta: newMeta, rates: ratesCache, sections }, 0);
+      await writeJsonAsync(DATA_FILE, { meta: newMeta, rates: ratesCache, sections });
       await exportUkraine(sections);
-      logger.success(`Exported ukraine datasets (${budgetYears[0]}–${budgetYears[budgetYears.length - 1]} budget, debt & trade)`);
+      logger.complete(`${budgetYears[0]}–${budgetYears[budgetYears.length - 1]} budget, debt & trade`);
     },
     verbose,
   );
@@ -1089,7 +1089,7 @@ export async function runUkrainePipeline(forceUpdate = false, verbose?: boolean)
 
 if (import.meta.main) {
   runUkrainePipeline(isUpdate(), isVerbose()).catch((err) => {
-    getLogger('ukraine').error('Fatal error running Ukraine pipeline:', err);
+    getPipelineLogger('ukraine').error('Fatal error running Ukraine pipeline:', err);
     process.exit(1);
   });
 }
