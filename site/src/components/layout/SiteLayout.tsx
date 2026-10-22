@@ -69,8 +69,8 @@ const ActionControls: React.FC<ActionControlsProps> = ({ className, showGitHubLa
         title={`Theme: ${theme.charAt(0).toUpperCase() + theme.slice(1)}`}
       >
         {theme === 'system' && <MonitorIcon className="w-4 h-4 text-accent-primary" />}
-        {theme === 'light' && <SunIcon className="w-4 h-4 text-amber-500" />}
-        {theme === 'dark' && <MoonIcon className="w-4 h-4 text-sky-400" />}
+        {theme === 'light' && <SunIcon className="w-4 h-4 text-status-warning" />}
+        {theme === 'dark' && <MoonIcon className="w-4 h-4 text-accent-primary" />}
       </button>
 
       <DropdownMenu>

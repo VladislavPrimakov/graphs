@@ -1,6 +1,7 @@
 import { cloneDeep, isEqual } from 'lodash-es';
 import queryString from 'query-string';
-import { useEffect, useReducer, useSyncExternalStore } from 'react';
+import type React from 'react';
+import { startTransition, useEffect, useReducer, useRef, useSyncExternalStore } from 'react';
 import type { Control } from '@/utils/project';
 
 /** Universal reactive filter state containing optional active filter indicator and dynamic control values. */
@@ -27,15 +28,17 @@ export interface ControlStore {
 export interface StoreOptions {
   /** Debounce delay in milliseconds before synchronizing state to URL query string. @default 200 */
   debounceMs?: number;
+  /** Prefix for URL query parameters. When undefined, controls are stored directly by their ID. */
+  urlPrefix?: string;
 }
 
 /** Creates a reactive filter store synchronized with URL query parameters derived from controls. */
-function createControlStore(scopeId: string, controls?: readonly Control[] | Control[], options?: StoreOptions): ControlStore {
+function createControlStore(controls?: readonly Control[] | Control[], options?: StoreOptions): ControlStore {
   const list = controls ?? [];
   const debounceMs = options?.debounceMs ?? 200;
 
   const defaultState: Record<string, unknown> = {};
-  const getParamKey = (ctrl: Control): string => `${scopeId}.${ctrl.id}`;
+  const getParamKey = (ctrl: Control): string => (options?.urlPrefix ? `${options.urlPrefix}.${ctrl.id}` : ctrl.id);
 
   for (const ctrl of list) {
     switch (ctrl.type) {
@@ -44,7 +47,9 @@ function createControlStore(scopeId: string, controls?: readonly Control[] | Con
         break;
       }
       case 'range-slider': {
-        defaultState[ctrl.id] = ctrl.defaultValue ? [...ctrl.defaultValue] : [ctrl.min, ctrl.max];
+        const min = typeof ctrl.min === 'function' ? ctrl.min({}) : ctrl.min;
+        const max = typeof ctrl.max === 'function' ? ctrl.max({}) : ctrl.max;
+        defaultState[ctrl.id] = ctrl.defaultValue ? [...ctrl.defaultValue] : [min, Math.max(min, max)];
         break;
       }
       case 'toggle': {
@@ -100,7 +105,11 @@ function createControlStore(scopeId: string, controls?: readonly Control[] | Con
         case 'slider': {
           const num = Number(rawVal);
           if (Number.isFinite(num)) {
-            partial[ctrl.id] = Math.max(ctrl.min, Math.min(ctrl.max, num));
+            const contextState = { ...defaultState, ...partial };
+            const min = typeof ctrl.min === 'function' ? ctrl.min(contextState) : ctrl.min;
+            const max = typeof ctrl.max === 'function' ? ctrl.max(contextState) : ctrl.max;
+            const effectiveMax = Math.max(min, max);
+            partial[ctrl.id] = Math.max(min, Math.min(effectiveMax, num));
           }
           break;
         }
@@ -108,15 +117,19 @@ function createControlStore(scopeId: string, controls?: readonly Control[] | Con
           const items = Array.isArray(rawVal) ? rawVal : typeof rawVal === 'string' ? rawVal.split(',') : [rawVal];
           const nums = items.map(Number).filter(Number.isFinite);
           if (nums.length === 2) {
-            const low = Math.max(ctrl.min, Math.min(ctrl.max, Math.min(nums[0], nums[1])));
-            const high = Math.max(ctrl.min, Math.min(ctrl.max, Math.max(nums[0], nums[1])));
+            const contextState = { ...defaultState, ...partial };
+            const min = typeof ctrl.min === 'function' ? ctrl.min(contextState) : ctrl.min;
+            const max = typeof ctrl.max === 'function' ? ctrl.max(contextState) : ctrl.max;
+            const effectiveMax = Math.max(min, max);
+            const low = Math.max(min, Math.min(effectiveMax, Math.min(nums[0], nums[1])));
+            const high = Math.max(min, Math.min(effectiveMax, Math.max(nums[0], nums[1])));
             partial[ctrl.id] = [low, high];
           }
           break;
         }
         case 'toggle': {
           const strVal = String(rawVal);
-          const options = typeof ctrl.options === 'function' ? ctrl.options({}) : ctrl.options;
+          const options = typeof ctrl.options === 'function' ? ctrl.options({ ...defaultState, ...partial }) : ctrl.options;
           if (options.some((opt) => opt.value === strVal)) {
             partial[ctrl.id] = strVal;
           }
@@ -133,7 +146,7 @@ function createControlStore(scopeId: string, controls?: readonly Control[] | Con
           break;
         }
         case 'single-search-select': {
-          const items = typeof ctrl.items === 'function' ? ctrl.items({}) : ctrl.items;
+          const items = typeof ctrl.items === 'function' ? ctrl.items({ ...defaultState, ...partial }) : ctrl.items;
           const validSet = new Set(items.map((it) => String(it.value)));
           const strVal = String(rawVal);
           if (validSet.size === 0 || validSet.has(strVal)) {
@@ -143,7 +156,7 @@ function createControlStore(scopeId: string, controls?: readonly Control[] | Con
         }
         case 'multi-search-select': {
           const arr = Array.isArray(rawVal) ? rawVal : typeof rawVal === 'string' ? rawVal.split(',') : [rawVal];
-          const items = typeof ctrl.items === 'function' ? ctrl.items({}) : ctrl.items;
+          const items = typeof ctrl.items === 'function' ? ctrl.items({ ...defaultState, ...partial }) : ctrl.items;
           const validSet = new Set(items.map((it) => String(it.value)));
           partial[ctrl.id] = arr.map(String).filter((x) => validSet.size === 0 || validSet.has(x));
           break;
@@ -297,18 +310,52 @@ export function getOrCreateStoreFromControls(scopeId: string, controls?: readonl
   if (existing) {
     return existing;
   }
-  const store = createControlStore(scopeId, controls, options);
+  const store = createControlStore(controls, options);
   storeRegistry.set(scopeId, store);
   return store;
+}
+
+/**
+ * Extracts a static dictionary of current state snapshots indexed by store ID from a record of reactive control stores.
+ * Omit parameters or pass undefined to receive an empty dictionary.
+ */
+export function getStoreSnapshots(stores?: Record<string, ControlStore>): Record<string, State> {
+  if (!stores) return {};
+  const snapshots: Record<string, State> = {};
+  for (const key in stores) {
+    snapshots[key] = stores[key].getState();
+  }
+  return snapshots;
 }
 
 /**
  * React hook subscribing to a record of reactive control stores.
  * Returns a dictionary of current state snapshots indexed by store ID,
  * or undefined if no stores are provided.
+ *
+ * When an optional inViewRef and subscribeInView are provided, skips re-rendering
+ * while off-screen and flushes pending updates when entering the viewport (isDirty pattern).
  */
-export function useCombinedStores<TStores extends Record<string, ControlStore>>(stores?: TStores): { [K in keyof TStores]: State } | undefined {
+export function useCombinedStores<TStores extends Record<string, ControlStore>>(
+  stores?: TStores,
+  inViewRef?: React.RefObject<boolean | null>,
+  subscribeInView?: (listener: (inView: boolean) => void) => () => void,
+): { [K in keyof TStores]: State } | undefined {
   const [, forceUpdate] = useReducer((x) => x + 1, 0);
+  const isDirtyRef = useRef(false);
+
+  // Subscribe to inView changes to flush pending updates when scrolling into view
+  useEffect(() => {
+    if (!subscribeInView) return;
+    return subscribeInView((inView) => {
+      if (inView && isDirtyRef.current) {
+        isDirtyRef.current = false;
+        startTransition(() => {
+          forceUpdate();
+        });
+      }
+    });
+  }, [subscribeInView]);
 
   const storeKeys = stores ? Object.keys(stores).join('::') : '';
 
@@ -318,7 +365,17 @@ export function useCombinedStores<TStores extends Record<string, ControlStore>>(
     const storeList = Object.values(stores);
     if (storeList.length === 0) return;
 
-    const unsubs = storeList.map((store) => store.subscribe(forceUpdate));
+    const handleStoreChange = () => {
+      if (inViewRef && !inViewRef.current) {
+        isDirtyRef.current = true;
+        return;
+      }
+      startTransition(() => {
+        forceUpdate();
+      });
+    };
+
+    const unsubs = storeList.map((store) => store.subscribe(handleStoreChange));
     return () => {
       for (let i = 0; i < unsubs.length; i++) unsubs[i]();
     };

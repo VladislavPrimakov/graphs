@@ -1,10 +1,10 @@
-import type { AiTokensDataset } from '@graphs/types/ai-tokens/data';
+import type { AiTokensDataset } from '@graphs/shared/types/ai-tokens/data';
 import { defineProject, loadDataset, type ProjectSection } from '@/utils/project';
 import type { dict } from './locales/dict-en';
 import { meta } from './meta';
 
 const data = {
-  aiTokens: () => loadDataset<AiTokensDataset>('ai-tokens', 'data.json'),
+  aiTokensData: () => loadDataset<AiTokensDataset>('ai-tokens', 'data.json'),
 };
 
 export type Section = ProjectSection<typeof data, typeof dict>;

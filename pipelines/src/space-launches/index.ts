@@ -6,11 +6,11 @@ import type {
   SpaceEntityMeta,
   SpaceLaunchesDataset,
   SpaceLaunchesToolbarMeta,
-} from '@graphs/types/space-launches';
+} from '@graphs/shared/types/space-launches';
 import { exportDataset, getPipelineDataPath } from '@/utils/dataset';
-import { fileExists, readJson, writeJson } from '@/utils/fs';
+import { fileExists, readJson, writeJsonAsync } from '@/utils/fs';
 import { fetchWithRetry } from '@/utils/http';
-import { getLogger, isUpdate, isVerbose, runWithLogger } from '@/utils/logger';
+import { getPipelineLogger, isUpdate, isVerbose, runWithLogger } from '@/utils/logger';
 import { percentage, percentageNullable, range, ratio, round, sum } from '@/utils/math';
 import { resolveRegionCode } from '@/utils/region';
 
@@ -222,8 +222,8 @@ export async function runSpaceLaunchesPipeline(forceUpdate = false, verbose?: bo
   return runWithLogger(
     'space-launches',
     async () => {
-      const logger = getLogger();
-      logger.start('Starting Space Launches ETL pipeline');
+      const logger = getPipelineLogger('space-launches');
+      logger.start('Space Launches');
 
       let cache: SpaceLaunchesPipelineCache | null = null;
       if (await fileExists(DATA_FILE)) {
@@ -269,11 +269,11 @@ export async function runSpaceLaunchesPipeline(forceUpdate = false, verbose?: bo
             latestRemoteLaunch = data.results?.[0] ?? null;
 
             if (latestRemoteLaunch?.id === cache.meta.lastLaunchId && preflightCount === cache.meta.remoteCount) {
-              logger.info(`Remote sources unchanged (${cache.launches.length.toLocaleString()} launches up to ${latestRemoteLaunch?.net?.slice(0, 10)}). Using cached dataset.`);
+              logger.unchanged(`${cache.launches.length.toLocaleString()} launches up to ${latestRemoteLaunch?.net?.slice(0, 10)}`);
               await exportSpaceLaunches(cache.sections, cache.launches);
               return;
             }
-            logger.info('New upstream data detected. Fetching recent launches...');
+            logger.detected('Fetching recent launches');
           } else {
             logger.warn(`Space Devs API preflight returned HTTP ${res.status}. Using cached dataset.`);
             await exportSpaceLaunches(cache.sections, cache.launches);
@@ -868,17 +868,13 @@ export async function runSpaceLaunchesPipeline(forceUpdate = false, verbose?: bo
         remoteCount: preflightCount ?? cache?.meta?.remoteCount ?? allSorted.length,
       };
 
-      await writeJson(
-        DATA_FILE,
-        {
-          meta: newMeta,
-          launches: allSorted,
-          sections,
-        },
-        0,
-      );
+      await writeJsonAsync(DATA_FILE, {
+        meta: newMeta,
+        launches: allSorted,
+        sections,
+      });
       await exportSpaceLaunches(sections, allSorted);
-      logger.success(`Exported space-launches datasets (${allLaunches.length.toLocaleString()} launches, ${allYears[0]}–${allYears[allYears.length - 1]})`);
+      logger.complete(`${allLaunches.length.toLocaleString()} launches (${allYears[0]}–${allYears[allYears.length - 1]})`);
     },
     verbose,
   );
@@ -886,7 +882,7 @@ export async function runSpaceLaunchesPipeline(forceUpdate = false, verbose?: bo
 
 if (import.meta.main) {
   runSpaceLaunchesPipeline(isUpdate(), isVerbose()).catch((err) => {
-    getLogger('space-launches').error('Fatal error running Space Launches pipeline:', err);
+    getPipelineLogger('space-launches').error('Fatal error running Space Launches pipeline:', err);
     process.exit(1);
   });
 }

@@ -1,11 +1,12 @@
 import { createChart } from '@/components/sections/SectionChart';
-import { chartOption, createBarSeries, zipRecords } from '@/utils/chart-builder';
+import { chartOption, createBarSeries } from '@/utils/chart-builder';
+import { BILLIONS_SCALE } from '../constants';
 import type { Section } from '../project';
 import { budgetColors } from '../tokens';
 
 /** Section builder for Country State Budget & Sovereign Debt (Macro) chart. */
 export const macroSection: Section = ({ t, fmt, tokens }) => {
-  const formatGdpLabel = (val: number, pct?: number | null) => (pct != null ? `${fmt.number(val)}\n(${fmt.percent(pct)} ${t.proj.macro.gdp})` : fmt.number(val));
+  const formatGdpLabel = (val: number, pct?: number | null) => (pct != null ? `${fmt.number(val)}\n(${fmt.percent(pct)})` : fmt.number(val));
 
   return {
     id: 'macro',
@@ -16,31 +17,55 @@ export const macroSection: Section = ({ t, fmt, tokens }) => {
         url: 'https://www.imf.org/en/Publications/WEO',
       },
     ],
-    buildView: ({ country }, stores) => {
-      const countryStore = stores.country;
-      const data = country.macro;
-      const years = country.years;
-      const [selStartYear, selEndYear] = countryStore?.period ?? [years[Math.max(0, years.length - 6)], years[years.length - 1]];
-      const showLabels = countryStore?.labels ?? true;
+    buildView: ({ countryData }, { countryStore }) => {
+      const countryName = fmt.region(countryData.code);
+      const title = `${countryName} — ${t.proj.macro.title}`;
+      const years = countryData.years;
+      const [selStartYear, selEndYear] = countryStore.period;
+      const showLabels = countryStore.labels;
 
       const foundStartIdx = years.findIndex((y: number) => y >= selStartYear);
-      const startIdx = foundStartIdx === -1 ? 0 : foundStartIdx;
+      const startIdx = foundStartIdx === -1 ? years.length : foundStartIdx;
       const foundEndIdx = years.findLastIndex((y: number) => y <= selEndYear);
-      const endIdx = foundEndIdx === -1 ? years.length : foundEndIdx + 1;
+      const endIdx = foundEndIdx === -1 ? 0 : foundEndIdx + 1;
 
-      const visibleYears = years.slice(startIdx, endIdx);
-      const visibleBalances = data.govBalanceUsd.slice(startIdx, endIdx);
-      const visibleBalancesPct = data.govBalancePctGdp.slice(startIdx, endIdx);
+      const visibleTimeline = startIdx < endIdx ? countryData.timeline.slice(startIdx, endIdx) : [];
+      const count = visibleTimeline.length;
 
-      const budgetXAxisData = visibleYears.map((year: number, i: number) => {
-        const bal = visibleBalances[i];
-        if (bal == null) return `{year|${year}}`;
-        const balSign = `${bal > 0 ? '+' : ''}${fmt.number(bal)}`;
-        const balTag = bal < 0 ? 'balNeg' : 'balPos';
-        return `{year|${year}}\n{${balTag}|${balSign}}`;
-      });
+      const visibleYears = new Array<number>(count);
+      const visibleBalances = new Array<number | null>(count);
+      const visibleBalancesPct = new Array<number | null>(count);
+      const expendituresData = new Array<{ value: number | null; gdpPct: number | null }>(count);
+      const revenuesData = new Array<{ value: number | null; gdpPct: number | null }>(count);
+      const debtData = new Array<{ value: number | null; gdpPct: number | null }>(count);
+      const gdpData = new Array<number | null>(count);
+      const budgetXAxisData = new Array<string>(count);
+
+      for (let i = 0; i < count; i++) {
+        const y = visibleTimeline[i];
+        const m = y.macro;
+        const yr = y.year;
+        const bal = m.govBalanceUsd;
+
+        visibleYears[i] = yr;
+        visibleBalances[i] = bal;
+        visibleBalancesPct[i] = m.govBalancePctGdp;
+        expendituresData[i] = { value: m.govExpenditureUsd, gdpPct: m.govExpenditurePctGdp };
+        revenuesData[i] = { value: m.govRevenueUsd, gdpPct: m.govRevenuePctGdp };
+        debtData[i] = { value: m.govDebtUsd, gdpPct: m.govDebtPctGdp };
+        gdpData[i] = m.gdpNominalUsd;
+
+        if (bal == null) {
+          budgetXAxisData[i] = `{year|${yr}}`;
+        } else {
+          const balSign = `${bal > 0 ? '+' : ''}${fmt.number(bal)}`;
+          const balTag = bal < 0 ? 'balNeg' : 'balPos';
+          budgetXAxisData[i] = `{year|${yr}}\n{${balTag}|${balSign}}`;
+        }
+      }
 
       return {
+        title,
         content: createChart(
           chartOption({
             tooltip: {
@@ -72,7 +97,7 @@ export const macroSection: Section = ({ t, fmt, tokens }) => {
               type: 'category',
               data: budgetXAxisData,
               axisLabel: {
-                interval: 0,
+                interval: visibleYears.length > 15 ? 'auto' : 0,
                 rich: {
                   year: { color: tokens.text.secondary },
                   balNeg: { color: tokens.status.danger },
@@ -83,48 +108,39 @@ export const macroSection: Section = ({ t, fmt, tokens }) => {
             yAxis: {
               type: 'value',
               min: 0,
-              name: `${fmt.scale(1e9)} ($)`,
+              name: `${fmt.scale(BILLIONS_SCALE)} ($)`,
             },
             series: [
               createBarSeries({
                 id: 'expenditures',
                 name: t.proj.macro.expenditure,
-                data: zipRecords({
-                  value: data.govExpenditureUsd.slice(startIdx, endIdx),
-                  gdpPct: data.govExpenditurePctGdp.slice(startIdx, endIdx),
-                }),
+                data: expendituresData,
                 color: budgetColors.totalExp,
-                label: { show: showLabels, position: 'top' },
+                label: { show: showLabels },
                 formatLabel: ({ value, item }) => formatGdpLabel(value, item.gdpPct),
               }),
               createBarSeries({
                 id: 'revenues',
                 name: t.proj.macro.revenue,
-                data: zipRecords({
-                  value: data.govRevenueUsd.slice(startIdx, endIdx),
-                  gdpPct: data.govRevenuePctGdp.slice(startIdx, endIdx),
-                }),
+                data: revenuesData,
                 color: budgetColors.domesticRev,
-                label: { show: showLabels, position: 'top' },
+                label: { show: showLabels },
                 formatLabel: ({ value, item }) => formatGdpLabel(value, item.gdpPct),
               }),
               createBarSeries({
                 id: 'debt',
                 name: t.proj.macro.debt,
-                data: zipRecords({
-                  value: data.govDebtUsd.slice(startIdx, endIdx),
-                  gdpPct: data.govDebtPctGdp.slice(startIdx, endIdx),
-                }),
+                data: debtData,
                 color: budgetColors.govDebt,
-                label: { show: showLabels, position: 'top' },
+                label: { show: showLabels },
                 formatLabel: ({ value, item }) => formatGdpLabel(value, item.gdpPct),
               }),
               createBarSeries({
                 id: 'gdp',
                 name: t.proj.macro.nominalGdp,
-                data: data.gdpNominalUsd.slice(startIdx, endIdx),
+                data: gdpData,
                 color: budgetColors.gdp,
-                label: { show: showLabels, position: 'top' },
+                label: { show: showLabels },
                 formatLabel: ({ value }) => fmt.number(value),
               }),
             ],

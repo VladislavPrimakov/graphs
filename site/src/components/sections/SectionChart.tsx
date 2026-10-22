@@ -37,7 +37,7 @@ import type React from 'react';
 import { createElement, useEffect, useEffectEvent, useRef, useState } from 'react';
 import { useSectionContext } from '@/components/sections/Section';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
-import { bindChartEvents, enhanceOption, exportChartAsPng, renderChart, resizeChart } from '@/utils/chart-builder';
+import { bindChartEvents, cancelQueuedChartRender, enhanceOption, exportChartAsPng, queueChartRender, resizeChart } from '@/utils/chart-builder';
 import { cn } from '@/utils/cn';
 import { useTheme, useTranslation } from '@/utils/provider';
 
@@ -49,7 +49,7 @@ export interface SectionChartProps {
   exportName?: string;
   /** Optional DOM element identifier for testing or scroll targeting. Derived from SectionContext if omitted. */
   id?: string;
-  /** Optional container CSS class name. @default 'w-full h-[60dvh]' */
+  /** Optional container CSS class name. @default 'w-full h-chart' */
   className?: string;
   /** Optional section title override to draw atop exported PNG snapshots. Derived from SectionContext if omitted. */
   title?: string;
@@ -64,7 +64,7 @@ export function createChart(option: EChartsOption, className?: string): React.Re
  * Interactive ECharts canvas visualizer component handling theme switching,
  * reactive option updates, and responsive container resizing with smooth cross-fade on initial render.
  */
-export const SectionChart: React.FC<SectionChartProps> = ({ option: rawOption, exportName, id, className = 'w-full h-[60dvh]', title }) => {
+export const SectionChart: React.FC<SectionChartProps> = ({ option: rawOption, exportName, id, className = 'w-full h-chart', title }) => {
   const sectionCtx = useSectionContext();
   const effectiveExportName = exportName ?? (sectionCtx ? `${sectionCtx.projectSlug}--${sectionCtx.sectionId}` : 'chart');
   const effectiveId = id ?? (sectionCtx ? `chart-${sectionCtx.sectionId}` : undefined);
@@ -108,6 +108,7 @@ export const SectionChart: React.FC<SectionChartProps> = ({ option: rawOption, e
     return () => {
       if (resizeRaf !== null) cancelAnimationFrame(resizeRaf);
       resizeObserver.disconnect();
+      cancelQueuedChartRender(chart);
       chart.dispose();
       chartInstance.current = null;
       setIsReady(false);
@@ -118,9 +119,12 @@ export const SectionChart: React.FC<SectionChartProps> = ({ option: rawOption, e
   useEffect(() => {
     if (!chartInstance.current) return;
     const enhanced = enhanceOption(rawOption, t.common, effectiveExportName, tokens, handleExport);
-    renderChart(chartInstance.current, enhanced, () => {
+    queueChartRender(chartInstance.current, enhanced, () => {
       setIsReady(true);
     });
+    return () => {
+      cancelQueuedChartRender(chartInstance.current);
+    };
   }, [rawOption, effectiveExportName, tokens, t.common]);
 
   return (

@@ -1,4 +1,4 @@
-import type { StrikesUavSectionData } from '@graphs/types/war-rf-ua/strikes';
+import type { StrikesUavSectionData } from '@graphs/shared/types/war-rf-ua/strikes';
 import { createChart } from '@/components/sections/SectionChart';
 import { chartOption, createBarSeries } from '@/utils/chart-builder';
 import { defineSection, loadDataset, type ProjectContext } from '@/utils/project';
@@ -19,13 +19,13 @@ export const strikesUavSection = defineSection(({ t, fmt }: ProjectContext<typeo
       { name: 'Ministry of Defence of the Russian Federation (@mod_russia)', url: 'https://t.me/mod_russia' },
     ],
     data: {
-      strikes: () => loadDataset<StrikesUavSectionData>('war-rf-ua', 'strikes.json'),
+      strikesData: () => loadDataset<StrikesUavSectionData>('war-rf-ua', 'strikes.json'),
     },
-    buildView: ({ strikes: data }, { strikes }) => {
-      const rf = data.rfAttacks.summary;
-      const ua = data.uaAttacks.summary;
-      const timeline = data.unifiedTimeline;
-      const isDaily = strikes?.period === 'daily';
+    buildView: ({ strikesData }, { strikesStore }) => {
+      const rf = strikesData.rfAttacks.summary;
+      const ua = strikesData.uaAttacks.summary;
+      const timeline = strikesData.unifiedTimeline;
+      const isDaily = strikesStore.period === 'daily';
 
       return {
         title: isDaily ? t.proj.uavStrikes.titleDaily : t.proj.uavStrikes.titleMonthly,

@@ -6,11 +6,11 @@ import type {
   GdpPppSectionData,
   MachineryTurnoverSectionData,
   WorldDataset,
-} from '@graphs/types/world';
+} from '@graphs/shared/types/world';
 import { exportDataset, getPipelineDataPath } from '@/utils/dataset';
-import { fileExists, readJson, writeJson } from '@/utils/fs';
+import { fileExists, readJson, writeJsonAsync } from '@/utils/fs';
 import { fetchHeadMeta, fetchWithRetry, isRemoteMetaEqual, type RemoteFileMeta } from '@/utils/http';
-import { getLogger, isUpdate, isVerbose, runWithLogger } from '@/utils/logger';
+import { getPipelineLogger, isUpdate, isVerbose, runWithLogger } from '@/utils/logger';
 import { range, round } from '@/utils/math';
 import { loadEnv } from '@/utils/paths';
 import { resolveRegionCode } from '@/utils/region';
@@ -151,7 +151,7 @@ async function loadWorldCache(): Promise<WorldPipelineCache | null> {
 
 /** Fetches global macroeconomic series from World Bank API & IMF WEO. */
 async function fetchMacroDataWorldBank(existingMacro?: MacroData, forceUpdate = false): Promise<MacroData> {
-  const logger = getLogger();
+  const logger = getPipelineLogger('world');
   const hasMacroRange = Boolean(existingMacro?.gdp_ppp_kd?.USA?.[START_YEAR] && (existingMacro?.gdp_ppp_kd?.USA?.[CURRENT_YEAR] || existingMacro?.gdp_ppp_kd?.USA?.[CURRENT_YEAR - 1]));
   if (!forceUpdate && hasMacroRange && existingMacro?.gdp_ppp_kd && Object.keys(existingMacro.gdp_ppp_kd).length > 0) {
     logger.debug('Using cached World Bank & IMF macroeconomic data');
@@ -343,7 +343,7 @@ async function fetchComtradeReporters(existingReporters?: Record<number, string>
     return existingReporters;
   }
 
-  const logger = getLogger();
+  const logger = getPipelineLogger('world');
   const map: Record<number, string> = {
     97: 'EUU', // European Union
     156: 'CHN',
@@ -377,7 +377,7 @@ async function fetchComtradeReporters(existingReporters?: Record<number, string>
 
 /** Fetches physical industrial scale, electricity, and machinery trade turnover. */
 async function fetchPhysicalAndMachineryData(existingPhysical?: PhysicalData, comtradeReporters?: Record<number, string>, owidChanged = true, forceUpdate = false): Promise<PhysicalData> {
-  const logger = getLogger();
+  const logger = getPipelineLogger('world');
   const data: PhysicalData = {
     chapter84_nominal: existingPhysical?.chapter84_nominal || {},
     electricity_twh: existingPhysical?.electricity_twh || {},
@@ -466,8 +466,8 @@ export async function runWorldPipeline(forceUpdate = false, verbose?: boolean): 
   return runWithLogger(
     'world',
     async () => {
-      const logger = getLogger();
-      logger.start('Starting World ETL pipeline');
+      const logger = getPipelineLogger('world');
+      logger.start('World');
 
       const cache = await loadWorldCache();
       const hasValidDataset =
@@ -497,12 +497,12 @@ export async function runWorldPipeline(forceUpdate = false, verbose?: boolean): 
         owidChanged = !isRemoteMetaEqual(cache.meta.owid, remoteOwidMeta);
 
         if (!wdiChanged && !owidChanged) {
-          logger.info('Remote sources unchanged (WDI & OWID match). Using cached dataset.');
+          logger.unchanged('WDI & OWID match');
           await exportWorld(cache.sections);
           return;
         }
 
-        logger.info('New upstream data detected. Refreshing dataset...');
+        logger.detected('Refreshing dataset');
       }
 
       const reporters = await fetchComtradeReporters(cache?.reporters);
@@ -625,22 +625,18 @@ export async function runWorldPipeline(forceUpdate = false, verbose?: boolean): 
         'electricity-per-capita': { years, series: formatMetric(physicalData.elec_per_capita_kwh || {}, 1.0, 0).series },
       };
 
-      await writeJson(
-        DATA_FILE,
-        {
-          meta: {
-            wdiLastUpdated: remoteWdiDate || cache?.meta?.wdiLastUpdated || '2026-07-13',
-            owid: remoteOwidMeta || cache?.meta?.owid || null,
-          },
-          macro: macroRaw,
-          physical: physicalData,
-          reporters,
-          sections,
+      await writeJsonAsync(DATA_FILE, {
+        meta: {
+          wdiLastUpdated: remoteWdiDate || cache?.meta?.wdiLastUpdated || '2026-07-13',
+          owid: remoteOwidMeta || cache?.meta?.owid || null,
         },
-        0,
-      );
+        macro: macroRaw,
+        physical: physicalData,
+        reporters,
+        sections,
+      });
       await exportWorld(sections);
-      logger.success(`Exported world datasets (${years[0]}–${years[years.length - 1]} global metrics across all sovereign economies)`);
+      logger.complete(`${years[0]}–${years[years.length - 1]} global metrics across all sovereign economies`);
     },
     verbose,
   );
@@ -648,7 +644,7 @@ export async function runWorldPipeline(forceUpdate = false, verbose?: boolean): 
 
 if (import.meta.main) {
   runWorldPipeline(isUpdate(), isVerbose()).catch((err) => {
-    getLogger('world').error('Fatal error running World pipeline:', err);
+    getPipelineLogger('world').error('Fatal error running World pipeline:', err);
     process.exit(1);
   });
 }

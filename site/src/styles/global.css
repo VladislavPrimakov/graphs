@@ -10,6 +10,13 @@
   --font-sans: "Inter", system-ui, -apple-system, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 
+  /* Standardized micro-typography scales */
+  --text-2xs: 0.6875rem; /* 11px */
+  --text-3xs: 0.625rem; /* 10px */
+
+  /* Standardized viewport scales */
+  --height-chart: 60dvh;
+
   /* Semantic surface tokens */
   --color-surface-base: var(--color-surface-base);
   --color-surface-card: var(--color-surface-card);
@@ -114,6 +121,10 @@
     background-color: var(--color-accent-primary);
     color: #ffffff;
   }
+
+  .dark ::selection {
+    color: var(--color-surface-base);
+  }
 }
 
 /* Custom scrollbars */
@@ -139,6 +150,11 @@
 /* Glassmorphic sticky header & navigation bars */
 @utility glass-bar {
   @apply backdrop-blur-md bg-surface-base/80 border-b border-border-subtle/80;
+}
+
+/* Horizontal edge feathering mask for scrollable navigations */
+@utility mask-fade-x {
+  mask-image: linear-gradient(to right, transparent, black 16px, black calc(100% - 16px), transparent);
 }
 
 /* Glassmorphic floating popups, tooltips, and dropdowns */
@@ -178,7 +194,7 @@
 
 /* Section anchor deep-link button */
 @utility anchor-btn {
-  @apply inline-flex items-center gap-1.5 px-2.5 h-7 rounded-lg bg-surface-base/70 hover:bg-surface-elevated border border-border-subtle/70 hover:border-border-muted text-[11px] font-mono font-medium text-content-muted hover:text-accent-primary transition-all cursor-pointer backdrop-blur-sm shadow-xs shrink-0;
+  @apply inline-flex items-center gap-1.5 px-2.5 h-7 rounded-lg bg-surface-base/70 hover:bg-surface-elevated border border-border-subtle/70 hover:border-border-muted text-2xs font-mono font-medium text-content-muted hover:text-accent-primary transition-all cursor-pointer backdrop-blur-sm shadow-xs shrink-0;
 }
 
 /* Navigation & Outline pills */

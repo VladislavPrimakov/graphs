@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto';
-import { AI_COMPANY_IDS, type AiCompanyId, type CompanySeriesItem, type RegionSeriesItem } from '@graphs/types/ai-tokens';
+import { AI_COMPANY_IDS, type AiCompanyId, type CompanySeriesItem, type RegionSeriesItem } from '@graphs/shared/types/ai-tokens';
 import { exportDataset, getPipelineDataPath } from '@/utils/dataset';
-import { fileExists, readJson, writeJson } from '@/utils/fs';
+import { fileExists, readJson, writeJsonAsync } from '@/utils/fs';
 import { fetchHeadMeta, fetchWithRetry, isRemoteMetaEqual, type RemoteFileMeta } from '@/utils/http';
-import { getLogger, isUpdate, isVerbose, runWithLogger } from '@/utils/logger';
+import { getPipelineLogger, isUpdate, isVerbose, runWithLogger } from '@/utils/logger';
 import { percentage, round } from '@/utils/math';
 
 const DATA_FILE = getPipelineDataPath('ai-tokens');
@@ -92,8 +92,8 @@ export async function runAiTokensPipeline(forceUpdate = false, verbose?: boolean
   return runWithLogger(
     'ai-tokens',
     async () => {
-      const logger = getLogger();
-      logger.start('Starting AI Tokens ETL pipeline');
+      const logger = getPipelineLogger('ai-tokens');
+      logger.start('AI Tokens');
 
       let cache: AiTokensPipelineCache | null = null;
       if (await fileExists(DATA_FILE)) {
@@ -116,7 +116,7 @@ export async function runAiTokensPipeline(forceUpdate = false, verbose?: boolean
         logger.debug('Checking tokensperday.com HTTP metadata via HEAD...');
         remoteMeta = await fetchHeadMeta(URL_HOME);
         if (remoteMeta && isRemoteMetaEqual(cache.meta.remoteMeta, remoteMeta) && remoteMeta.etag) {
-          logger.info('Remote sources unchanged (ETag match). Using cached dataset.');
+          logger.unchanged('ETag match');
           await exportDataset('ai-tokens', cache.dataset);
           return;
         }
@@ -144,12 +144,12 @@ export async function runAiTokensPipeline(forceUpdate = false, verbose?: boolean
         viewsSha256 = createHash('sha256').update(rawJson).digest('hex');
 
         if (!forceUpdate && hasValidDataset && cache?.meta?.viewsSha256 === viewsSha256) {
-          logger.info('Remote sources unchanged (SHA-256 match). Using cached dataset.');
+          logger.unchanged('SHA-256 match');
           await exportDataset('ai-tokens', cache.dataset);
           return;
         }
 
-        logger.info('New upstream data detected. Processing updated series...');
+        logger.detected('Processing updated series');
       } catch (err) {
         if (hasValidDataset && cache) {
           logger.warn(`Network query failed (${err instanceof Error ? err.message : String(err)}). Using cached dataset.`);
@@ -323,21 +323,17 @@ export async function runAiTokensPipeline(forceUpdate = false, verbose?: boolean
         },
       };
 
-      await writeJson(
-        DATA_FILE,
-        {
-          meta: {
-            lastUpdated: new Date().toISOString(),
-            viewsSha256: viewsSha256 || cache?.meta?.viewsSha256,
-            remoteMeta: remoteMeta || cache?.meta?.remoteMeta,
-          },
-          views,
-          dataset,
+      await writeJsonAsync(DATA_FILE, {
+        meta: {
+          lastUpdated: new Date().toISOString(),
+          viewsSha256: viewsSha256 || cache?.meta?.viewsSha256,
+          remoteMeta: remoteMeta || cache?.meta?.remoteMeta,
         },
-        0,
-      );
+        views,
+        dataset,
+      });
       await exportDataset('ai-tokens', dataset);
-      logger.success(`Exported ai-tokens datasets (${months.length} months, ${companySeries.length} companies, ${regionSeries.length} regions)`);
+      logger.complete(`${months.length} months, ${companySeries.length} companies, ${regionSeries.length} regions`);
     },
     verbose,
   );
@@ -345,7 +341,7 @@ export async function runAiTokensPipeline(forceUpdate = false, verbose?: boolean
 
 if (import.meta.main) {
   runAiTokensPipeline(isUpdate(), isVerbose()).catch((err) => {
-    getLogger('ai-tokens').error('Fatal error running AI Tokens pipeline:', err);
+    getPipelineLogger('ai-tokens').error('Fatal error running AI Tokens pipeline:', err);
     process.exit(1);
   });
 }

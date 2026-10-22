@@ -1,6 +1,7 @@
 import type { DefaultLabelFormatterCallbackParams as CallbackDataParams } from 'echarts';
 import { createChart } from '@/components/sections/SectionChart';
-import { chartOption, createBarSeries, zipRecords } from '@/utils/chart-builder';
+import { chartOption, createBarSeries } from '@/utils/chart-builder';
+import { BALANCE_LINE_WIDTH, BALANCE_SYMBOL_SIZE, BILLIONS_SCALE } from '../constants';
 import type { Section } from '../project';
 import { tradeColors } from '../tokens';
 
@@ -15,31 +16,55 @@ export const tradeStructureSection: Section = ({ t, fmt }) => {
         url: 'https://comtradeplus.un.org/',
       },
     ],
-    buildView: ({ country }, stores) => {
-      const countryStore = stores.country;
-      const data = country.trade;
-      const years = country.years;
-      const [selStartYear, selEndYear] = countryStore?.period ?? [years[Math.max(0, years.length - 6)], years[years.length - 1]];
+    buildView: ({ countryData }, { countryStore }) => {
+      const countryName = fmt.region(countryData.code);
+      const title = `${countryName} — ${t.proj.tradeStructure.title}`;
+      const years = countryData.years;
+      const [selStartYear, selEndYear] = countryStore.period;
+      const showLabels = countryStore.labels;
 
       const foundStartIdx = years.findIndex((y: number) => y >= selStartYear);
-      const startIdx = foundStartIdx === -1 ? 0 : foundStartIdx;
+      const startIdx = foundStartIdx === -1 ? years.length : foundStartIdx;
       const foundEndIdx = years.findLastIndex((y: number) => y <= selEndYear);
-      const endIdx = foundEndIdx === -1 ? years.length : foundEndIdx + 1;
+      const endIdx = foundEndIdx === -1 ? 0 : foundEndIdx + 1;
 
-      const visibleYears = years.slice(startIdx, endIdx);
-      const visibleBalances = data.netBalanceUsd.slice(startIdx, endIdx);
+      const visibleTimeline = startIdx < endIdx ? countryData.timeline.slice(startIdx, endIdx) : [];
+      const count = visibleTimeline.length;
+
+      const visibleYears = new Array<number>(count);
+      const visibleBalances = new Array<number | null>(count);
+      const exportsData = new Array<{ value: number | null; goods: number | null; services: number | null }>(count);
+      const importsData = new Array<{ value: number | null; goods: number | null; services: number | null }>(count);
+
+      for (let i = 0; i < count; i++) {
+        const y = visibleTimeline[i];
+        visibleYears[i] = y.year;
+        visibleBalances[i] = y.netBalanceUsd;
+        exportsData[i] = {
+          value: y.exports.total,
+          goods: y.exports.goods,
+          services: y.exports.services,
+        };
+        importsData[i] = {
+          value: y.imports.total,
+          goods: y.imports.goods,
+          services: y.imports.services,
+        };
+      }
 
       return {
+        title,
         content: createChart(
           chartOption({
             tooltip: {
               type: 'axis',
               header: ({ dataIndex }) => `${t.common.period}: ${visibleYears[dataIndex]}`,
-              row: ({ seriesName, value, data: rowData }) => {
+              row: ({ seriesName, value, seriesId, data: rowData }) => {
+                if (seriesId === 'balance') return undefined;
                 const item = rowData as { goods?: number | null; services?: number | null };
                 const details: string[] = [];
-                if (item?.goods != null) details.push(`${t.proj.tradeStructure.goods}: $${fmt.number(item.goods)}`);
-                if (item?.services != null) details.push(`${t.proj.tradeStructure.services}: $${fmt.number(item.services)}`);
+                if (item?.goods != null) details.push(`${t.proj.tradeStructure.goods}: ${fmt.number(item.goods)}`);
+                if (item?.services != null) details.push(`${t.proj.tradeStructure.services}: ${fmt.number(item.services)}`);
                 const subValue = details.length > 0 ? details.join(' · ') : undefined;
                 return {
                   label: seriesName,
@@ -64,20 +89,16 @@ export const tradeStructureSection: Section = ({ t, fmt }) => {
             },
             yAxis: {
               type: 'value',
-              name: `${fmt.scale(1e9)} ($)`,
+              name: `${fmt.scale(BILLIONS_SCALE)} ($)`,
             },
             series: [
               createBarSeries({
                 id: 'exports',
                 name: t.proj.tradeStructure.exports,
                 color: tradeColors.exportTotal,
-                data: zipRecords({
-                  value: data.totalExportsUsd.slice(startIdx, endIdx),
-                  goods: data.goodsExportsUsd.slice(startIdx, endIdx),
-                  services: data.servicesExportsUsd.slice(startIdx, endIdx),
-                }),
+                data: exportsData,
                 label: {
-                  position: 'top',
+                  show: showLabels,
                   color: tradeColors.exportTotal,
                 },
                 formatLabel: ({ value }) => fmt.number(value),
@@ -86,13 +107,9 @@ export const tradeStructureSection: Section = ({ t, fmt }) => {
                 id: 'imports',
                 name: t.proj.tradeStructure.imports,
                 color: tradeColors.importTotal,
-                data: zipRecords({
-                  value: data.totalImportsUsd.slice(startIdx, endIdx),
-                  goods: data.goodsImportsUsd.slice(startIdx, endIdx),
-                  services: data.servicesImportsUsd.slice(startIdx, endIdx),
-                }),
+                data: importsData,
                 label: {
-                  position: 'top',
+                  show: showLabels,
                   color: tradeColors.importTotal,
                 },
                 formatLabel: ({ value }) => fmt.number(value),
@@ -102,14 +119,11 @@ export const tradeStructureSection: Section = ({ t, fmt }) => {
                 name: t.common.balance,
                 type: 'line',
                 color: tradeColors.balanceLine,
-                symbolSize: 12,
-                lineStyle: { width: 3, type: 'dashed' },
+                symbolSize: BALANCE_SYMBOL_SIZE,
+                lineStyle: { width: BALANCE_LINE_WIDTH, type: 'dashed' },
                 data: visibleBalances,
                 label: {
-                  show: true,
-                  position: 'bottom',
-                  distance: 8,
-                  fontSize: 12,
+                  show: showLabels,
                   formatter: (params: CallbackDataParams) => {
                     const num = Number(params.value);
                     if (Number.isNaN(num)) return '';

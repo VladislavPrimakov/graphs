@@ -1,5 +1,5 @@
 import { fileExists, readJson } from '@/utils/fs';
-import { getLogger, isUpdate, isVerbose } from '@/utils/logger';
+import { getPipelineLogger, isUpdate, isVerbose } from '@/utils/logger';
 import { getMetadataPath } from '@/utils/paths';
 
 import { runAiTokensPipeline } from './ai-tokens/index';
@@ -45,7 +45,7 @@ const PIPELINES: PipelineTask[] = [
 export async function runAllPipelines(options: { update?: boolean; verbose?: boolean } = {}): Promise<void> {
   const verbose = options.verbose ?? isVerbose();
   const forceUpdate = options.update ?? isUpdate();
-  const logger = getLogger('pipelines', verbose);
+  const logger = getPipelineLogger('pipelines', verbose);
 
   logger.info(`Starting Parallel Data Pipelines Refresh [${forceUpdate ? 'Force Cache Refresh (-u)' : 'Cache-First / Incremental'}]`);
 
@@ -91,7 +91,7 @@ export async function runAllPipelines(options: { update?: boolean; verbose?: boo
 
 if (import.meta.main) {
   runAllPipelines().catch((err) => {
-    getLogger('pipelines').error('Fatal execution error:', err);
+    getPipelineLogger('pipelines').error('Fatal execution error:', err);
     process.exit(1);
   });
 }

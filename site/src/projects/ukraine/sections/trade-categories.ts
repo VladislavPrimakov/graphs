@@ -1,6 +1,6 @@
-import { TRADE_CATEGORY_IDS, type TradeCategoryId } from '@graphs/types/ukraine';
+import { TRADE_CATEGORY_IDS, type TradeCategoryId } from '@graphs/shared/types/ukraine';
 import { createChart } from '@/components/sections/SectionChart';
-import { chartOption, createBarSeries } from '@/utils/chart-builder';
+import { chartOption, createRankedBarSeries, createStaticLegend, createStaticLegendSeries } from '@/utils/chart-builder';
 import type { Section } from '../project';
 import { tradeCategoryColors, tradeColors } from '../tokens';
 
@@ -12,7 +12,8 @@ export const tradeCategoriesSection: Section = ({ t, fmt }) => {
     sources: [{ name: 'NBU — Merchandise Trade by Commodity Group (xlsx)', url: 'https://bank.gov.ua/files/ES/Trade_y.xlsx' }],
     toolbars: [
       {
-        id: 'tradeCategories',
+        id: 'tradeCategoriesStore',
+        urlPrefix: 'tradeCategories',
         controls: [
           {
             id: 'mode',
@@ -27,12 +28,11 @@ export const tradeCategoriesSection: Section = ({ t, fmt }) => {
         ] as const,
       },
     ] as const,
-    buildView: ({ ukraine: dataset }, { ukraine, tradeCategories }) => {
-      const data = dataset['trade-categories'];
-      const isPercent = tradeCategories.mode === 'percent';
-      const [selStartYear, selEndYear] = ukraine?.years ?? [data.years[Math.max(0, data.years.length - 6)], data.years[data.years.length - 1]];
-      const showLabels = ukraine?.labels ?? true;
-      const tradeYearsStr = data.years.map(String);
+    buildView: ({ ukraineData }, { ukraineStore, tradeCategoriesStore }) => {
+      const data = ukraineData['trade-categories'];
+      const isPercent = tradeCategoriesStore.mode === 'percent';
+      const [selStartYear, selEndYear] = ukraineStore.years;
+      const showLabels = ukraineStore.labels;
 
       const foundStartIdx = data.years.findIndex((y) => y >= selStartYear);
       const startIdx = foundStartIdx === -1 ? 0 : foundStartIdx;
@@ -52,42 +52,56 @@ export const tradeCategoriesSection: Section = ({ t, fmt }) => {
         const dataset = isExp ? visibleCategoryExports : visibleCategoryImports;
         const sign = isExp ? 1 : -1;
         const prefix = isExp ? '' : '-';
-        const series = [];
 
-        for (let i = 0; i < visibleYears.length; i++) {
-          const year = visibleYears[i];
-          const yearCategories = dataset[i] || [];
-          for (const [catId, val, share] of yearCategories) {
+        return createRankedBarSeries<[string, number, number]>({
+          idPrefix: type,
+          stack: 'categories',
+          categoryCount: visibleYears.length,
+          rankedData: dataset,
+          sign,
+          getValue: ([, val, share]) => (isPercent ? share : val),
+          getColor: ([catId]) => categoryColors[catId as TradeCategoryId],
+          getName: ([catId]) => t.proj.tradeCategories[catId as TradeCategoryId],
+          getExtraProps: ([catId, val, share]) => ({ catId, val, share }),
+          formatLabel: ({ item: [catId, val, share] }) => {
             const localizedName = t.proj.tradeCategories[catId as TradeCategoryId];
-            series.push(
-              createBarSeries({
-                id: `${type}-${year}-${catId}`,
-                name: localizedName,
-                stack: 'categories',
-                color: categoryColors[catId as TradeCategoryId],
-                label: {
-                  show: true,
-                  position: 'inside',
-                },
-                data: [
-                  {
-                    value: [i, sign * (isPercent ? share : val)],
-                    val,
-                    share,
-                    catId,
-                  },
-                ],
-                formatLabel: ({ item }) => {
-                  const valStr = `${prefix}${isPercent ? fmt.percent(item.share) : fmt.number(item.val)}`;
-                  return showLabels ? `${localizedName}: ${valStr}` : valStr;
-                },
-              }),
-            );
-          }
-        }
-
-        return series;
+            const valStr = `${prefix}${isPercent ? fmt.percent(share) : fmt.number(val)}`;
+            return showLabels ? `${localizedName}: ${valStr}` : valStr;
+          },
+        });
       };
+
+      const expSeries = buildCategorySeries('exp');
+      const impSeries = buildCategorySeries('imp');
+
+      const legendItems = TRADE_CATEGORY_IDS.map((id) => ({
+        name: t.proj.tradeCategories[id],
+        color: categoryColors[id],
+      }));
+
+      let maxExpStack = 0;
+      let maxImpStack = 0;
+      if (isPercent) {
+        for (let i = 0; i < visibleYears.length; i++) {
+          let expSum = 0;
+          for (const s of expSeries) {
+            const raw = s.data?.[i];
+            const v = typeof raw === 'number' ? raw : typeof raw === 'object' && raw !== null && 'value' in raw ? Number(raw.value) : 0;
+            if (v) expSum += Math.abs(v);
+          }
+          if (expSum > maxExpStack) maxExpStack = expSum;
+
+          let impSum = 0;
+          for (const s of impSeries) {
+            const raw = s.data?.[i];
+            const v = typeof raw === 'number' ? raw : typeof raw === 'object' && raw !== null && 'value' in raw ? Number(raw.value) : 0;
+            if (v) impSum += Math.abs(v);
+          }
+          if (impSum > maxImpStack) maxImpStack = impSum;
+        }
+      }
+      const peakPercentStack = Math.max(maxExpStack, maxImpStack);
+      const effectivePercentBound = peakPercentStack > 0 ? Math.min(100, Math.ceil((peakPercentStack * 1.15) / 5) * 5 || 10) : 100;
 
       return {
         content: createChart(
@@ -122,27 +136,21 @@ export const tradeCategoriesSection: Section = ({ t, fmt }) => {
                 };
               },
             },
-            legend: {
-              show: true,
-              data: TRADE_CATEGORY_IDS.map((id) => ({
-                name: t.proj.tradeCategories[id],
-                itemStyle: { color: categoryColors[id] },
-              })),
-            },
+            legend: createStaticLegend(legendItems),
             xAxis: {
               type: 'category',
-              data: tradeYearsStr.slice(startIdx, endIdx),
+              data: visibleYears.map(String),
             },
             yAxis: {
               type: 'value',
               name: isPercent ? '%' : `${fmt.scale(1e9)} ($)`,
-              max: isPercent ? 100 : undefined,
-              min: isPercent ? -100 : undefined,
+              max: isPercent ? effectivePercentBound : undefined,
+              min: isPercent ? -effectivePercentBound : undefined,
               axisLabel: {
                 formatter: (val: number) => String(Math.abs(val)),
               },
             },
-            series: [...buildCategorySeries('exp'), ...buildCategorySeries('imp')],
+            series: [...expSeries, ...impSeries, ...createStaticLegendSeries(legendItems)],
           }),
         ),
       };

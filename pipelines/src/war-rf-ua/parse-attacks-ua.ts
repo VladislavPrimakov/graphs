@@ -1,10 +1,9 @@
 import path from 'node:path';
-import type { AttackDataGroup } from '@graphs/types/war-rf-ua/strikes';
+import type { AttackDataGroup } from '@graphs/shared/types/war-rf-ua/strikes';
 import * as cheerio from 'cheerio';
-import { fileExists, readJson, writeJson } from '@/utils/fs';
+import { fileExists, readJson, writeJsonAsync } from '@/utils/fs';
 import { fetchWithRetry } from '@/utils/http';
 import { getLogger } from '@/utils/logger';
-import { PIPELINES_SRC_DIR } from '@/utils/paths';
 
 const logger = getLogger();
 
@@ -484,7 +483,7 @@ export async function crawlTelegram(dataFile: string, _fullUpdate: boolean = fal
     reports: updatedReports,
   };
 
-  await writeJson(dataFile, updatedSnapshot, 0);
+  await writeJsonAsync(dataFile, updatedSnapshot);
   logger.debug(`Snapshot updated: total ${updatedReports.length} reports (+${newFound} new)`);
   return updatedReports;
 }
@@ -638,7 +637,7 @@ export function processAndAuditData(reports: UaInterceptionReport[]): AttackData
 }
 
 export async function parseUaAttacks(dataPath?: string, forceUpdate: boolean = false, threads: number = 16): Promise<AttackDataGroup> {
-  const defaultFile = path.resolve(PIPELINES_SRC_DIR, 'war-rf-ua/data-attacks-ua.json');
+  const defaultFile = `${import.meta.dir}/data-attacks-ua.json.br`;
   const targetFile = dataPath || defaultFile;
   const reports = await crawlTelegram(targetFile, forceUpdate, threads);
   return processAndAuditData(reports);

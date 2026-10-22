@@ -1,4 +1,4 @@
-import type { FrontlineMapSectionData } from '@graphs/types/war-rf-ua/frontline';
+import type { FrontlineMapSectionData } from '@graphs/shared/types/war-rf-ua/frontline';
 import { createElement, lazy } from 'react';
 import { defineSection, loadDataset, type ProjectContext } from '@/utils/project';
 import type { dict } from '../locales/dict-en';
@@ -14,12 +14,12 @@ export const frontlineMapSection = defineSection(({ t }: ProjectContext<typeof d
     { name: 'LostArmour', url: 'https://lostarmour.info/map' },
   ],
   data: {
-    frontline: () => loadDataset<FrontlineMapSectionData>('war-rf-ua', 'frontline-map.json'),
+    frontlineData: () => loadDataset<FrontlineMapSectionData>('war-rf-ua', 'frontline-map.json'),
   },
-  buildView: ({ frontline: data }, { frontline }) => ({
+  buildView: ({ frontlineData }, { frontlineStore }) => ({
     content: createElement(FrontlineMap, {
-      data,
-      targetDate: frontline?.period?.[1],
+      data: frontlineData,
+      targetDate: frontlineStore.period[1],
       t: t.proj,
     }),
   }),

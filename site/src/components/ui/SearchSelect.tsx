@@ -29,6 +29,8 @@ export interface SingleSearchSelectProps extends SearchSelectBaseProps {
   mode: 'single';
   /** Currently selected single value. */
   value?: string | number | null;
+  /** Default value used to determine whether selection is non-default. */
+  defaultValue?: string | number | null;
   /** Callback fired when an item is selected. */
   onChange: (value: string | number) => void;
   /** Optional callback fired when selection is cleared. */
@@ -125,7 +127,7 @@ export const SearchSelect: React.FC<SearchSelectProps> = (props) => {
     singleItem = items.find((it) => it.value === props.value);
     if (singleItem) {
       displayPlaceholder = singleItem.label;
-      inputTitle = singleItem.count !== undefined ? `${singleItem.label} (${fmt.number(singleItem.count)})` : singleItem.label;
+      inputTitle = singleItem.label;
     }
   } else {
     const multiSelected = props.selectedValues;
@@ -133,7 +135,7 @@ export const SearchSelect: React.FC<SearchSelectProps> = (props) => {
       singleItem = items.find((it) => it.value === multiSelected[0]);
       if (singleItem) {
         displayPlaceholder = singleItem.label;
-        inputTitle = singleItem.count !== undefined ? `${singleItem.label} (${fmt.number(singleItem.count)})` : singleItem.label;
+        inputTitle = singleItem.label;
       }
     } else if (multiSelected.length > 1) {
       displayPlaceholder = `${placeholder} (${multiSelected.length})`;
@@ -145,6 +147,8 @@ export const SearchSelect: React.FC<SearchSelectProps> = (props) => {
   }
 
   const hasSelection = isSingle ? props.value != null && props.value !== '' : props.selectedValues.length > 0;
+  const isNonDefault = isSingle ? (props.defaultValue !== undefined ? props.value !== props.defaultValue && props.value != null && props.value !== '' : hasSelection) : props.selectedValues.length > 0;
+  const isClearVisible = Boolean(query) || isNonDefault;
 
   return (
     <div ref={containerRef} className={cn('relative w-52 shrink-0', disabled && 'opacity-50 pointer-events-none', className)}>
@@ -177,27 +181,25 @@ export const SearchSelect: React.FC<SearchSelectProps> = (props) => {
               hasSelection && !query ? 'placeholder:text-accent-primary placeholder:font-bold' : 'placeholder:text-content-muted font-normal',
             )}
           />
-          {isSingle && singleItem?.count !== undefined && !query && <span className="font-mono text-[10px] text-content-muted shrink-0 tabular-nums">{fmt.number(singleItem.count)}</span>}
-          {(query || hasSelection) && (
-            <button
-              type="button"
-              disabled={disabled}
-              onClick={(e) => {
-                e.stopPropagation();
-                if (query) {
-                  setQuery('');
-                } else if (isSingle) {
-                  props.onClear?.();
-                } else {
-                  props.onClear();
-                }
-              }}
-              className="text-content-muted hover:text-accent-primary shrink-0 cursor-pointer text-sm leading-none p-0.5"
-              aria-label="Clear"
-            >
-              &times;
-            </button>
-          )}
+          <button
+            type="button"
+            disabled={disabled || !isClearVisible}
+            tabIndex={isClearVisible ? 0 : -1}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (query) {
+                setQuery('');
+              } else if (isSingle) {
+                props.onClear?.();
+              } else {
+                props.onClear();
+              }
+            }}
+            className={cn('text-content-muted hover:text-accent-primary shrink-0 cursor-pointer text-sm leading-none p-0.5', !isClearVisible && 'invisible pointer-events-none')}
+            aria-label="Clear"
+          >
+            &times;
+          </button>
         </div>
 
         {isOpen && (
@@ -220,15 +222,15 @@ export const SearchSelect: React.FC<SearchSelectProps> = (props) => {
                 <div className="flex items-center gap-2 min-w-0 mr-2">
                   <div
                     className={cn(
-                      'w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 text-[10px] leading-none transition-colors',
-                      props.selectedValues.length === 0 ? 'border-accent-primary bg-accent-primary text-surface-ground font-bold' : 'border-border-subtle bg-surface-card',
+                      'w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 text-3xs leading-none transition-colors',
+                      props.selectedValues.length === 0 ? 'border-accent-primary bg-accent-primary text-surface-base font-bold' : 'border-border-subtle bg-surface-card',
                     )}
                   >
                     {props.selectedValues.length === 0 ? '✓' : ''}
                   </div>
                   <span className="truncate">{props.allLabel}</span>
                 </div>
-                {effectiveAllCount !== undefined && <span className="font-mono text-[10px] text-content-muted shrink-0 tabular-nums">{fmt.number(effectiveAllCount)}</span>}
+                {effectiveAllCount !== undefined && <span className="font-mono text-3xs text-content-muted shrink-0 tabular-nums">{fmt.number(effectiveAllCount)}</span>}
               </Command.Item>
             )}
             {sortedItems.map((item) => {
@@ -260,8 +262,8 @@ export const SearchSelect: React.FC<SearchSelectProps> = (props) => {
                     {!isSingle && (
                       <div
                         className={cn(
-                          'w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 text-[10px] leading-none transition-colors',
-                          isSelected ? 'border-accent-primary bg-accent-primary text-surface-ground font-bold' : 'border-border-subtle bg-surface-card',
+                          'w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 text-3xs leading-none transition-colors',
+                          isSelected ? 'border-accent-primary bg-accent-primary text-surface-base font-bold' : 'border-border-subtle bg-surface-card',
                         )}
                       >
                         {isSelected ? '✓' : ''}
@@ -270,7 +272,7 @@ export const SearchSelect: React.FC<SearchSelectProps> = (props) => {
                     {item.icon && <span className="shrink-0 flex items-center opacity-70">{item.icon}</span>}
                     <span className="truncate">{item.label}</span>
                   </div>
-                  {item.count !== undefined && <span className="font-mono text-[10px] text-content-muted shrink-0 tabular-nums">{fmt.number(item.count)}</span>}
+                  {item.count !== undefined && <span className="font-mono text-3xs text-content-muted shrink-0 tabular-nums">{fmt.number(item.count)}</span>}
                 </Command.Item>
               );
             })}

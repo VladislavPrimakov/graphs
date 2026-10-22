@@ -100,7 +100,7 @@ async function captureSection(browser: Browser, slug: string, sectionId: string)
     await page.addStyleTag({
       content: `
         header, nav, #header-section-nav, aside, footer { display: none !important; }
-        .loading-spinner-overlay { display: none !important; }
+        .loading-spinner-overlay, [data-loading-spinner] { display: none !important; }
         .echarts-toolbox { display: none !important; }
         .anchor-btn { display: none !important; }
         [data-sticky-toolbar], .section-toolbar, .control-bar, .control-panel, [role="toolbar"] { display: none !important; }
@@ -168,10 +168,42 @@ async function captureSection(browser: Browser, slug: string, sectionId: string)
     });
 
     const sectionEl = page.locator(`[data-section="${sectionId}"]`).first();
-    await sectionEl.waitFor({ state: 'visible', timeout: 15000 });
+    await sectionEl.waitFor({ state: 'visible', timeout: 30000 });
 
-    // Wait a moment for canvas animation and tiles to settle
-    await page.waitForTimeout(1200);
+    // Wait for any loading spinners to finish/detach
+    await page
+      .locator('[data-loading-spinner], .loading-spinner-overlay')
+      .waitFor({ state: 'detached', timeout: 30000 })
+      .catch(() => {});
+
+    // Ensure visualizer canvas or breakdown card content is mounted and sized
+    await page
+      .waitForFunction(
+        (secId) => {
+          const sec = document.querySelector(`[data-section="${secId}"]`);
+          if (!sec) return false;
+
+          // Ensure no active loading spinner
+          if (sec.querySelector('[data-loading-spinner], .loading-spinner-overlay')) return false;
+
+          // Check canvas visualizers (ECharts or MapLibre)
+          const canvas = sec.querySelector('canvas');
+          if (canvas) {
+            return (canvas as HTMLCanvasElement).width > 0;
+          }
+
+          // Check breakdown grid or other non-canvas card
+          const card = sec.querySelector('.card');
+          return Boolean(card && card.children.length > 1);
+        },
+        sectionId,
+        { timeout: 30000 },
+      )
+      .catch(() => {});
+
+    // Settling delay for animations, fonts, and tiles to render cleanly on CI runners
+    const settleDelay = Number(process.env.OG_SETTLE_MS ?? 2500);
+    await page.waitForTimeout(settleDelay);
 
     await page.screenshot({ path: outputPath });
     console.log(`  ✅ [captured 1200x630] ${slug}/${sectionId}`);
@@ -182,16 +214,34 @@ async function captureSection(browser: Browser, slug: string, sectionId: string)
   }
 }
 
+async function runWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let currentIndex = 0;
+
+  async function worker() {
+    while (currentIndex < items.length) {
+      const index = currentIndex++;
+      results[index] = await fn(items[index]);
+    }
+  }
+
+  const workerCount = Math.min(limit, items.length);
+  const workers = Array.from({ length: workerCount }, () => worker());
+  await Promise.all(workers);
+  return results;
+}
+
 async function main() {
   const sections = getProjectSections();
   const totalTasks = sections.length;
-  console.log(`📸 Generating ${totalTasks} section OG preview images...\n`);
+  const concurrency = Number(process.env.OG_CONCURRENCY ?? 16);
+  console.log(`📸 Generating ${totalTasks} section OG preview images with ${concurrency} concurrent workers...\n`);
 
   const browser = await chromium.launch({
     headless: true,
   });
 
-  await Promise.all(sections.map(({ slug, sectionId }) => captureSection(browser, slug, sectionId)));
+  await runWithConcurrency(sections, concurrency, ({ slug, sectionId }) => captureSection(browser, slug, sectionId));
 
   await browser.close();
   server.stop();

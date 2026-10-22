@@ -1,14 +1,14 @@
-import type { CountryToolbarMeta } from '@graphs/types/country';
-import { type CountryCategoryTuple, type CountryPartnerTuple, type CountryProfileData, EBOPS_SERVICE_CODES, TRADE_CATEGORY_IDS, type TradeCategoryId } from '@graphs/types/country';
+import type { CountryToolbarMeta } from '@graphs/shared/types/country';
+import { type CountryMacroYear, type CountryPartnerTradeRecord, type CountryProfileData, type CountryYearRecord, TRADE_CATEGORY_IDS, type TradeCategoryId } from '@graphs/shared/types/country';
 import { exportProjectMeta, getPipelineDataPath } from '@/utils/dataset';
-import { fileExists, readJson, writeJson } from '@/utils/fs';
+import { fileExists, flushPendingJsonSaves, readJson, writeJsonAsync } from '@/utils/fs';
 import { fetchWithRetry, HttpError } from '@/utils/http';
-import { getLogger, isUpdate, isVerbose, runWithLogger } from '@/utils/logger';
-import { percentage, range, round } from '@/utils/math';
+import { getPipelineLogger, isUpdate, isVerbose, runWithLogger } from '@/utils/logger';
+import { range, round } from '@/utils/math';
 import { updateMetadata } from '@/utils/metadata';
 import { loadEnv } from '@/utils/paths';
 import { resolveRegionCode } from '@/utils/region';
-import { COUNTRY_CATEGORIES_META, EBOPS_TO_SERVICES_MAP, HS_TO_MACRO_MAP, HS2_CHAPTERS } from './classification';
+import { COUNTRY_CATEGORIES_META, EBOPS_NORMALIZATION_MAP, EBOPS_TO_SERVICES_MAP, HS_TO_MACRO_MAP, HS2_CHAPTERS } from './classification';
 import { COUNTRIES, COUNTRY_BY_CODE, COUNTRY_BY_ID, COUNTRY_BY_ISO3, type CountryEntry, SUPPORTED_COUNTRIES } from './countries';
 
 loadEnv();
@@ -19,54 +19,58 @@ export { COUNTRIES, SUPPORTED_COUNTRIES };
 
 export const START_YEAR = 1990;
 export const CURRENT_YEAR = new Date().getFullYear() - 1;
+export const CHUNK_SIZE_GOODS = 4;
+export const CHUNK_SIZE_SERVICES = 12;
 export const CHUNK_SIZE = 12;
-export const BATCH_SIZE = 5;
 
 const comtradeKey = process.env.COMTRADE_API_KEY || '';
 const comtradeHeaders: Record<string, string> = comtradeKey ? { 'Ocp-Apim-Subscription-Key': comtradeKey } : {};
-
-export const REQUIRED_IMF_INDICATORS = [
-  'gdpNominalUsd',
-  'gdpRealGrowthYoy',
-  'gdpPerCapitaUsd',
-  'gdpPppUsd',
-  'govExpenditurePctGdp',
-  'govRevenuePctGdp',
-  'govBalancePctGdp',
-  'govDebtPctGdp',
-  'inflationPct',
-  'unemploymentPct',
-  'currentAccountPctGdp',
-] as const;
-
-export type RequiredMacroKey = (typeof REQUIRED_IMF_INDICATORS)[number];
 
 /** UN Comtrade statistical, accounting, and unspecified non-country area aggregates mapped to Others. */
 export const STATISTICAL_PARTNER_CODES = new Set(['_X', 'XX', 'X1', 'X2', 'E19', 'F19', 'O19', 'A79', 'A59', 'F97', 'E29', 'A49', 'F49', 'R91', 'NTZ', '_AC', '_CI', '_SM', '_TK', '_WI', '_ZP']);
 
 export interface RawYearData {
-  /** Raw merchandise exports by 2-digit HS chapter in billion USD: { "01": 1.25, ... } or null if no trade reported */
-  exports?: Record<string, number> | null;
-  /** Raw merchandise imports by 2-digit HS chapter in billion USD or null if no trade reported */
-  imports?: Record<string, number> | null;
+  /** Raw merchandise goods exports by 2-digit HS chapter in billion USD: { "01": 1.25, ... } or null if no trade reported */
+  goodsExports?: Record<string, number> | null;
   /** Raw commercial services exports by 3-digit EBOPS code in billion USD: { "205": 91.0, ... } or null if no trade reported */
   servicesExports?: Record<string, number> | null;
-  /** Raw commercial services imports by 3-digit EBOPS code in billion USD or null if no trade reported */
+  /** Raw commercial services imports by 3-digit EBOPS code in billion USD: { "205": 45.2, ... } or null if no trade reported */
   servicesImports?: Record<string, number> | null;
-  /** Complete bilateral exports turnover by partner ISO-3: { "CAN": 352.76, ... } or null if no trade reported */
-  partnerExports?: Record<string, number> | null;
-  /** Complete bilateral imports turnover by partner ISO-3: { "CHN": 536.8, ... } or null if no trade reported */
-  partnerImports?: Record<string, number> | null;
+  /** Bilateral merchandise goods exports by active partner code and 2-digit HS chapter: { "cn": { "84": 13.9, ... }, ... } or null if no trade reported */
+  partnerGoodsExports?: Record<string, Record<string, number>> | null;
   /** Upstream UN Comtrade HS goods dataset checksum for this reporter and year */
   goodsChecksum?: number | null;
   /** Upstream UN Comtrade EBOPS services dataset checksum for this reporter and year */
   servicesChecksum?: number | null;
+
+  // Macroeconomic indicators from IMF World Economic Outlook (short codes matching API):
+  /** Nominal GDP in billion USD (IMF: NGDPD) */
+  ngdpd?: number | null;
+  /** Real GDP growth YoY percentage (IMF: NGDP_RPCH) */
+  rpch?: number | null;
+  /** Nominal GDP per capita in USD (IMF: NGDPDPC) */
+  dpc?: number | null;
+  /** GDP at purchasing power parity in billion current international dollars (IMF: PPPGDP) */
+  pppgdp?: number | null;
+  /** General government total expenditure as % of GDP (IMF: G_X_G01_GDP_PT) */
+  gx?: number | null;
+  /** General government total revenue as % of GDP (IMF: GGR_G01_GDP_PT) */
+  ggr?: number | null;
+  /** General government net lending/borrowing balance as % of GDP (IMF: GGXCNL_NGDP) */
+  ggxcnl?: number | null;
+  /** General government gross debt as % of GDP (IMF: GGXWDG_NGDP) */
+  ggxwdg?: number | null;
+  /** Consumer price index inflation rate YoY % (IMF: PCPIPCH) */
+  pcpipch?: number | null;
+  /** Unemployment rate as % of labor force (IMF: LUR) */
+  lur?: number | null;
+  /** Current account balance as % of GDP (IMF: BCA_NGDPD) */
+  bca?: number | null;
 }
 
 export interface RawCountryProfile {
   code: string;
   years: Record<string, RawYearData>;
-  macro?: Partial<Record<RequiredMacroKey, Record<string, number | null> | null>>;
 }
 
 export interface CountryPipelineCacheMeta {
@@ -112,7 +116,7 @@ async function fetchComtradeWithPacer(url: string): Promise<Response> {
       if (err instanceof HttpError && err.isQuotaExhausted) {
         if (!comtradeQuotaExhausted) {
           comtradeQuotaExhausted = true;
-          getLogger('country').warn(`UN Comtrade quota exhausted: ${err.message}`);
+          getPipelineLogger('country').warn(`UN Comtrade quota exhausted: ${err.message}`);
         }
       }
       throw err;
@@ -146,10 +150,13 @@ export function detectMissingStreams(
   targetYears: number[],
   reporterId?: number,
   catalog?: AvailabilityCatalog,
+  cachedImfLastModified?: string,
 ): { goods: number[]; partners: number[]; services: number[]; needsImf: boolean } {
   const missingGoods: number[] = [];
-  const missingPartners: number[] = [];
   const missingServices: number[] = [];
+
+  const hasGoodsCatalog = Boolean(reporterId && catalog && catalog.goodsChecksums.size > 0);
+  const hasServicesCatalog = Boolean(reporterId && catalog && catalog.servicesChecksums.size > 0);
 
   for (const y of targetYears) {
     const yStr = String(y);
@@ -158,34 +165,54 @@ export function detectMissingStreams(
     const upstreamGoodsChecksum = reporterId && catalog ? catalog.goodsChecksums.get(`${reporterId}:${y}`) : undefined;
     const upstreamServicesChecksum = reporterId && catalog ? catalog.servicesChecksums.get(`${reporterId}:${y}`) : undefined;
 
-    const needsGoodsFetch = yData?.exports === undefined || yData?.imports === undefined || (upstreamGoodsChecksum !== undefined && yData.goodsChecksum !== upstreamGoodsChecksum);
+    const hasGoodsInCache = yData?.goodsExports !== undefined && yData?.partnerGoodsExports !== undefined;
+    const hasServicesInCache = yData?.servicesExports !== undefined && yData?.servicesImports !== undefined;
 
-    const needsPartnersFetch = yData?.partnerExports === undefined || yData?.partnerImports === undefined || (upstreamGoodsChecksum !== undefined && yData.goodsChecksum !== upstreamGoodsChecksum);
+    let needsGoodsFetch = false;
+    if (hasGoodsCatalog) {
+      if (upstreamGoodsChecksum !== undefined) {
+        needsGoodsFetch = !hasGoodsInCache || yData?.goodsChecksum !== upstreamGoodsChecksum;
+      }
+    } else {
+      needsGoodsFetch = !hasGoodsInCache;
+    }
 
-    const needsServicesFetch =
-      yData?.servicesExports === undefined || yData?.servicesImports === undefined || (upstreamServicesChecksum !== undefined && yData.servicesChecksum !== upstreamServicesChecksum);
+    let needsServicesFetch = false;
+    if (hasServicesCatalog) {
+      if (upstreamServicesChecksum !== undefined) {
+        needsServicesFetch = !hasServicesInCache || yData?.servicesChecksum !== upstreamServicesChecksum;
+      }
+    } else {
+      needsServicesFetch = !hasServicesInCache;
+    }
 
     if (needsGoodsFetch) missingGoods.push(y);
-    if (needsPartnersFetch) missingPartners.push(y);
     if (needsServicesFetch) missingServices.push(y);
   }
 
-  const gdpMap = existing?.macro?.gdpNominalUsd;
-  const needsImf = !gdpMap;
+  const imfChanged = Boolean(catalog?.imfLastModified && cachedImfLastModified !== catalog.imfLastModified);
+  const hasAnyGdp = Object.values(existing?.years || {}).some((y) => y.ngdpd !== undefined && y.ngdpd !== null);
+  const needsImf = !hasAnyGdp || imfChanged;
 
   return {
     goods: missingGoods,
-    partners: missingPartners,
+    partners: missingGoods,
     services: missingServices,
     needsImf,
   };
 }
 
-/** Returns true if a country profile is fully populated across all target years and all 4 streams. */
-export function isCountryComplete(existing: RawCountryProfile | undefined, targetYears: number[] = range(START_YEAR, CURRENT_YEAR), reporterId?: number, catalog?: AvailabilityCatalog): boolean {
+/** Returns true if a country profile is fully populated across all target years and all streams. */
+export function isCountryComplete(
+  existing: RawCountryProfile | undefined,
+  targetYears: number[] = range(START_YEAR, CURRENT_YEAR),
+  reporterId?: number,
+  catalog?: AvailabilityCatalog,
+  cachedImfLastModified?: string,
+): boolean {
   if (!existing) return false;
-  const missing = detectMissingStreams(existing, targetYears, reporterId, catalog);
-  return missing.goods.length === 0 && missing.partners.length === 0 && missing.services.length === 0 && !missing.needsImf;
+  const missing = detectMissingStreams(existing, targetYears, reporterId, catalog, cachedImfLastModified);
+  return missing.goods.length === 0 && missing.services.length === 0 && !missing.needsImf;
 }
 
 let partnerAreasCache: Record<number, string> | null = null;
@@ -205,7 +232,7 @@ export async function getPartnerAreasMap(): Promise<Record<number, string>> {
       }
     }
   } catch (err) {
-    getLogger('country').warn(`Failed to fetch partnerAreas.json: ${err}`);
+    getPipelineLogger('country').warn(`Failed to fetch partnerAreas.json: ${err}`);
   }
   partnerAreasCache = partners;
   return partners;
@@ -227,7 +254,7 @@ interface ImfIndicators {
 
 /** Fetches full macroeconomic indicator maps for a country from IMF DataMapper in a single call. */
 async function fetchImfIndicators(iso3: string): Promise<ImfIndicators> {
-  const logger = getLogger('country');
+  const logger = getPipelineLogger('country');
   try {
     const imfUrl = `https://www.imf.org/external/datamapper/api/v1/NGDPD/NGDP_RPCH/NGDPDPC/PPPGDP/G_X_G01_GDP_PT/GGR_G01_GDP_PT/GGXCNL_NGDP/GGXWDG_NGDP/PCPIPCH/LUR/BCA_NGDPD/${iso3}`;
     const imfRes = await fetchWithRetry(imfUrl, { retries: 2, timeoutMs: 25000 });
@@ -259,7 +286,7 @@ let availabilityCatalogCache: AvailabilityCatalog | null = null;
 /** Fetches full availability catalogs from UN Comtrade and latest WEO release from IMF DataMapper in 3 calls. */
 export async function fetchAvailabilityCatalog(): Promise<AvailabilityCatalog> {
   if (availabilityCatalogCache) return availabilityCatalogCache;
-  const logger = getLogger('country');
+  const logger = getPipelineLogger('country');
   const goodsChecksums = new Map<string, number>();
   const servicesChecksums = new Map<string, number>();
   let imfLastModified: string | undefined;
@@ -306,275 +333,365 @@ export async function fetchAvailabilityCatalog(): Promise<AvailabilityCatalog> {
   return availabilityCatalogCache;
 }
 
-type Ag2Row = { reporterCode: number; period: string; flowCode: string; cmdCode: string; primaryValue: number };
-type PartnerRow = { reporterCode: number; period: string; flowCode: string; partnerCode: number; primaryValue: number };
-type ServiceRow = { reporterCode: number; period: string; flowCode: string; cmdCode: string; primaryValue: number };
+export interface UnifiedAg2Row {
+  reporterCode: number;
+  partnerCode: number;
+  period: string;
+  flowCode: string;
+  cmdCode: string;
+  primaryValue: number;
+}
 
-/** Fetches raw country data for a batch of countries (up to 5) via multi-country UN Comtrade queries. */
-export async function fetchRawCountryBatch(
-  batch: CountryEntry[],
-  existingMap: Record<string, RawCountryProfile>,
-  partnersMap?: Record<number, string>,
-  catalog?: AvailabilityCatalog,
-): Promise<Record<string, RawCountryProfile>> {
-  const logger = getLogger('country');
-  const targetYears = range(START_YEAR, CURRENT_YEAR);
+export interface IngestedAg2Data {
+  goodsExports: Record<string, number>;
+  partnerGoodsExports: Record<string, Record<string, number>>;
+}
 
-  // 1. Detect missing years per country and across the batch
-  const countryMissingMap = new Map<string, ReturnType<typeof detectMissingStreams>>();
-  const allMissingGoodsYears = new Set<number>();
-  const allMissingPartnerYears = new Set<number>();
-  const allMissingServiceYears = new Set<number>();
+/**
+ * Ingests unified UN Comtrade flowCode=X rows containing both world totals (partnerCode=0)
+ * and individual sovereign partner countries.
+ */
+export function ingestUnifiedAg2Rows(rows: UnifiedAg2Row[], targetReporterId: number, partnerCodeResolver?: (id: number) => string | undefined): Record<string, IngestedAg2Data> {
+  const result: Record<string, IngestedAg2Data> = {};
 
-  for (const c of batch) {
-    const existing = existingMap[c.code];
-    const missing = detectMissingStreams(existing, targetYears, c.id, catalog);
-    countryMissingMap.set(c.code, missing);
-    for (const y of missing.goods) allMissingGoodsYears.add(y);
-    for (const y of missing.partners) allMissingPartnerYears.add(y);
-    for (const y of missing.services) allMissingServiceYears.add(y);
+  for (const r of rows) {
+    if (r.reporterCode !== targetReporterId) continue;
+    if (r.flowCode !== 'X') continue;
+
+    const valB = round(r.primaryValue / 1e9, 3);
+    if (valB <= 0) continue;
+
+    const period = r.period;
+    if (!result[period]) {
+      result[period] = {
+        goodsExports: {},
+        partnerGoodsExports: {},
+      };
+    }
+
+    const chStr = r.cmdCode.padStart(2, '0');
+
+    if (r.partnerCode === 0) {
+      result[period].goodsExports[chStr] = round((result[period].goodsExports[chStr] || 0) + valB, 3);
+    } else {
+      const rawCode = COUNTRY_BY_ID.get(r.partnerCode)?.code || (partnerCodeResolver ? partnerCodeResolver(r.partnerCode) : undefined);
+      if (!rawCode) continue;
+
+      const upperCode = rawCode.toUpperCase();
+      if (STATISTICAL_PARTNER_CODES.has(upperCode)) continue;
+
+      const pCode = resolveRegionCode(rawCode).toLowerCase();
+      if (!pCode || STATISTICAL_PARTNER_CODES.has(pCode.toUpperCase())) continue;
+
+      if (!result[period].partnerGoodsExports[pCode]) {
+        result[period].partnerGoodsExports[pCode] = {};
+      }
+      result[period].partnerGoodsExports[pCode][chStr] = round((result[period].partnerGoodsExports[pCode][chStr] || 0) + valB, 3);
+    }
   }
 
-  const goodsChunks = chunkYears(Array.from(allMissingGoodsYears).sort((a, b) => a - b));
-  const partnerChunks = chunkYears(Array.from(allMissingPartnerYears).sort((a, b) => a - b));
-  const serviceChunks = chunkYears(Array.from(allMissingServiceYears).sort((a, b) => a - b));
+  return result;
+}
 
-  const reporterParam = batch.map((c) => c.id).join(',');
-  const batchLabel = batch.map((c) => c.code.toUpperCase()).join(',');
+type ServiceRow = { reporterCode: number; period: string; flowCode: string; cmdCode: string; primaryValue: number };
 
-  logger.info(
-    `[Batch: ${batchLabel}] Missing: Goods (${allMissingGoodsYears.size} yrs / ${goodsChunks.length} q), Partners (${allMissingPartnerYears.size} yrs / ${partnerChunks.length} q), Services (${allMissingServiceYears.size} yrs / ${serviceChunks.length} q)`,
-  );
+/**
+ * STAGE 1: Synchronize Macroeconomic Indicators (IMF DataMapper WEO)
+ * Fetches all 11 indicators for all countries that have missing macro indicators.
+ * Independent of UN Comtrade rate limits.
+ */
+export async function syncMacroStage(cache: CountryPipelineCache, catalog: AvailabilityCatalog, countriesToSync: CountryEntry[]): Promise<boolean> {
+  const stage = getPipelineLogger('country').stage(1, 'Macro');
+  const imfChanged = Boolean(catalog?.imfLastModified && cache.meta?.imfLastModified !== catalog.imfLastModified);
 
-  // 2. Fetch Goods (cmdCode=AG2, partnerCode=0)
-  const newAg2Rows: Ag2Row[] = [];
-  const successfulGoodsYears = new Set<number>();
-  for (const chunk of goodsChunks) {
-    if (comtradeQuotaExhausted) break;
+  const countriesNeedingMacro = countriesToSync.filter((c) => {
+    const existing = cache.countries[c.code];
+    return !existing || !Object.values(existing.years || {}).some((y) => y.ngdpd != null) || imfChanged;
+  });
+
+  if (countriesNeedingMacro.length === 0) {
+    stage.info('All macroeconomic indicators are up to date.');
+    return false;
+  }
+
+  stage.info(`Fetching IMF WEO indicators for ${countriesNeedingMacro.length} countries...`);
+  let hasChanges = false;
+
+  for (let i = 0; i < countriesNeedingMacro.length; i++) {
+    const country = countriesNeedingMacro[i];
+    const indicators = await fetchImfIndicators(country.iso3);
+    if (!indicators || Object.keys(indicators).length === 0) continue;
+
+    if (!cache.countries[country.code]) {
+      cache.countries[country.code] = { code: country.code, years: {} };
+    }
+    const profile = cache.countries[country.code];
+
+    const allYears = new Set<string>();
+    for (const rec of Object.values(indicators)) {
+      if (rec) for (const y of Object.keys(rec)) allYears.add(y);
+    }
+
+    for (const yStr of allYears) {
+      if (!profile.years[yStr]) profile.years[yStr] = {};
+      const y = profile.years[yStr];
+      if (indicators.NGDPD?.[yStr] !== undefined) y.ngdpd = indicators.NGDPD[yStr];
+      if (indicators.NGDP_RPCH?.[yStr] !== undefined) y.rpch = indicators.NGDP_RPCH[yStr];
+      if (indicators.NGDPDPC?.[yStr] !== undefined) y.dpc = indicators.NGDPDPC[yStr];
+      if (indicators.PPPGDP?.[yStr] !== undefined) y.pppgdp = indicators.PPPGDP[yStr];
+      if (indicators.G_X_G01_GDP_PT?.[yStr] !== undefined) y.gx = indicators.G_X_G01_GDP_PT[yStr];
+      if (indicators.GGR_G01_GDP_PT?.[yStr] !== undefined) y.ggr = indicators.GGR_G01_GDP_PT[yStr];
+      if (indicators.GGXCNL_NGDP?.[yStr] !== undefined) y.ggxcnl = indicators.GGXCNL_NGDP[yStr];
+      if (indicators.GGXWDG_NGDP?.[yStr] !== undefined) y.ggxwdg = indicators.GGXWDG_NGDP[yStr];
+      if (indicators.PCPIPCH?.[yStr] !== undefined) y.pcpipch = indicators.PCPIPCH[yStr];
+      if (indicators.LUR?.[yStr] !== undefined) y.lur = indicators.LUR[yStr];
+      if (indicators.BCA_NGDPD?.[yStr] !== undefined) y.bca = indicators.BCA_NGDPD[yStr];
+    }
+
+    hasChanges = true;
+    if ((i + 1) % 10 === 0 || i === countriesNeedingMacro.length - 1) {
+      stage.progress(i + 1, countriesNeedingMacro.length, 'countries synced');
+      writeJsonAsync(DATA_FILE, cache);
+    }
+  }
+
+  return hasChanges;
+}
+
+/**
+ * STAGE 2: Synchronize Bilateral Merchandise Goods Exports (UN Comtrade AG2)
+ * Parameters: reporterCode=1_country, flowCode=X, cmdCode=AG2 (partnerCode omitted to capture all historical & sovereign partners).
+ * Strict batching: 1 country at a time, chunked by 4 years.
+ * Pacing: 1 req/sec.
+ */
+export async function syncGoodsStage(cache: CountryPipelineCache, catalog: AvailabilityCatalog, partnersMap: Record<number, string>, countriesToSync: CountryEntry[]): Promise<boolean> {
+  const stage = getPipelineLogger('country').stage(2, 'Goods');
+  const targetYears = range(START_YEAR, CURRENT_YEAR);
+
+  stage.info(`Checking bilateral goods for ${countriesToSync.length} countries (chunk size: ${CHUNK_SIZE_GOODS} years)...`);
+  let hasChanges = false;
+
+  for (let i = 0; i < countriesToSync.length; i++) {
+    if (isComtradeQuotaExhausted()) {
+      stage.warn('Comtrade quota exhausted. Stopping goods stage.');
+      break;
+    }
+
+    const country = countriesToSync[i];
+    const existing = cache.countries[country.code];
+    const missing = detectMissingStreams(existing, targetYears, country.id, catalog);
+
+    if (missing.goods.length === 0) continue;
+
+    stage.progress(i + 1, countriesToSync.length, `${country.code.toUpperCase()} missing ${missing.goods.length} years of goods trade`);
+
+    if (!cache.countries[country.code]) {
+      cache.countries[country.code] = { code: country.code, years: {} };
+    }
+    const profile = cache.countries[country.code];
+    const goodsChunks = chunkYears(
+      missing.goods.sort((a, b) => a - b),
+      CHUNK_SIZE_GOODS,
+    );
+
+    let countryChanged = false;
+
+    for (let cIdx = 0; cIdx < goodsChunks.length; cIdx++) {
+      const chunk = goodsChunks[cIdx];
+      if (isComtradeQuotaExhausted()) break;
+      const periodParam = chunk.join(',');
+      const ag2Url = `https://comtradeapi.un.org/data/v1/get/C/A/HS?period=${periodParam}&reporterCode=${country.id}&flowCode=X&partner2Code=0&customsCode=C00&motCode=0&cmdCode=AG2`;
+
+      try {
+        const res = await fetchComtradeWithPacer(ag2Url);
+        if (res.ok) {
+          const json = (await res.json()) as { data?: UnifiedAg2Row[] };
+          const rows = json.data || [];
+
+          stage.progress(i + 1, countriesToSync.length, `${country.code.toUpperCase()} chunk [${cIdx + 1}/${goodsChunks.length}] (${chunk[0]}..${chunk[chunk.length - 1]}): ${rows.length} rows`);
+
+          // Initialize queried chunk years: confirmed no trade defaults to null
+          for (const y of chunk) {
+            const yStr = String(y);
+            if (!profile.years[yStr]) profile.years[yStr] = {};
+            if (profile.years[yStr].goodsExports === undefined) profile.years[yStr].goodsExports = null;
+            if (profile.years[yStr].partnerGoodsExports === undefined) profile.years[yStr].partnerGoodsExports = null;
+          }
+
+          // Ingest rows (sparse dictionary of active trading partners only)
+          const ingested = ingestUnifiedAg2Rows(rows, country.id, (id) => partnersMap[id]);
+          for (const [yStr, ingData] of Object.entries(ingested)) {
+            if (!profile.years[yStr]) profile.years[yStr] = {};
+            profile.years[yStr].goodsExports = ingData.goodsExports;
+            profile.years[yStr].partnerGoodsExports = ingData.partnerGoodsExports;
+          }
+
+          // Update checksums for successful years
+          for (const y of chunk) {
+            const yStr = String(y);
+            const checksum = catalog.goodsChecksums.get(`${country.id}:${y}`);
+            if (checksum !== undefined && profile.years[yStr]) {
+              profile.years[yStr].goodsChecksum = checksum;
+            }
+          }
+
+          countryChanged = true;
+          hasChanges = true;
+        } else {
+          stage.warn(`${country.code.toUpperCase()} HTTP ${res.status} (${periodParam}): ${await res.text()}`);
+        }
+      } catch (err) {
+        if (err instanceof HttpError && err.isQuotaExhausted) break;
+        stage.warn(`${country.code.toUpperCase()} query failed (${periodParam}): ${err}`);
+      }
+    }
+
+    if (countryChanged) {
+      cache.countries[country.code] = profile;
+      writeJsonAsync(DATA_FILE, cache);
+    }
+  }
+
+  return hasChanges;
+}
+
+/**
+ * STAGE 3: Synchronize Commercial Services Trade (UN Comtrade EBOPS)
+ * Parameters: flowCode=M,X, partnerCode=0 (World total).
+ * Multi-country batching: queries all countries needing services in 1 request per year chunk.
+ * Pacing: 1 req/sec.
+ */
+export async function syncServicesStage(cache: CountryPipelineCache, catalog: AvailabilityCatalog, countriesToSync: CountryEntry[]): Promise<boolean> {
+  const stage = getPipelineLogger('country').stage(3, 'Services');
+  const targetYears = range(START_YEAR, CURRENT_YEAR);
+
+  stage.info(`Checking commercial services for ${countriesToSync.length} countries...`);
+
+  // 1. Collect which countries need services for which years
+  const countryMissingMap = new Map<CountryEntry, number[]>();
+  const allMissingYears = new Set<number>();
+
+  for (const country of countriesToSync) {
+    const existing = cache.countries[country.code];
+    const missing = detectMissingStreams(existing, targetYears, country.id, catalog);
+    if (missing.services.length > 0) {
+      countryMissingMap.set(country, missing.services);
+      for (const y of missing.services) allMissingYears.add(y);
+    }
+  }
+
+  if (countryMissingMap.size === 0) {
+    stage.info('All commercial services are up to date.');
+    return false;
+  }
+
+  const sortedYears = Array.from(allMissingYears).sort((a, b) => a - b);
+  const yearChunks = chunkYears(sortedYears, CHUNK_SIZE_SERVICES);
+  let hasChanges = false;
+
+  stage.info(`${countryMissingMap.size} countries missing services across ${yearChunks.length} period chunks.`);
+
+  for (let cIdx = 0; cIdx < yearChunks.length; cIdx++) {
+    if (isComtradeQuotaExhausted()) {
+      stage.warn('Comtrade quota exhausted. Stopping services stage.');
+      break;
+    }
+
+    const chunk = yearChunks[cIdx];
+    const chunkCountries = countriesToSync.filter((c) => {
+      const missing = countryMissingMap.get(c);
+      return missing?.some((y) => chunk.includes(y));
+    });
+
+    if (chunkCountries.length === 0) continue;
+
+    const reporterCodesParam = chunkCountries.map((c) => c.id).join(',');
     const periodParam = chunk.join(',');
-    const ag2Url = `https://comtradeapi.un.org/data/v1/get/C/A/HS?period=${periodParam}&reporterCode=${reporterParam}&flowCode=X,M&partnerCode=0&partner2Code=0&customsCode=C00&motCode=0&cmdCode=AG2`;
+    const serviceUrl = `https://comtradeapi.un.org/data/v1/get/S/A/EB?period=${periodParam}&reporterCode=${reporterCodesParam}&flowCode=M,X&partnerCode=0`;
+
     try {
-      const res = await fetchComtradeWithPacer(ag2Url);
-      if (res.ok) {
-        for (const y of chunk) successfulGoodsYears.add(y);
-        const json = (await res.json()) as { data?: Ag2Row[] };
-        if (json.data) newAg2Rows.push(...json.data);
+      const sRes = await fetchComtradeWithPacer(serviceUrl);
+      if (sRes.ok) {
+        const sJson = (await sRes.json()) as { data?: ServiceRow[] };
+        const rows = sJson.data || [];
+
+        stage.progress(cIdx + 1, yearChunks.length, `Years ${chunk[0]}..${chunk[chunk.length - 1]} (${chunkCountries.length} countries): ${rows.length} rows`);
+
+        // Initialize queried countries and years in this chunk: default to null
+        for (const country of chunkCountries) {
+          if (!cache.countries[country.code]) {
+            cache.countries[country.code] = { code: country.code, years: {} };
+          }
+          const profile = cache.countries[country.code];
+          const missing = countryMissingMap.get(country) || [];
+
+          for (const y of chunk) {
+            if (missing.includes(y)) {
+              const yStr = String(y);
+              if (!profile.years[yStr]) profile.years[yStr] = {};
+              if (profile.years[yStr].servicesExports === undefined) profile.years[yStr].servicesExports = null;
+              if (profile.years[yStr].servicesImports === undefined) profile.years[yStr].servicesImports = null;
+            }
+          }
+        }
+
+        // Ingest returned service rows with canonical EBOPS normalization
+        for (const r of rows) {
+          const country = COUNTRY_BY_ID.get(r.reporterCode);
+          if (!country) continue;
+
+          const normCmd = EBOPS_NORMALIZATION_MAP[r.cmdCode];
+          if (!normCmd) continue;
+
+          const valB = round(r.primaryValue / 1e9, 3);
+          if (valB <= 0) continue;
+
+          const profile = cache.countries[country.code];
+          if (!profile) continue;
+
+          const yStr = r.period;
+          if (!profile.years[yStr]) profile.years[yStr] = {};
+
+          if (r.flowCode === 'M') {
+            if (!profile.years[yStr].servicesImports) profile.years[yStr].servicesImports = {};
+            profile.years[yStr].servicesImports[normCmd] = round((profile.years[yStr].servicesImports[normCmd] || 0) + valB, 3);
+          } else if (r.flowCode === 'X') {
+            if (!profile.years[yStr].servicesExports) profile.years[yStr].servicesExports = {};
+            profile.years[yStr].servicesExports[normCmd] = round((profile.years[yStr].servicesExports[normCmd] || 0) + valB, 3);
+          }
+        }
+
+        // Update checksums and clean profiles
+        for (const country of chunkCountries) {
+          const profile = cache.countries[country.code];
+          if (!profile) continue;
+          const missing = countryMissingMap.get(country) || [];
+
+          for (const y of chunk) {
+            if (missing.includes(y)) {
+              const yStr = String(y);
+              const checksum = catalog.servicesChecksums.get(`${country.id}:${y}`);
+              if (checksum !== undefined && profile.years[yStr]) {
+                profile.years[yStr].servicesChecksum = checksum;
+              }
+            }
+          }
+
+          cache.countries[country.code] = profile;
+        }
+
+        hasChanges = true;
+        writeJsonAsync(DATA_FILE, cache);
       } else {
-        logger.warn(`[Batch Comtrade AG2] HTTP ${res.status} (${periodParam}): ${await res.text()}`);
+        stage.warn(`HTTP ${sRes.status} (${periodParam}): ${await sRes.text()}`);
       }
     } catch (err) {
       if (err instanceof HttpError && err.isQuotaExhausted) break;
-      logger.warn(`[Batch Comtrade AG2] query failed (${periodParam}): ${err}`);
+      stage.warn(`Query failed (${periodParam}): ${err}`);
     }
   }
 
-  // 3. Fetch Partners (cmdCode=TOTAL, all partners)
-  const newPartnerRows: PartnerRow[] = [];
-  const successfulPartnerYears = new Set<number>();
-  if (!comtradeQuotaExhausted) {
-    for (const chunk of partnerChunks) {
-      if (comtradeQuotaExhausted) break;
-      const periodParam = chunk.join(',');
-      const partnerUrl = `https://comtradeapi.un.org/data/v1/get/C/A/HS?period=${periodParam}&reporterCode=${reporterParam}&flowCode=X,M&partner2Code=0&customsCode=C00&motCode=0&cmdCode=TOTAL`;
-      try {
-        const pRes = await fetchComtradeWithPacer(partnerUrl);
-        if (pRes.ok) {
-          for (const y of chunk) successfulPartnerYears.add(y);
-          const pJson = (await pRes.json()) as { data?: PartnerRow[] };
-          if (pJson.data) newPartnerRows.push(...pJson.data);
-        } else {
-          logger.warn(`[Batch Comtrade Partners] HTTP ${pRes.status} (${periodParam}): ${await pRes.text()}`);
-        }
-      } catch (err) {
-        if (err instanceof HttpError && err.isQuotaExhausted) break;
-        logger.warn(`[Batch Comtrade Partners] query failed (${periodParam}): ${err}`);
-      }
-    }
-  }
-
-  // 4. Fetch Services (EB02)
-  const newServiceRows: ServiceRow[] = [];
-  const successfulServiceYears = new Set<number>();
-  if (!comtradeQuotaExhausted) {
-    for (const chunk of serviceChunks) {
-      if (comtradeQuotaExhausted) break;
-      const periodParam = chunk.join(',');
-      const ebopsCodesParam = EBOPS_SERVICE_CODES.join(',');
-      const serviceUrl = `https://comtradeapi.un.org/data/v1/get/S/A/EB?period=${periodParam}&reporterCode=${reporterParam}&flowCode=X,M&partnerCode=0&cmdCode=${ebopsCodesParam}`;
-      try {
-        const sRes = await fetchComtradeWithPacer(serviceUrl);
-        if (sRes.ok) {
-          for (const y of chunk) successfulServiceYears.add(y);
-          const sJson = (await sRes.json()) as { data?: ServiceRow[] };
-          if (sJson.data) newServiceRows.push(...sJson.data);
-        } else {
-          logger.warn(`[Batch Comtrade Services] HTTP ${sRes.status} (${periodParam}): ${await sRes.text()}`);
-        }
-      } catch (err) {
-        if (err instanceof HttpError && err.isQuotaExhausted) break;
-        logger.warn(`[Batch Comtrade Services] query failed (${periodParam}): ${err}`);
-      }
-    }
-  }
-
-  // 5. Ingest results per country in the batch
-  const resultMap: Record<string, RawCountryProfile> = {};
-
-  for (const country of batch) {
-    const existing = existingMap[country.code];
-    const missing = countryMissingMap.get(country.code);
-    if (!missing) continue;
-
-    const countryAg2 = newAg2Rows.filter((r) => r.reporterCode === country.id);
-    const countryPartners = newPartnerRows.filter((r) => r.reporterCode === country.id);
-    const countryServices = newServiceRows.filter((r) => r.reporterCode === country.id);
-
-    const imfIndicators = missing.needsImf && !comtradeQuotaExhausted ? await fetchImfIndicators(country.iso3) : {};
-
-    // If quota was exhausted and nothing was fetched for this country, preserve existing
-    if (comtradeQuotaExhausted && countryAg2.length === 0 && countryPartners.length === 0 && countryServices.length === 0) {
-      if (existing) resultMap[country.code] = existing;
-      continue;
-    }
-
-    const updatedYears: Record<string, RawYearData> = { ...(existing?.years || {}) };
-
-    // Initialize queried years only if upstream request was successful: default to null (confirmed no trade reported)
-    for (const y of missing.goods) {
-      if (!successfulGoodsYears.has(y)) continue;
-      const yStr = String(y);
-      if (!updatedYears[yStr]) updatedYears[yStr] = {};
-      if (updatedYears[yStr].exports === undefined) updatedYears[yStr].exports = null;
-      if (updatedYears[yStr].imports === undefined) updatedYears[yStr].imports = null;
-    }
-    for (const y of missing.partners) {
-      if (!successfulPartnerYears.has(y)) continue;
-      const yStr = String(y);
-      if (!updatedYears[yStr]) updatedYears[yStr] = {};
-      if (updatedYears[yStr].partnerExports === undefined) updatedYears[yStr].partnerExports = null;
-      if (updatedYears[yStr].partnerImports === undefined) updatedYears[yStr].partnerImports = null;
-    }
-    for (const y of missing.services) {
-      if (!successfulServiceYears.has(y)) continue;
-      const yStr = String(y);
-      if (!updatedYears[yStr]) updatedYears[yStr] = {};
-      if (updatedYears[yStr].servicesExports === undefined) updatedYears[yStr].servicesExports = null;
-      if (updatedYears[yStr].servicesImports === undefined) updatedYears[yStr].servicesImports = null;
-    }
-
-    // Ingest AG2
-    for (const r of countryAg2) {
-      const valB = round(r.primaryValue / 1e9, 3);
-      if (valB <= 0) continue;
-
-      const yStr = r.period;
-      let yData = updatedYears[yStr];
-      if (!yData) {
-        yData = {};
-        updatedYears[yStr] = yData;
-      }
-
-      const ch = r.cmdCode.padStart(2, '0');
-      if (r.flowCode === 'X') {
-        if (!yData.exports) yData.exports = {};
-        yData.exports[ch] = valB;
-      } else if (r.flowCode === 'M') {
-        if (!yData.imports) yData.imports = {};
-        yData.imports[ch] = valB;
-      }
-    }
-
-    // Ingest Services (keep strictly valid 11 EBOPS categories with non-zero volume)
-    const validEbops = new Set<string>(EBOPS_SERVICE_CODES);
-    for (const r of countryServices) {
-      if (!validEbops.has(r.cmdCode)) continue;
-      const valB = round(r.primaryValue / 1e9, 3);
-      if (valB <= 0) continue;
-
-      const yStr = r.period;
-      let yData = updatedYears[yStr];
-      if (!yData) {
-        yData = {};
-        updatedYears[yStr] = yData;
-      }
-
-      const code = r.cmdCode;
-      if (r.flowCode === 'X') {
-        if (!yData.servicesExports) yData.servicesExports = {};
-        yData.servicesExports[code] = valB;
-      } else if (r.flowCode === 'M') {
-        if (!yData.servicesImports) yData.servicesImports = {};
-        yData.servicesImports[code] = valB;
-      }
-    }
-
-    // Ingest Partners (ignore world total and negligible or zero volumes)
-    for (const r of countryPartners) {
-      if (r.partnerCode === 0) continue;
-      const valB = round(r.primaryValue / 1e9, 3);
-      if (valB <= 0) continue;
-
-      const yStr = r.period;
-      let yData = updatedYears[yStr];
-      if (!yData) {
-        yData = {};
-        updatedYears[yStr] = yData;
-      }
-
-      const partnerCountry = COUNTRY_BY_ID.get(r.partnerCode);
-      let pCode = partnerCountry ? partnerCountry.code.toUpperCase() : resolveRegionCode(partnersMap?.[r.partnerCode] || String(r.partnerCode));
-      if (STATISTICAL_PARTNER_CODES.has(pCode.toUpperCase()) || pCode.startsWith('_')) {
-        pCode = 'Others';
-      }
-      if (r.flowCode === 'X') {
-        if (!yData.partnerExports) yData.partnerExports = {};
-        yData.partnerExports[pCode] = round((yData.partnerExports[pCode] || 0) + valB, 3);
-      } else if (r.flowCode === 'M') {
-        if (!yData.partnerImports) yData.partnerImports = {};
-        yData.partnerImports[pCode] = round((yData.partnerImports[pCode] || 0) + valB, 3);
-      }
-    }
-
-    // Merge IMF indicators
-    const updatedMacro: Record<RequiredMacroKey, Record<string, number | null>> = {
-      gdpNominalUsd: { ...(existing?.macro?.gdpNominalUsd || {}), ...(imfIndicators.NGDPD || {}) },
-      gdpRealGrowthYoy: { ...(existing?.macro?.gdpRealGrowthYoy || {}), ...(imfIndicators.NGDP_RPCH || {}) },
-      gdpPerCapitaUsd: { ...(existing?.macro?.gdpPerCapitaUsd || {}), ...(imfIndicators.NGDPDPC || {}) },
-      gdpPppUsd: { ...(existing?.macro?.gdpPppUsd || {}), ...(imfIndicators.PPPGDP || {}) },
-      govExpenditurePctGdp: { ...(existing?.macro?.govExpenditurePctGdp || {}), ...(imfIndicators.G_X_G01_GDP_PT || {}) },
-      govRevenuePctGdp: { ...(existing?.macro?.govRevenuePctGdp || {}), ...(imfIndicators.GGR_G01_GDP_PT || {}) },
-      govBalancePctGdp: { ...(existing?.macro?.govBalancePctGdp || {}), ...(imfIndicators.GGXCNL_NGDP || {}) },
-      govDebtPctGdp: { ...(existing?.macro?.govDebtPctGdp || {}), ...(imfIndicators.GGXWDG_NGDP || {}) },
-      inflationPct: { ...(existing?.macro?.inflationPct || {}), ...(imfIndicators.PCPIPCH || {}) },
-      unemploymentPct: { ...(existing?.macro?.unemploymentPct || {}), ...(imfIndicators.LUR || {}) },
-      currentAccountPctGdp: { ...(existing?.macro?.currentAccountPctGdp || {}), ...(imfIndicators.BCA_NGDPD || {}) },
-    };
-
-    if (catalog && country.id) {
-      for (const y of targetYears) {
-        const yStr = String(y);
-        const yData = updatedYears[yStr];
-        if (yData) {
-          const upstreamGoods = catalog.goodsChecksums.get(`${country.id}:${y}`);
-          if (upstreamGoods !== undefined) {
-            yData.goodsChecksum = upstreamGoods;
-          }
-          const upstreamServices = catalog.servicesChecksums.get(`${country.id}:${y}`);
-          if (upstreamServices !== undefined) {
-            yData.servicesChecksum = upstreamServices;
-          }
-        }
-      }
-    }
-
-    resultMap[country.code] = {
-      code: country.code,
-      years: updatedYears,
-      macro: updatedMacro,
-    };
-  }
-
-  return resultMap;
+  return hasChanges;
 }
 
 /** Fetches completely raw, uncalculated CountryProfile data from 1990 to CURRENT_YEAR for a single country. */
@@ -586,11 +703,21 @@ export async function fetchRawCountryProfile(
 ): Promise<RawCountryProfile | null> {
   const meta = COUNTRY_BY_CODE.get(countryCode.toLowerCase()) || COUNTRY_BY_ISO3.get(countryCode.toUpperCase());
   if (!meta) return existing ?? null;
-  const resultMap = await fetchRawCountryBatch([meta], existing ? { [meta.code]: existing } : {}, partnersMap, catalog);
-  return resultMap[meta.code] || existing || null;
+
+  const fakeCache: CountryPipelineCache = {
+    countries: { [meta.code]: existing || { code: meta.code, years: {} } },
+  };
+  const cat = catalog || (await fetchAvailabilityCatalog());
+  const pMap = partnersMap || (await getPartnerAreasMap());
+
+  await syncMacroStage(fakeCache, cat, [meta]);
+  await syncGoodsStage(fakeCache, cat, pMap, [meta]);
+  await syncServicesStage(fakeCache, cat, [meta]);
+
+  return fakeCache.countries[meta.code] || null;
 }
 
-/** Loads existing Tier 1 raw country cache snapshot from data.json. */
+/** Loads existing Tier 1 raw country cache snapshot from data.json.br. */
 async function loadCountryCache(): Promise<CountryPipelineCache> {
   if (await fileExists(DATA_FILE)) {
     try {
@@ -606,64 +733,139 @@ async function loadCountryCache(): Promise<CountryPipelineCache> {
   return { countries: {} };
 }
 
+/**
+ * Computes bilateral trade category breakdowns (10 macro goods categories and 2-digit HS chapters)
+ * for a specific trading partner in billion USD.
+ */
+function buildPartnerCategoryBreakdown(chMap: Record<string, number>): {
+  macro: Record<string, number>;
+  detailed: Record<string, number>;
+} {
+  const detList: [string, number][] = [];
+  const macroMap: Record<string, number> = {};
+
+  for (const [chStr, valB] of Object.entries(chMap)) {
+    if (typeof valB === 'number' && valB > 0) {
+      const code = chStr.padStart(2, '0');
+      const val = round(valB, 2);
+      detList.push([code, val]);
+
+      const macroId = HS_TO_MACRO_MAP[code] || 'misc_instruments';
+      macroMap[macroId] = (macroMap[macroId] || 0) + valB;
+    }
+  }
+
+  detList.sort((a, b) => b[1] - a[1]);
+  const detailed: Record<string, number> = {};
+  for (const [code, val] of detList) {
+    detailed[code] = val;
+  }
+
+  const macroList = Object.entries(macroMap)
+    .map(([mId, mVal]) => [mId, round(mVal, 2)] as const)
+    .sort((a, b) => b[1] - a[1]);
+  const macro: Record<string, number> = {};
+  for (const [mId, val] of macroList) {
+    macro[mId] = val;
+  }
+
+  return { macro, detailed };
+}
+
 /** Converts raw country cache into a fully aggregated and formatted Tier 2 production dataset. */
-export function buildProductionProfile(raw: RawCountryProfile): CountryProfileData {
+export function buildProductionProfile(raw: RawCountryProfile, allCountries?: Record<string, RawCountryProfile>): CountryProfileData {
   const years = Object.keys(raw.years || {})
     .map(Number)
     .filter((y) => {
+      if (y < START_YEAR || y > CURRENT_YEAR) return false;
       const yStr = String(y);
       const yData = raw.years[yStr];
-      const hasGoods = (yData?.exports && Object.keys(yData.exports).length > 0) || (yData?.imports && Object.keys(yData.imports).length > 0);
+      const hasGoods = (yData?.goodsExports && Object.keys(yData.goodsExports).length > 0) || (yData?.partnerGoodsExports && Object.keys(yData.partnerGoodsExports).length > 0);
       const hasServ = (yData?.servicesExports && Object.keys(yData.servicesExports).length > 0) || (yData?.servicesImports && Object.keys(yData.servicesImports).length > 0);
-      const hasGdp = raw.macro?.gdpNominalUsd?.[yStr] != null;
+      const hasGdp = yData?.ngdpd != null;
       return hasGoods || hasServ || hasGdp;
     })
     .sort((a, b) => a - b);
 
-  // Trade totals
-  const goodsExportsUsd: (number | null)[] = [];
-  const goodsImportsUsd: (number | null)[] = [];
-  const goodsBalanceUsd: (number | null)[] = [];
-
-  const servicesExportsUsd: (number | null)[] = [];
-  const servicesImportsUsd: (number | null)[] = [];
-  const servicesBalanceUsd: (number | null)[] = [];
-
-  const totalExportsUsd: (number | null)[] = [];
-  const totalImportsUsd: (number | null)[] = [];
-  const netBalanceUsd: (number | null)[] = [];
-
-  // Macro categories: 10 goods + 7 services
-  const macroExports: CountryCategoryTuple[][] = [];
-  const macroImports: CountryCategoryTuple[][] = [];
-
-  // Detailed categories: 97 HS chapters + 11 EBOPS services codes
-  const detailedExports: CountryCategoryTuple[][] = [];
-  const detailedImports: CountryCategoryTuple[][] = [];
-
-  const partnerExports: CountryPartnerTuple[][] = [];
-  const partnerImports: CountryPartnerTuple[][] = [];
+  const timeline: CountryYearRecord[] = [];
 
   for (let i = 0; i < years.length; i++) {
     const yStr = String(years[i]);
     const yData = raw.years[yStr];
     if (!yData) {
-      goodsExportsUsd.push(null);
-      goodsImportsUsd.push(null);
-      goodsBalanceUsd.push(null);
-      servicesExportsUsd.push(null);
-      servicesImportsUsd.push(null);
-      servicesBalanceUsd.push(null);
-      totalExportsUsd.push(null);
-      totalImportsUsd.push(null);
-      netBalanceUsd.push(null);
-      macroExports.push([]);
-      macroImports.push([]);
-      detailedExports.push([]);
-      detailedImports.push([]);
-      partnerExports.push([]);
-      partnerImports.push([]);
+      timeline.push({
+        year: years[i],
+        exports: { total: 0, goods: null, services: null, macro: {}, detailed: {}, partners: {} },
+        imports: { total: 0, goods: null, services: null, macro: {}, detailed: {}, partners: {} },
+        netBalanceUsd: null,
+        macro: {
+          gdpNominalUsd: null,
+          gdpRealGrowthYoy: null,
+          gdpPerCapitaUsd: null,
+          gdpPppUsd: null,
+          govExpenditureUsd: null,
+          govExpenditurePctGdp: null,
+          govRevenueUsd: null,
+          govRevenuePctGdp: null,
+          govBalanceUsd: null,
+          govBalancePctGdp: null,
+          govDebtUsd: null,
+          govDebtPctGdp: null,
+          inflationPct: null,
+          unemploymentPct: null,
+          currentAccountUsd: null,
+          currentAccountPctGdp: null,
+          growth: {
+            gdpYoy: null,
+            gdpDiffUsd: null,
+            revenueYoy: null,
+            revenueDiffUsd: null,
+            expenditureYoy: null,
+            expenditureDiffUsd: null,
+            debtYoy: null,
+            debtDiffUsd: null,
+          },
+        },
+      });
       continue;
+    }
+
+    // Resolve symmetrical partner and category imports from allCountries
+    let symmetricalCategoryImports: Record<string, number> | null = null;
+    let symmetricalPartnerImports: Record<string, number> | null = null;
+    const yearMacroImports: Record<string, Record<string, number>> = {};
+    const yearDetImports: Record<string, Record<string, number>> = {};
+
+    if (allCountries) {
+      symmetricalCategoryImports = {};
+      symmetricalPartnerImports = {};
+      const cCode = raw.code.toLowerCase();
+
+      for (const [pCode, pProfile] of Object.entries(allCountries)) {
+        if (pCode.toLowerCase() === cCode) continue;
+        const pYear = pProfile.years?.[yStr];
+        if (!pYear) continue;
+
+        const pGoods = pYear.partnerGoodsExports?.[cCode];
+        if (pGoods) {
+          let pTot = 0;
+          for (const [chStr, valB] of Object.entries(pGoods)) {
+            if (typeof valB === 'number' && valB > 0) {
+              const key = chStr.padStart(2, '0');
+              symmetricalCategoryImports[key] = round((symmetricalCategoryImports[key] || 0) + valB, 3);
+              pTot = round(pTot + valB, 3);
+            }
+          }
+          if (pTot > 0) {
+            const pIsoUpper = pCode.toUpperCase();
+            symmetricalPartnerImports[pIsoUpper] = pTot;
+
+            const { macro, detailed } = buildPartnerCategoryBreakdown(pGoods);
+            yearMacroImports[pIsoUpper] = macro;
+            yearDetImports[pIsoUpper] = detailed;
+          }
+        }
+      }
     }
 
     // 1. Calculate Physical Goods (HS chapters -> 10 goods categories)
@@ -676,10 +878,13 @@ export function buildProductionProfile(raw: RawCountryProfile): CountryProfileDa
       yearMacroM[id] = 0;
     }
 
+    const rawGoodsX = yData.goodsExports;
+    const rawGoodsM = symmetricalCategoryImports;
+
     for (const ch of HS2_CHAPTERS) {
       const code = ch.code;
-      const xVal = yData.exports?.[code] ?? null;
-      const mVal = yData.imports?.[code] ?? null;
+      const xVal = rawGoodsX?.[code] ?? null;
+      const mVal = rawGoodsM?.[code] ?? null;
 
       const macroId = HS_TO_MACRO_MAP[code] || 'misc_instruments';
       if (xVal != null && xVal > 0) {
@@ -694,9 +899,7 @@ export function buildProductionProfile(raw: RawCountryProfile): CountryProfileDa
 
     // 2. Calculate Commercial Services (EBOPS parent codes -> 7 services categories)
     let yearServX = 0;
-    let yearServM = 0;
     let hasServX = false;
-    let hasServM = false;
 
     for (const [ebCode, val] of Object.entries(yData.servicesExports || {})) {
       if (val != null && val > 0) {
@@ -708,6 +911,9 @@ export function buildProductionProfile(raw: RawCountryProfile): CountryProfileDa
         }
       }
     }
+
+    let yearServM = 0;
+    let hasServM = false;
 
     for (const [ebCode, val] of Object.entries(yData.servicesImports || {})) {
       if (val != null && val > 0) {
@@ -722,198 +928,213 @@ export function buildProductionProfile(raw: RawCountryProfile): CountryProfileDa
 
     const gX = yearGoodsX > 0 ? round(yearGoodsX, 3) : null;
     const gM = yearGoodsM > 0 ? round(yearGoodsM, 3) : null;
-    goodsExportsUsd.push(gX);
-    goodsImportsUsd.push(gM);
-    goodsBalanceUsd.push(gX != null && gM != null ? round(gX - gM, 3) : null);
-
     const sX = hasServX ? round(yearServX, 3) : null;
     const sM = hasServM ? round(yearServM, 3) : null;
-    servicesExportsUsd.push(sX);
-    servicesImportsUsd.push(sM);
-    servicesBalanceUsd.push(sX != null && sM != null ? round(sX - sM, 3) : null);
 
     // Combined Totals (Goods + Services)
     const totX = round((gX || 0) + (sX || 0), 3);
     const totM = round((gM || 0) + (sM || 0), 3);
-    totalExportsUsd.push(totX > 0 ? totX : gX);
-    totalImportsUsd.push(totM > 0 ? totM : gM);
-    netBalanceUsd.push(totX > 0 && totM > 0 ? round(totX - totM, 3) : null);
+    const netBalanceUsd = totX > 0 && totM > 0 ? round(totX - totM, 3) : null;
 
-    // Macro categories tuples sorted by volume descending
-    const catMacroXTuples: CountryCategoryTuple[] = [];
-    for (const id of TRADE_CATEGORY_IDS) {
-      const val = yearMacroX[id];
-      if (val > 0) {
-        catMacroXTuples.push([id, round(val, 2), percentage(val, totX > 0 ? totX : 1, 1)]);
-      }
+    // Macro categories: sorted descending by volume
+    const catMacroXMap: Record<string, number> = {};
+    const catMacroXList = TRADE_CATEGORY_IDS.filter((id) => yearMacroX[id] > 0)
+      .map((id) => [id, round(yearMacroX[id], 2)] as const)
+      .sort((a, b) => b[1] - a[1]);
+    for (const [id, val] of catMacroXList) {
+      catMacroXMap[id] = val;
     }
-    catMacroXTuples.sort((a, b) => b[1] - a[1]);
-    macroExports.push(catMacroXTuples);
 
-    const catMacroMTuples: CountryCategoryTuple[] = [];
-    for (const id of TRADE_CATEGORY_IDS) {
-      const val = yearMacroM[id];
-      if (val > 0) {
-        catMacroMTuples.push([id, round(val, 2), percentage(val, totM > 0 ? totM : 1, 1)]);
-      }
+    const catMacroMMap: Record<string, number> = {};
+    const catMacroMList = TRADE_CATEGORY_IDS.filter((id) => yearMacroM[id] > 0)
+      .map((id) => [id, round(yearMacroM[id], 2)] as const)
+      .sort((a, b) => b[1] - a[1]);
+    for (const [id, val] of catMacroMList) {
+      catMacroMMap[id] = val;
     }
-    catMacroMTuples.sort((a, b) => b[1] - a[1]);
-    macroImports.push(catMacroMTuples);
 
-    // Detailed categories tuples sorted by volume descending
-    const catDetXTuples: CountryCategoryTuple[] = [];
+    // Detailed categories: sorted descending by volume
+    const catDetXMap: Record<string, number> = {};
+    const catDetXList: [string, number][] = [];
     for (const ch of HS2_CHAPTERS) {
-      const val = yData.exports?.[ch.code];
+      const val = rawGoodsX?.[ch.code];
       if (val != null && val > 0) {
-        catDetXTuples.push([ch.code, round(val, 2), percentage(val, totX > 0 ? totX : 1, 1)]);
+        catDetXList.push([ch.code, round(val, 2)]);
       }
     }
-    for (const eb of EBOPS_SERVICE_CODES) {
-      const val = yData.servicesExports?.[eb];
-      if (val != null && val > 0) {
-        catDetXTuples.push([eb, round(val, 2), percentage(val, totX > 0 ? totX : 1, 1)]);
+    if (yData.servicesExports) {
+      for (const [eb, val] of Object.entries(yData.servicesExports)) {
+        if (val != null && val > 0 && EBOPS_TO_SERVICES_MAP[eb]) {
+          catDetXList.push([eb, round(val, 2)]);
+        }
       }
     }
-    catDetXTuples.sort((a, b) => b[1] - a[1]);
-    detailedExports.push(catDetXTuples);
+    catDetXList.sort((a, b) => b[1] - a[1]);
+    for (const [code, val] of catDetXList) {
+      catDetXMap[code] = val;
+    }
 
-    const catDetMTuples: CountryCategoryTuple[] = [];
+    const catDetMMap: Record<string, number> = {};
+    const catDetMList: [string, number][] = [];
     for (const ch of HS2_CHAPTERS) {
-      const val = yData.imports?.[ch.code];
+      const val = rawGoodsM?.[ch.code] ?? null;
       if (val != null && val > 0) {
-        catDetMTuples.push([ch.code, round(val, 2), percentage(val, totM > 0 ? totM : 1, 1)]);
+        catDetMList.push([ch.code, round(val, 2)]);
       }
     }
-    for (const eb of EBOPS_SERVICE_CODES) {
-      const val = yData.servicesImports?.[eb];
-      if (val != null && val > 0) {
-        catDetMTuples.push([eb, round(val, 2), percentage(val, totM > 0 ? totM : 1, 1)]);
+    if (yData.servicesImports) {
+      for (const [eb, val] of Object.entries(yData.servicesImports)) {
+        if (val != null && val > 0 && EBOPS_TO_SERVICES_MAP[eb]) {
+          catDetMList.push([eb, round(val, 2)]);
+        }
       }
     }
-    catDetMTuples.sort((a, b) => b[1] - a[1]);
-    detailedImports.push(catDetMTuples);
+    catDetMList.sort((a, b) => b[1] - a[1]);
+    for (const [code, val] of catDetMList) {
+      catDetMMap[code] = val;
+    }
 
-    // 3. Export ALL partner countries (excluding zero values), sorted by volume descending
-    const pX = Object.entries(yData.partnerExports || {}).filter(([, val]) => val > 0);
-    const pXTot = pX.reduce((acc, [, val]) => acc + val, 0);
-    const sortedPX = pX.sort((a, b) => b[1] - a[1]).map(([pIso, val]) => [pIso, round(val, 2), percentage(val, pXTot, 1)] as CountryPartnerTuple);
-    partnerExports.push(sortedPX);
+    // 3. Export ALL partner countries on the fly from partnerGoodsExports
+    const pX: [string, number][] = [];
+    const pXMap: Record<string, CountryPartnerTradeRecord> = {};
 
-    const pM = Object.entries(yData.partnerImports || {}).filter(([, val]) => val > 0);
-    const pMTot = pM.reduce((acc, [, val]) => acc + val, 0);
-    const sortedPM = pM.sort((a, b) => b[1] - a[1]).map(([pIso, val]) => [pIso, round(val, 2), percentage(val, pMTot, 1)] as CountryPartnerTuple);
-    partnerImports.push(sortedPM);
-  }
+    if (yData.partnerGoodsExports) {
+      for (const [pIso, chMap] of Object.entries(yData.partnerGoodsExports)) {
+        if (!chMap) continue;
+        let sumVal = 0;
+        for (const val of Object.values(chMap)) {
+          if (typeof val === 'number' && val > 0) sumVal += val;
+        }
+        if (sumVal > 0) {
+          const pIsoUpper = pIso.toUpperCase();
+          const roundedVal = round(sumVal, 2);
+          pX.push([pIsoUpper, roundedVal]);
 
-  // 4. Map and calculate comprehensive IMF macroeconomic indicators
-  const getMacroVal = (key: RequiredMacroKey, y: number): number | null => {
-    const map = raw.macro?.[key];
-    if (!map) return null;
-    const val = map[String(y)];
-    return typeof val === 'number' ? val : null;
-  };
+          const { macro, detailed } = buildPartnerCategoryBreakdown(chMap);
+          pXMap[pIsoUpper] = {
+            total: roundedVal,
+            macro,
+            detailed,
+          };
+        }
+      }
+    }
 
-  const gdpNominalUsd = years.map((y) => {
-    const val = getMacroVal('gdpNominalUsd', y);
-    return val != null ? round(val, 2) : null;
-  });
-  const gdpRealGrowthYoy = years.map((y) => {
-    const val = getMacroVal('gdpRealGrowthYoy', y);
-    return val != null ? round(val, 2) : null;
-  });
-  const gdpPerCapitaUsd = years.map((y) => {
-    const val = getMacroVal('gdpPerCapitaUsd', y);
-    return val != null ? round(val, 1) : null;
-  });
-  const gdpPppUsd = years.map((y) => {
-    const val = getMacroVal('gdpPppUsd', y);
-    return val != null ? round(val, 2) : null;
-  });
+    const sortedPXMap: Record<string, CountryPartnerTradeRecord> = {};
+    for (const [pIsoUpper] of pX.sort((a, b) => b[1] - a[1])) {
+      sortedPXMap[pIsoUpper] = pXMap[pIsoUpper];
+    }
 
-  // Government budget (% of GDP and billion USD)
-  const govExpenditurePctGdp = years.map((y) => {
-    const val = getMacroVal('govExpenditurePctGdp', y);
-    return val != null ? round(val, 2) : null;
-  });
-  const govRevenuePctGdp = years.map((y) => {
-    const val = getMacroVal('govRevenuePctGdp', y);
-    return val != null ? round(val, 2) : null;
-  });
-  const govBalancePctGdp = years.map((y) => {
-    const val = getMacroVal('govBalancePctGdp', y);
-    return val != null ? round(val, 2) : null;
-  });
-  const govDebtPctGdp = years.map((y) => {
-    const val = getMacroVal('govDebtPctGdp', y);
-    return val != null ? round(val, 1) : null;
-  });
+    const sortedPMMap: Record<string, CountryPartnerTradeRecord> = {};
+    const pMList = Object.entries(symmetricalPartnerImports || {}).filter(([, val]) => val > 0);
+    const sortedPMList = pMList.sort((a, b) => b[1] - a[1]);
 
-  const govExpenditureUsd = years.map((_, i) => (gdpNominalUsd[i] != null && govExpenditurePctGdp[i] != null ? round((gdpNominalUsd[i]! * govExpenditurePctGdp[i]!) / 100, 2) : null));
-  const govRevenueUsd = years.map((_, i) => (gdpNominalUsd[i] != null && govRevenuePctGdp[i] != null ? round((gdpNominalUsd[i]! * govRevenuePctGdp[i]!) / 100, 2) : null));
-  const govBalanceUsd = years.map((_, i) => (gdpNominalUsd[i] != null && govBalancePctGdp[i] != null ? round((gdpNominalUsd[i]! * govBalancePctGdp[i]!) / 100, 2) : null));
-  const govDebtUsd = years.map((_, i) => (gdpNominalUsd[i] != null && govDebtPctGdp[i] != null ? round((gdpNominalUsd[i]! * govDebtPctGdp[i]!) / 100, 2) : null));
+    for (const [pIsoUpper, pTot] of sortedPMList) {
+      const roundedVal = round(pTot, 2);
+      sortedPMMap[pIsoUpper] = {
+        total: roundedVal,
+        macro: yearMacroImports[pIsoUpper] || {},
+        detailed: yearDetImports[pIsoUpper] || {},
+      };
+    }
 
-  const inflationPct = years.map((y) => {
-    const val = getMacroVal('inflationPct', y);
-    return val != null ? round(val, 2) : null;
-  });
-  const unemploymentPct = years.map((y) => {
-    const val = getMacroVal('unemploymentPct', y);
-    return val != null ? round(val, 2) : null;
-  });
-  const currentAccountPctGdp = years.map((y) => {
-    const val = getMacroVal('currentAccountPctGdp', y);
-    return val != null ? round(val, 2) : null;
-  });
-  const currentAccountUsd = years.map((_, i) => (gdpNominalUsd[i] != null && currentAccountPctGdp[i] != null ? round((gdpNominalUsd[i]! * currentAccountPctGdp[i]!) / 100, 2) : null));
+    // 4. Macroeconomic indicators from IMF WEO
+    const gdpNominal = yData.ngdpd != null ? round(yData.ngdpd, 2) : null;
+    const gx = yData.gx != null ? round(yData.gx, 2) : null;
+    const ggr = yData.ggr != null ? round(yData.ggr, 2) : null;
+    const ggxcnl = yData.ggxcnl != null ? round(yData.ggxcnl, 2) : null;
+    const ggxwdg = yData.ggxwdg != null ? round(yData.ggxwdg, 1) : null;
+    const bca = yData.bca != null ? round(yData.bca, 2) : null;
 
-  // 5. YoY Growth Dynamics
-  const gdpYoy: (number | null)[] = [null];
-  const gdpDiffUsd: (number | null)[] = [null];
-  const revenueYoy: (number | null)[] = [null];
-  const revenueDiffUsd: (number | null)[] = [null];
-  const expenditureYoy: (number | null)[] = [null];
-  const expenditureDiffUsd: (number | null)[] = [null];
-  const debtYoy: (number | null)[] = [null];
-  const debtDiffUsd: (number | null)[] = [null];
+    const govExpUsd = gdpNominal != null && gx != null ? round((gdpNominal * gx) / 100, 2) : null;
+    const govRevUsd = gdpNominal != null && ggr != null ? round((gdpNominal * ggr) / 100, 2) : null;
+    const govBalUsd = gdpNominal != null && ggxcnl != null ? round((gdpNominal * ggxcnl) / 100, 2) : null;
+    const govDebtUsd = gdpNominal != null && ggxwdg != null ? round((gdpNominal * ggxwdg) / 100, 2) : null;
+    const currAccUsd = gdpNominal != null && bca != null ? round((gdpNominal * bca) / 100, 2) : null;
 
-  for (let i = 1; i < years.length; i++) {
+    const prevMacro = timeline[i - 1]?.macro;
     const calcYoy = (c: number | null, p: number | null) => (c == null || p == null || p === 0 ? null : round(((c - p) / Math.abs(p)) * 100, 1));
     const calcDiff = (c: number | null, p: number | null) => (c == null || p == null ? null : round(c - p, 2));
 
-    gdpYoy.push(calcYoy(gdpNominalUsd[i], gdpNominalUsd[i - 1]));
-    gdpDiffUsd.push(calcDiff(gdpNominalUsd[i], gdpNominalUsd[i - 1]));
-    revenueYoy.push(calcYoy(govRevenueUsd[i], govRevenueUsd[i - 1]));
-    revenueDiffUsd.push(calcDiff(govRevenueUsd[i], govRevenueUsd[i - 1]));
-    expenditureYoy.push(calcYoy(govExpenditureUsd[i], govExpenditureUsd[i - 1]));
-    expenditureDiffUsd.push(calcDiff(govExpenditureUsd[i], govExpenditureUsd[i - 1]));
-    debtYoy.push(calcYoy(govDebtUsd[i], govDebtUsd[i - 1]));
-    debtDiffUsd.push(calcDiff(govDebtUsd[i], govDebtUsd[i - 1]));
+    const macroYear: CountryMacroYear = {
+      gdpNominalUsd: gdpNominal,
+      gdpRealGrowthYoy: yData.rpch != null ? round(yData.rpch, 2) : null,
+      gdpPerCapitaUsd: yData.dpc != null ? round(yData.dpc, 1) : null,
+      gdpPppUsd: yData.pppgdp != null ? round(yData.pppgdp, 2) : null,
+      govExpenditureUsd: govExpUsd,
+      govExpenditurePctGdp: gx,
+      govRevenueUsd: govRevUsd,
+      govRevenuePctGdp: ggr,
+      govBalanceUsd: govBalUsd,
+      govBalancePctGdp: ggxcnl,
+      govDebtUsd: govDebtUsd,
+      govDebtPctGdp: ggxwdg,
+      inflationPct: yData.pcpipch != null ? round(yData.pcpipch, 2) : null,
+      unemploymentPct: yData.lur != null ? round(yData.lur, 2) : null,
+      currentAccountUsd: currAccUsd,
+      currentAccountPctGdp: bca,
+      growth: {
+        gdpYoy: calcYoy(gdpNominal, prevMacro?.gdpNominalUsd ?? null),
+        gdpDiffUsd: calcDiff(gdpNominal, prevMacro?.gdpNominalUsd ?? null),
+        revenueYoy: calcYoy(govRevUsd, prevMacro?.govRevenueUsd ?? null),
+        revenueDiffUsd: calcDiff(govRevUsd, prevMacro?.govRevenueUsd ?? null),
+        expenditureYoy: calcYoy(govExpUsd, prevMacro?.govExpenditureUsd ?? null),
+        expenditureDiffUsd: calcDiff(govExpUsd, prevMacro?.govExpenditureUsd ?? null),
+        debtYoy: calcYoy(govDebtUsd, prevMacro?.govDebtUsd ?? null),
+        debtDiffUsd: calcDiff(govDebtUsd, prevMacro?.govDebtUsd ?? null),
+      },
+    };
+
+    timeline.push({
+      year: years[i],
+      exports: {
+        total: totX > 0 ? totX : (gX ?? 0),
+        goods: gX,
+        services: sX,
+        macro: catMacroXMap,
+        detailed: catDetXMap,
+        partners: sortedPXMap,
+      },
+      imports: {
+        total: totM > 0 ? totM : (gM ?? 0),
+        goods: gM,
+        services: sM,
+        macro: catMacroMMap,
+        detailed: catDetMMap,
+        partners: sortedPMMap,
+      },
+      netBalanceUsd,
+      macro: macroYear,
+    });
   }
 
-  // 6. Precompute sorted rankings for interactive toolbar selectors
-  let latestTradeIdx = years.length - 1;
+  // 5. Precompute sorted rankings for interactive toolbar selectors
+  let latestTradeIdx = timeline.length - 1;
   while (latestTradeIdx >= 0) {
-    const x = totalExportsUsd[latestTradeIdx];
-    const m = totalImportsUsd[latestTradeIdx];
-    if ((x != null && x > 0) || (m != null && m > 0)) break;
+    const x = timeline[latestTradeIdx].exports.total;
+    const m = timeline[latestTradeIdx].imports.total;
+    if (x > 0 || m > 0) break;
     latestTradeIdx--;
   }
-  if (latestTradeIdx < 0) latestTradeIdx = years.length - 1;
+  if (latestTradeIdx < 0) latestTradeIdx = timeline.length - 1;
+
+  const latestYear = timeline[latestTradeIdx];
 
   const allMacroTotals: Record<string, number> = {};
   const latestMacroMap: Record<string, number> = {};
-  for (const [id, val] of macroExports[latestTradeIdx] || []) {
-    latestMacroMap[id] = (latestMacroMap[id] || 0) + val;
+  if (latestYear) {
+    for (const [id, val] of Object.entries(latestYear.exports.macro)) {
+      latestMacroMap[id] = (latestMacroMap[id] || 0) + val;
+    }
+    for (const [id, val] of Object.entries(latestYear.imports.macro)) {
+      latestMacroMap[id] = (latestMacroMap[id] || 0) + val;
+    }
   }
-  for (const [id, val] of macroImports[latestTradeIdx] || []) {
-    latestMacroMap[id] = (latestMacroMap[id] || 0) + val;
-  }
-  for (let i = 0; i < macroExports.length; i++) {
-    for (const [id, val] of macroExports[i] || []) {
+  for (const y of timeline) {
+    for (const [id, val] of Object.entries(y.exports.macro)) {
       allMacroTotals[id] = (allMacroTotals[id] || 0) + val;
     }
-    for (const [id, val] of macroImports[i] || []) {
+    for (const [id, val] of Object.entries(y.imports.macro)) {
       allMacroTotals[id] = (allMacroTotals[id] || 0) + val;
     }
   }
@@ -927,17 +1148,19 @@ export function buildProductionProfile(raw: RawCountryProfile): CountryProfileDa
 
   const allDetailedTotals: Record<string, number> = {};
   const latestDetailedMap: Record<string, number> = {};
-  for (const [code, val] of detailedExports[latestTradeIdx] || []) {
-    latestDetailedMap[code] = (latestDetailedMap[code] || 0) + val;
+  if (latestYear) {
+    for (const [code, val] of Object.entries(latestYear.exports.detailed)) {
+      latestDetailedMap[code] = (latestDetailedMap[code] || 0) + val;
+    }
+    for (const [code, val] of Object.entries(latestYear.imports.detailed)) {
+      latestDetailedMap[code] = (latestDetailedMap[code] || 0) + val;
+    }
   }
-  for (const [code, val] of detailedImports[latestTradeIdx] || []) {
-    latestDetailedMap[code] = (latestDetailedMap[code] || 0) + val;
-  }
-  for (let i = 0; i < detailedExports.length; i++) {
-    for (const [code, val] of detailedExports[i] || []) {
+  for (const y of timeline) {
+    for (const [code, val] of Object.entries(y.exports.detailed)) {
       allDetailedTotals[code] = (allDetailedTotals[code] || 0) + val;
     }
-    for (const [code, val] of detailedImports[i] || []) {
+    for (const [code, val] of Object.entries(y.imports.detailed)) {
       allDetailedTotals[code] = (allDetailedTotals[code] || 0) + val;
     }
   }
@@ -949,35 +1172,38 @@ export function buildProductionProfile(raw: RawCountryProfile): CountryProfileDa
     return (allDetailedTotals[b[0]] || 0) - (allDetailedTotals[a[0]] || 0);
   });
 
-  let latestPartnerIdx = partnerExports.length - 1;
+  let latestPartnerIdx = timeline.length - 1;
   while (latestPartnerIdx >= 0) {
-    const pX = partnerExports[latestPartnerIdx] || [];
-    const pM = partnerImports[latestPartnerIdx] || [];
-    if (pX.length > 0 || pM.length > 0) break;
+    const pX = timeline[latestPartnerIdx].exports.partners;
+    const pM = timeline[latestPartnerIdx].imports.partners;
+    if (Object.keys(pX).length > 0 || Object.keys(pM).length > 0) break;
     latestPartnerIdx--;
   }
   if (latestPartnerIdx < 0) latestPartnerIdx = 0;
 
+  const latestPartnerYear = timeline[latestPartnerIdx];
   const latestPartnerMap: Record<string, number> = {};
-  for (const [pIso, val] of partnerExports[latestPartnerIdx] || []) {
-    latestPartnerMap[pIso] = (latestPartnerMap[pIso] || 0) + val;
-  }
-  for (const [pIso, val] of partnerImports[latestPartnerIdx] || []) {
-    latestPartnerMap[pIso] = (latestPartnerMap[pIso] || 0) + val;
+  if (latestPartnerYear) {
+    for (const [pIso, rec] of Object.entries(latestPartnerYear.exports.partners)) {
+      latestPartnerMap[pIso] = (latestPartnerMap[pIso] || 0) + rec.total;
+    }
+    for (const [pIso, rec] of Object.entries(latestPartnerYear.imports.partners)) {
+      latestPartnerMap[pIso] = (latestPartnerMap[pIso] || 0) + rec.total;
+    }
   }
 
   const allPartnersTotalMap: Record<string, number> = {};
-  for (let i = 0; i < partnerExports.length; i++) {
-    for (const [pIso, val] of partnerExports[i] || []) {
-      allPartnersTotalMap[pIso] = (allPartnersTotalMap[pIso] || 0) + val;
+  for (const y of timeline) {
+    for (const [pIso, rec] of Object.entries(y.exports.partners)) {
+      allPartnersTotalMap[pIso] = (allPartnersTotalMap[pIso] || 0) + rec.total;
     }
-    for (const [pIso, val] of partnerImports[i] || []) {
-      allPartnersTotalMap[pIso] = (allPartnersTotalMap[pIso] || 0) + val;
+    for (const [pIso, rec] of Object.entries(y.imports.partners)) {
+      allPartnersTotalMap[pIso] = (allPartnersTotalMap[pIso] || 0) + rec.total;
     }
   }
 
-  const topPartners: [string, number][] = Object.keys(allPartnersTotalMap).map((code) => [code, round(latestPartnerMap[code] || 0, 1)]);
-  topPartners.sort((a, b) => {
+  const activePartners: [string, number][] = Object.keys(allPartnersTotalMap).map((code) => [code, round(latestPartnerMap[code] || 0, 1)]);
+  activePartners.sort((a, b) => {
     const diff = b[1] - a[1];
     if (diff !== 0) return diff;
     return (allPartnersTotalMap[b[0]] || 0) - (allPartnersTotalMap[a[0]] || 0);
@@ -986,116 +1212,61 @@ export function buildProductionProfile(raw: RawCountryProfile): CountryProfileDa
   return {
     code: raw.code,
     years,
-    trade: {
-      goodsExportsUsd,
-      goodsImportsUsd,
-      goodsBalanceUsd,
-      servicesExportsUsd,
-      servicesImportsUsd,
-      servicesBalanceUsd,
-      totalExportsUsd,
-      totalImportsUsd,
-      netBalanceUsd,
-    },
-    categories: {
-      macro: {
-        exports: macroExports,
-        imports: macroImports,
-      },
-      detailed: {
-        exports: detailedExports,
-        imports: detailedImports,
-      },
-      activeMacro,
-      activeDetailed,
-    },
-    partners: {
-      exports: partnerExports,
-      imports: partnerImports,
-      topPartners,
-    },
-    macro: {
-      gdpNominalUsd,
-      gdpRealGrowthYoy,
-      gdpPerCapitaUsd,
-      gdpPppUsd,
-      govExpenditurePctGdp,
-      govExpenditureUsd,
-      govRevenuePctGdp,
-      govRevenueUsd,
-      govBalancePctGdp,
-      govBalanceUsd,
-      govDebtPctGdp,
-      govDebtUsd,
-      inflationPct,
-      unemploymentPct,
-      currentAccountPctGdp,
-      currentAccountUsd,
-      growth: {
-        gdpYoy,
-        gdpDiffUsd,
-        revenueYoy,
-        revenueDiffUsd,
-        expenditureYoy,
-        expenditureDiffUsd,
-        debtYoy,
-        debtDiffUsd,
-      },
-    },
+    activeMacro,
+    activeDetailed,
+    activePartners,
+    timeline,
   };
 }
 
 /** Exports all individual country datasets and toolbar metadata to site/public/data/country. */
 export async function exportCountryDatasets(countries: Record<string, RawCountryProfile>): Promise<void> {
-  const logger = getLogger('country');
   const countryRank = new Map(SUPPORTED_COUNTRIES.map((code, idx) => [code, idx]));
 
   // Filter only countries that have both trade years data and macro indicators
   const completeCountries = Object.entries(countries).filter(([_, rawData]) => {
     const yearsCount = Object.keys(rawData.years || {}).length;
-    const hasMacro = rawData.macro?.gdpNominalUsd != null && Object.keys(rawData.macro.gdpNominalUsd).length > 0;
+    const hasMacro = Object.values(rawData.years || {}).some((y) => y.ngdpd != null);
     return yearsCount > 0 && hasMacro;
   });
 
   const countryList: string[] = completeCountries.map(([code]) => code).sort((a, b) => (countryRank.get(a) ?? 999) - (countryRank.get(b) ?? 999));
 
   const gdpMap: Record<string, number> = {};
+  let minYear = CURRENT_YEAR;
+  let maxYear = START_YEAR;
+  let hasAnyYear = false;
+
   for (const [code, rawData] of completeCountries) {
-    const profile = buildProductionProfile(rawData);
+    const profile = buildProductionProfile(rawData, countries);
     await exportProjectMeta('country', profile, `${code.toLowerCase()}.json`);
 
-    const macroGdp = rawData.macro?.gdpNominalUsd;
     let latestGdp: number | undefined;
-    if (macroGdp) {
-      const years = Object.keys(macroGdp)
-        .map(Number)
-        .sort((a, b) => b - a);
-      for (const y of years) {
-        const val = macroGdp[String(y)];
-        if (typeof val === 'number') {
-          latestGdp = val;
-          break;
-        }
+    for (let i = profile.timeline.length - 1; i >= 0; i--) {
+      const val = profile.timeline[i].macro.gdpNominalUsd;
+      if (val != null) {
+        latestGdp = val;
+        break;
       }
     }
     const val = latestGdp ?? COUNTRY_BY_CODE.get(code)?.gdp;
     if (val != null) {
       gdpMap[code] = round(val, 1);
     }
-  }
 
-  const yearsWithData: number[] = [];
-  for (const [_, rawData] of completeCountries) {
-    for (const [yStr, yData] of Object.entries(rawData.years || {})) {
-      const hasGoods = (yData?.exports && Object.keys(yData.exports).length > 0) || (yData?.imports && Object.keys(yData.imports).length > 0);
-      const hasServ = (yData?.servicesExports && Object.keys(yData.servicesExports).length > 0) || (yData?.servicesImports && Object.keys(yData.servicesImports).length > 0);
-      if (hasGoods || hasServ) {
-        yearsWithData.push(Number(yStr));
-      }
+    if (profile.years.length > 0) {
+      const pMin = profile.years[0];
+      const pMax = profile.years[profile.years.length - 1];
+      if (pMin < minYear) minYear = pMin;
+      if (pMax > maxYear) maxYear = pMax;
+      hasAnyYear = true;
     }
   }
-  const minYear = yearsWithData.length > 0 ? Math.min(...yearsWithData) : START_YEAR;
-  const maxYear = yearsWithData.length > 0 ? Math.max(...yearsWithData) : CURRENT_YEAR - 1;
+
+  if (!hasAnyYear) {
+    minYear = START_YEAR;
+    maxYear = CURRENT_YEAR - 1;
+  }
   const defaultPeriod: [number, number] = [Math.max(minYear, maxYear - 5), maxYear];
 
   const toolbarMeta: CountryToolbarMeta = {
@@ -1108,10 +1279,10 @@ export async function exportCountryDatasets(countries: Record<string, RawCountry
   };
 
   await exportProjectMeta('country', toolbarMeta, 'toolbar-meta.json');
-  await exportProjectMeta('country', toolbarMeta, 'index.json');
   await updateMetadata('country');
 
-  logger.info(`Exported ${countryList.length} complete country profiles and toolbar-meta.json`);
+  const exportLogger = getPipelineLogger('country');
+  exportLogger.exported(`${countryList.length} complete country profiles and toolbar-meta.json`);
 }
 
 /** Runs the standalone Country ETL Pipeline checking 1990..CURRENT_YEAR dynamically with smart incremental fetching. */
@@ -1119,13 +1290,13 @@ export async function runCountryPipeline(forceUpdate = false, verbose?: boolean)
   return runWithLogger(
     'country',
     async () => {
-      const logger = getLogger('country');
-      logger.start('Starting Country ETL pipeline');
+      const logger = getPipelineLogger('country');
+      logger.start('Country');
 
       const cache = await loadCountryCache();
       const force = forceUpdate || isUpdate();
       if (force) {
-        logger.info('Force update requested (-u): resetting data.json cache...');
+        logger.info('Force update requested (-u): resetting data.json.br cache to re-download all countries from scratch...');
         cache.countries = {};
         delete cache.meta;
       }
@@ -1133,68 +1304,48 @@ export async function runCountryPipeline(forceUpdate = false, verbose?: boolean)
       const targetYears = range(START_YEAR, CURRENT_YEAR);
       const catalog = await fetchAvailabilityCatalog();
 
-      const anyCountryNeedsUpdate = COUNTRIES.some((country) => {
-        const existing = cache.countries[country.code];
-        return !isCountryComplete(existing, targetYears, country.id, catalog);
+      // 1. Identify which countries have missing streams or updated checksums
+      const countriesNeedingUpdate = COUNTRIES.filter((c) => {
+        const existing = cache.countries[c.code];
+        return force || !isCountryComplete(existing, targetYears, c.id, catalog, cache.meta?.imfLastModified);
       });
 
-      const shouldUpdate = force || anyCountryNeedsUpdate;
-      let hasChanges = false;
-
-      if (shouldUpdate) {
-        logger.info(`Checking upstream UN Comtrade and IMF DataMapper from ${START_YEAR} to ${CURRENT_YEAR}...`);
+      if (countriesNeedingUpdate.length > 0) {
+        logger.stage('Init', `Found ${countriesNeedingUpdate.length} countries needing update.`);
         const partnersMap = await getPartnerAreasMap();
 
-        // 1. Identify which countries have missing streams
-        const countriesNeedingUpdate = COUNTRIES.filter((c) => {
-          const existing = cache.countries[c.code];
-          return force || !isCountryComplete(existing, targetYears, c.id, catalog);
-        });
+        // Stage 1: Macroeconomic Indicators (IMF DataMapper WEO)
+        const macroChanged = await syncMacroStage(cache, catalog, countriesNeedingUpdate);
 
-        logger.info(`Found ${countriesNeedingUpdate.length} countries needing update. Batching by ${BATCH_SIZE}...`);
+        // Stage 2: Bilateral Merchandise Goods Exports (UN Comtrade AG2)
+        const goodsChanged = await syncGoodsStage(cache, catalog, partnersMap, countriesNeedingUpdate);
 
-        // 2. Batch countries by 15
-        const batches = chunkArray(countriesNeedingUpdate, BATCH_SIZE);
+        // Stage 3: Commercial Services Exports (UN Comtrade EBOPS)
+        const servicesChanged = await syncServicesStage(cache, catalog, countriesNeedingUpdate);
 
-        for (let bIdx = 0; bIdx < batches.length; bIdx++) {
-          if (isComtradeQuotaExhausted()) {
-            logger.warn('Comtrade call volume quota exhausted. Halting remaining country online fetches; using existing cached data.');
-            break;
-          }
+        const imfChanged = Boolean(catalog.imfLastModified && catalog.imfLastModified !== cache.meta?.imfLastModified);
+        let hasChanges = macroChanged || goodsChanged || servicesChanged;
 
-          const batch = batches[bIdx];
-          const batchCodes = batch.map((c) => c.code.toUpperCase()).join(', ');
-          logger.info(`[Batch ${bIdx + 1}/${batches.length}] Fetching ${batch.length} countries: ${batchCodes}`);
-
-          try {
-            const updatedMap = await fetchRawCountryBatch(batch, cache.countries, partnersMap, catalog);
-            let batchHasChanges = false;
-            for (const [code, profile] of Object.entries(updatedMap)) {
-              if (profile && profile !== cache.countries[code]) {
-                cache.countries[code] = profile;
-                hasChanges = true;
-                batchHasChanges = true;
-              }
-            }
-            if (batchHasChanges) {
-              await writeJson(DATA_FILE, cache, 0);
-            }
-          } catch (err) {
-            logger.warn(`Batch ${bIdx + 1} failed: ${err}`);
-          }
-        }
-
-        if (catalog.imfLastModified) {
+        if (imfChanged) {
           cache.meta = {
             imfLastModified: catalog.imfLastModified,
             lastUpdated: new Date().toISOString(),
           };
           hasChanges = true;
+        } else if (hasChanges) {
+          cache.meta = {
+            ...cache.meta,
+            lastUpdated: new Date().toISOString(),
+          };
         }
 
         if (hasChanges) {
-          await writeJson(DATA_FILE, cache, 0);
-          logger.success(`Updated minified raw cache saved to ${DATA_FILE}`);
+          writeJsonAsync(DATA_FILE, cache);
+        }
+
+        await flushPendingJsonSaves(DATA_FILE);
+        if (hasChanges) {
+          logger.success(`Updated raw L1 cache saved to ${DATA_FILE}`);
         }
       }
 
@@ -1204,7 +1355,7 @@ export async function runCountryPipeline(forceUpdate = false, verbose?: boolean)
       }
 
       await exportCountryDatasets(cache.countries);
-      logger.success(`Country pipeline complete: ${Object.keys(cache.countries).length} countries ready.`);
+      logger.complete(`${Object.keys(cache.countries).length} countries ready.`);
     },
     verbose,
   );
@@ -1212,7 +1363,7 @@ export async function runCountryPipeline(forceUpdate = false, verbose?: boolean)
 
 if (import.meta.main) {
   runCountryPipeline(isUpdate(), isVerbose()).catch((err) => {
-    getLogger('country').error('Fatal Country pipeline error:', err);
+    getPipelineLogger('country').error('Fatal Country pipeline error:', err);
     process.exit(1);
   });
 }

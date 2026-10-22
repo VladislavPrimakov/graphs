@@ -66,11 +66,7 @@ export const SectionNav: React.FC<SectionNavProps> = ({ sections, projectSlug, s
   if (!portalTarget || sections.length <= 1) return null;
 
   return createPortal(
-    <nav
-      aria-label="Section navigation"
-      ref={containerRef}
-      className="flex items-center justify-center-safe gap-1.5 overflow-x-auto scrollbar-none py-1 max-w-full px-2 mask-[linear-gradient(to_right,transparent,black_16px,black_calc(100%-16px),transparent)]"
-    >
+    <nav aria-label="Section navigation" ref={containerRef} className="flex items-center justify-center-safe gap-1.5 overflow-x-auto scrollbar-none py-1 max-w-full px-2 mask-fade-x">
       {sections.map((sectionId) => {
         const isActive = activeId === sectionId;
         const targetHref = getHref(`/${projectSlug}/${sectionId}`);

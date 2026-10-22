@@ -1,7 +1,7 @@
-import type { FrontlineDynamicsMonthly, FrontlineDynamicsSectionData, FrontlineTimelinePoint, WarFrontlineDataset } from '@graphs/types/war-rf-ua/frontline';
-import type { WarFrontlineToolbarMeta, WarLossModelMeta, WarRfUaToolbarMeta } from '@graphs/types/war-rf-ua/toolbar-meta';
+import type { FrontlineDynamicsMonthly, FrontlineDynamicsSectionData, FrontlineTimelinePoint, WarFrontlineDataset } from '@graphs/shared/types/war-rf-ua/frontline';
+import type { WarFrontlineToolbarMeta, WarLossModelMeta, WarRfUaToolbarMeta } from '@graphs/shared/types/war-rf-ua/toolbar-meta';
 import { exportDataset } from '@/utils/dataset';
-import { getLogger, isUpdate, isVerbose, runWithLogger } from '@/utils/logger';
+import { getPipelineLogger, isUpdate, isVerbose, runWithLogger } from '@/utils/logger';
 import { round } from '@/utils/math';
 import { parseRfAttacks } from './parse-attacks-rf';
 import { parseUaAttacks } from './parse-attacks-ua';
@@ -191,8 +191,8 @@ export async function runWarRfUaPipeline(forceUpdate = false, verbose?: boolean)
   return runWithLogger(
     'war-rf-ua',
     async () => {
-      const logger = getLogger();
-      logger.start('Starting War RF-UA ETL pipeline');
+      const logger = getPipelineLogger('war-rf-ua');
+      logger.start('War RF-UA');
 
       logger.debug('Processing military equipment losses...');
       const losses = await parseLosses(forceUpdate);
@@ -325,9 +325,7 @@ export async function runWarRfUaPipeline(forceUpdate = false, verbose?: boolean)
         rfData.summary.uavs.total + rfData.summary.ballistic.total + rfData.summary.cruise.total + uaData.summary.uavs.total + uaData.summary.ballistic.total + uaData.summary.cruise.total;
 
       if (!forceUpdate) {
-        logger.info(
-          `Remote sources unchanged (${losses.summary.totalRecords.toLocaleString()} losses, ${totalStrikes.toLocaleString()} strikes, ${frontline.timeline.length.toLocaleString()} days cached). Using cached dataset.`,
-        );
+        logger.unchanged(`${losses.summary.totalRecords.toLocaleString()} losses, ${totalStrikes.toLocaleString()} strikes, ${frontline.timeline.length.toLocaleString()} days cached`);
       }
 
       await exportDataset(
@@ -362,9 +360,7 @@ export async function runWarRfUaPipeline(forceUpdate = false, verbose?: boolean)
       );
 
       if (forceUpdate) {
-        logger.success(
-          `Exported war-rf-ua datasets (${losses.summary.totalRecords.toLocaleString()} losses, ${totalStrikes.toLocaleString()} strikes, ${frontline.timeline.length.toLocaleString()} frontline days)`,
-        );
+        logger.complete(`${losses.summary.totalRecords.toLocaleString()} losses, ${totalStrikes.toLocaleString()} strikes, ${frontline.timeline.length.toLocaleString()} frontline days`);
       }
     },
     verbose,
@@ -373,7 +369,7 @@ export async function runWarRfUaPipeline(forceUpdate = false, verbose?: boolean)
 
 if (import.meta.main) {
   runWarRfUaPipeline(isUpdate(), isVerbose()).catch((err) => {
-    getLogger('war-rf-ua').error('Fatal error running war-rf-ua pipeline:', err);
+    getPipelineLogger('war-rf-ua').error('Fatal error running war-rf-ua pipeline:', err);
     process.exit(1);
   });
 }

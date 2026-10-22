@@ -19,10 +19,13 @@ Operational guide and rulebook for AI agents working on the `graphs` repository.
 - **JSDoc**: Use `/** ... */` for exported symbols; omit `@param` and `@returns`. Keep field descriptions single-line with `@default` and explicit units (`USD`, `TWh`, `px`, `%)`.
 - **Naming**: `PascalCase` for types/components; `camelCase` for variables, functions, and properties; `SCREAMING_SNAKE_CASE` for global constants; `kebab-case` for files, slugs, and section IDs.
 - **Changelog SSoT (`CHANGELOG.md`)**: Keep a Changelog format with STRICT workspace section ordering within every release:
-  1. `### Tooling & Types`
+  1. `### Tooling & Shared (@graphs/shared)`
   2. `### Pipelines (@graphs/pipelines)`
   3. `### Site (@graphs/site)`
   Separated by `---`. Use Factorio/Wube style: active past-tense verbs (`Added`, `Fixed that`, `Changed`, `Removed`, `Extracted`), zero fluff, exact backticked identifiers.
+  - **High-Signal & Significance Invariant**: Record strictly major architectural, domain, and user-facing milestones.
+  - **Forbidden Noise**: Never log test additions/updates, routine code formatting, intermediate refactorings, internal documentation changes (`AGENTS.md`, README), CI workflow tweaks, trivial localized strings/empty states, or non-breaking minor dependency bumps.
+  - **Consolidation**: Group related pipeline algorithms, domain models, and UI control updates into single coherent, high-level bullets rather than itemizing per-function or per-file micro-changes.
 - **Package Versioning**: Workspace `package.json` files omit `"version"`. Milestones exist exclusively in `CHANGELOG.md`.
 
 ---
@@ -30,14 +33,14 @@ Operational guide and rulebook for AI agents working on the `graphs` repository.
 ## 2. End-to-End Architecture & Data Contracts
 
 ```
-[ Upstream Sources ] ──(on -u / cache miss)──> [ Tier 1: pipelines/src/<slug>/data*.json ] (Committed Minimal Baseline)
+[ Upstream Sources ] ──(on -u / cache miss)──> [ Tier 1: pipelines/src/<slug>/data*.json.br ] (Committed Minimal Baseline)
                                                               │ (pure in-memory transform & aggregate)
                                                               ▼
-[ types/ ] ──(Subpath SSoT)──> [ site/ ] <─── [ Tier 2: site/public/data/<slug>/<section>/data.json ] (Ephemeral SSG Data)
+[ shared/types/ ] ──(Subpath SSoT)──> [ site/ ] <─── [ Tier 2: site/public/data/<slug>/<section>/data.json ] (Ephemeral SSG Data)
 ```
 
 ### 2.1 Two-Tier Data Architecture
-1. **Tier 1 (Committed Minimal Snapshot)**: `pipelines/src/<slug>/data.json` (or `data-losses.json`, `data-attacks-ua.json`, `data-attacks-rf.json`, `data-frontline.json` for `war-rf-ua`, `country/data.json` for `country`). Committed minimal raw offline baseline; strips upstream XML/SVG overhead.
+1. **Tier 1 (Committed Minimal Snapshot)**: `pipelines/src/<slug>/data.json.br` (or `data-losses.json.br`, `data-attacks-ua.json.br`, `data-attacks-rf.json.br`, `data-frontline.json.br`, `classification.json.br` for `war-rf-ua`). Committed minimal raw offline baseline; compressed via Brotli quality 9. Strips upstream XML/SVG overhead.
    - **Explicit Null Contract**: Streams confirmed empty by upstream must be saved as `null`, reserving `undefined` strictly for unqueried or failed streams. Empty `{}` objects are strictly forbidden in Tier 1 snapshots.
 2. **Tier 2 (Ephemeral Production Dataset)**: `site/public/data/<slug>/<sectionId>/data.json` (or `site/public/data/<slug>/<code>.json`) and optional project toolbar metadata `site/public/data/<slug>/toolbar-meta.json`. Compact single-line JSON build artifacts gitignored by default, exported via `exportProjectSections` / `exportDataset` / `exportProjectMeta`.
 - **Invariants**: `bun run build:site` requires Tier 2 datasets (run `bun run build:pipeline` first on fresh clones). CI runs every 3 days or on push to `main`.
@@ -45,9 +48,9 @@ Operational guide and rulebook for AI agents working on the `graphs` repository.
 ### 2.2 Pipelines & ETL Lifecycle
 - **CLI**: Run all: `bun run build:pipeline`. Run single: `bun --filter @graphs/pipelines run:<slug>`. Flags: `-u` (force download), `-v` (verbose logs).
 - **In-Memory Ingestion**: Scraping, XML parsing, and CSV downloads must occur in memory. Never write temporary cache files to disk. Default execution is cache-first against Tier 1 snapshots.
-- **Pre-Computation**: All domain aggregations, totals, and timeline pivots are computed in ETL. Static datasets output compact camelCase JSON strings matching `@graphs/types` schemas.
+- **Pre-Computation**: All domain aggregations, totals, and timeline pivots are computed in ETL. Static datasets output compact camelCase JSON strings matching `@graphs/shared/types` schemas.
 - **Rate Limiting & Pacing Invariant**: External API scrapers subject to rate limits must use serialized pacer queues. UN Comtrade requests must strictly obey `COMTRADE_PACER_DELAY_MS = 1000` (1 request/second) with automatic circuit breaker on daily call volume quota exhaustion (HTTP 403).
-- **Shared Utilities (`pipelines/src/utils/`)**: `paths.ts` (path resolution, `loadEnv`), `dataset.ts` (`exportDataset`, `exportProjectSections`, `exportProjectMeta`), `http.ts` (`fetchWithRetry`, `fetchHeadMeta`), `region.ts` (`resolveRegionCode`), `fs.ts` (`writeJson`, `readJson`), `logger.ts` (`getLogger`), `math.ts` (rounding/aggregation helpers), `metadata.ts` (`updateMetadata`).
+- **Shared Utilities (`pipelines/src/utils/`)**: `paths.ts` (path resolution, `loadEnv`), `dataset.ts` (`exportDataset`, `exportProjectSections`, `exportProjectMeta`), `http.ts` (`fetchWithRetry`, `fetchHeadMeta`), `region.ts` (`resolveRegionCode`), `fs.ts` (`writeJson`, `readJson`), `logger.ts` (`getLogger`), `math.ts` (re-exports from `@graphs/shared/math`), `metadata.ts` (`updateMetadata`).
 - **Constraint for `parse-attacks-ua.ts`**: Strictly prohibits any comments (`//`, `/* */`) or docstrings.
 
 ---
@@ -96,14 +99,14 @@ Operational guide and rulebook for AI agents working on the `graphs` repository.
 - **Interactive Components (`site/src/components/ui/`)**: `ControlBar.tsx` (`ControlBar`, `DashboardToolbars`), `TimelineScrubber.tsx`, `DatePickerPopover.tsx`, `SearchSelect.tsx`, `Slider.tsx`, `ToggleGroup.tsx`, `Checkbox.tsx`, `AnchorButton.tsx`, `KpiCard.tsx`, `TagBadge.tsx`.
 - **Styles (`site/src/styles/`)**: `global.css` (Tailwind v4 `@theme`, container utilities: `glass-bar`, `glass-overlay`, `card`, `card-elevated`, `control-panel`, `btn-subtle`, `btn-accent`, `nav-pill`, `anchor-btn`), `tags.css` (`@utility tag-pill`), `changelog.css`, `map.css`, `tokens.ts`. Prefer standard utility classes over arbitrary pixel brackets.
 - **Responsive Invariant**: Avoid arbitrary responsive modifier jumping (`sm:`, `md:`) on gaps, paddings, and font sizes; keep responsive adaptations strictly confined to global navbar drawer collapsing and section header action stacks.
-- **Mandatory Imports**: Use `@/*` aliases in `site/src/`. Import types from subpaths `@graphs/types/<slug>` (or `@graphs/types/<slug>/<section-id>`).
+- **Mandatory Imports**: Use `@/*` aliases in `site/src/`. Import types from subpaths `@graphs/shared/types/<slug>` (or `@graphs/shared/types/<slug>/<section-id>`). Import shared mathematical helpers from `@graphs/shared/math`.
 
 ---
 
 ## 4. New Dashboard Registration Checklist
 
 To register a new dashboard slice:
-1. **Section Schemas (`types/<slug>/index.ts`)**: Define TypeScript interfaces (`*SectionData`) exported via subpaths `@graphs/types/<slug>`.
+1. **Section Schemas (`shared/src/types/<slug>/index.ts`)**: Define TypeScript interfaces (`*SectionData`) exported via subpaths `@graphs/shared/types/<slug>`.
 2. **ETL Pipeline (`pipelines/src/<slug>/index.ts`)**: Scrape/parse data, output compact JSONs via `exportProjectSections` (and `exportProjectMeta` if coordinated toolbar metadata is needed), and update `metadata.json`.
 3. **Pipeline Runner (`pipelines/src/run-all.ts`)**: Register in `PIPELINES` registry and package scripts.
 4. **Project Module (`site/src/projects/<slug>/`)**:

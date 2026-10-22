@@ -42,12 +42,12 @@ export const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({ isVisible = true
         active ? 'opacity-100' : 'opacity-0 pointer-events-none',
       )
     : cn(
-        'absolute inset-0 z-10 flex items-center justify-center bg-surface-card/60 backdrop-blur-sm rounded-xl transition-opacity duration-300 pointer-events-none',
+        'loading-spinner-overlay absolute inset-0 z-10 flex items-center justify-center bg-surface-card/60 backdrop-blur-sm rounded-xl transition-opacity duration-300 pointer-events-none',
         active ? 'opacity-100' : 'opacity-0',
       );
 
   return (
-    <div className={overlayClass}>
+    <div data-loading-spinner className={overlayClass}>
       <div className="relative flex items-center justify-center">
         {/* Glowing backdrop halo */}
         <div className={`absolute -inset-4 rounded-full bg-accent-glow blur-2xl pointer-events-none ${isSm ? 'opacity-40' : 'opacity-60'}`} />
@@ -59,7 +59,7 @@ export const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({ isVisible = true
         <div className={`absolute flex items-end ${barsContainerClass}`}>
           {/* Bar 1 */}
           <div
-            className={`${barWidthClass} bg-linear-to-t from-blue-600 to-accent-primary rounded-full animate-pulse`}
+            className={`${barWidthClass} bg-linear-to-t from-accent-primary to-accent-hover rounded-full animate-pulse`}
             style={{
               height: '55%',
               animationDuration: '1.2s',
@@ -69,7 +69,7 @@ export const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({ isVisible = true
           />
           {/* Bar 2 */}
           <div
-            className={`${barWidthClass} bg-linear-to-t from-indigo-600 to-accent-hover rounded-full animate-pulse`}
+            className={`${barWidthClass} bg-linear-to-t from-accent-hover to-accent-primary rounded-full animate-pulse`}
             style={{
               height: '85%',
               animationDuration: '0.9s',
@@ -80,7 +80,7 @@ export const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({ isVisible = true
           />
           {/* Bar 3 */}
           <div
-            className={`${barWidthClass} bg-linear-to-t from-blue-500 to-sky-400 rounded-full animate-pulse`}
+            className={`${barWidthClass} bg-linear-to-t from-accent-primary/80 to-accent-hover rounded-full animate-pulse`}
             style={{
               height: '40%',
               animationDuration: '1.4s',
@@ -91,7 +91,7 @@ export const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({ isVisible = true
           />
           {/* Bar 4 */}
           <div
-            className={`${barWidthClass} bg-linear-to-t from-indigo-500 to-accent-primary rounded-full animate-pulse`}
+            className={`${barWidthClass} bg-linear-to-t from-accent-hover to-accent-primary rounded-full animate-pulse`}
             style={{
               height: '100%',
               animationDuration: '1.0s',
@@ -102,7 +102,7 @@ export const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({ isVisible = true
           />
           {/* Bar 5 */}
           <div
-            className={`${barWidthClass} bg-linear-to-t from-blue-600 to-accent-hover rounded-full animate-pulse`}
+            className={`${barWidthClass} bg-linear-to-t from-accent-primary to-accent-hover rounded-full animate-pulse`}
             style={{
               height: '65%',
               animationDuration: '1.3s',

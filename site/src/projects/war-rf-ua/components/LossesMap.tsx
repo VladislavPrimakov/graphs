@@ -3,7 +3,7 @@ import { type GeoJSONSource, type LayerSpecification, type MapLayerMouseEvent, M
 import type React from 'react';
 import { useEffect, useEffectEvent, useRef } from 'react';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import type { LossesMapSectionData, LossMapPoint, WarLossCategory, WarLossesFilterState } from '@graphs/types/war-rf-ua/losses';
+import type { LossesMapSectionData, LossMapPoint, WarLossCategory, WarLossesFilterState } from '@graphs/shared/types/war-rf-ua/losses';
 import { getMapTileStyle, registerFallbackDot } from '@/utils/map-builder';
 import { useFormat, useTheme, useTranslation } from '@/utils/provider';
 import { renderTooltipTablePopup } from '@/utils/tooltip-builder';
@@ -51,7 +51,7 @@ function renderSourceButtons(posts: unknown, sources: unknown, sourceLabel: stri
   const buttons = items.map(({ url, plat, idx }) => {
     const total = counts.get(plat) || 1;
     const label = !plat ? (total > 1 ? `${sourceLabel} #${idx}` : sourceLabel) : total > 1 ? `${sourceLabel} (${plat} #${idx})` : `${sourceLabel} (${plat})`;
-    return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="btn-accent w-full text-[11px] justify-center py-1 truncate text-center">${label}</a>`;
+    return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="btn-accent w-full text-2xs justify-center py-1 truncate text-center">${label}</a>`;
   });
 
   return `<div class="flex flex-col gap-1.5 mt-2.5">${buttons.join('')}</div>`;

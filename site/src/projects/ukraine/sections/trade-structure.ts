@@ -13,10 +13,10 @@ export const tradeStructureSection: Section = ({ t, fmt }) => {
       { name: 'NBU — Merchandise Trade Balance (xlsx)', url: 'https://bank.gov.ua/files/ES/Trade_y.xlsx' },
       { name: 'NBU — Monthly Foreign Trade (xlsx)', url: 'https://bank.gov.ua/files/ES/Trade_m.xlsx' },
     ],
-    buildView: ({ ukraine: dataset }, { ukraine }) => {
-      const data = dataset['trade-structure'];
+    buildView: ({ ukraineData }, { ukraineStore }) => {
+      const data = ukraineData['trade-structure'];
       const tradeYearsStr = data.yearLabels;
-      const [selStartYear, selEndYear] = ukraine?.years ?? [data.years[Math.max(0, data.years.length - 6)], data.years[data.years.length - 1]];
+      const [selStartYear, selEndYear] = ukraineStore.years;
 
       const foundStartIdx = data.years.findIndex((y) => y >= selStartYear);
       const startIdx = foundStartIdx === -1 ? 0 : foundStartIdx;
@@ -26,7 +26,27 @@ export const tradeStructureSection: Section = ({ t, fmt }) => {
       return {
         content: createChart(
           chartOption({
-            tooltip: { show: false },
+            tooltip: {
+              type: 'axis',
+              header: ({ dataIndex }) => `${t.common.period}: ${tradeYearsStr.slice(startIdx, endIdx)[dataIndex]}`,
+              row: ({ seriesName, value, seriesId }) => {
+                if (seriesId === 'balance') return undefined;
+                return {
+                  label: seriesName,
+                  value: fmt.number(value),
+                };
+              },
+              footer: ({ dataIndex }) => {
+                const bal = data.tradeBalance.slice(startIdx, endIdx)[dataIndex];
+                if (bal == null) return undefined;
+                const sign = bal > 0 ? '+' : '';
+                return {
+                  label: t.common.balance,
+                  value: `${sign}${fmt.number(bal)}`,
+                  color: bal < 0 ? 'danger' : 'success',
+                };
+              },
+            },
             xAxis: {
               type: 'category',
               data: tradeYearsStr.slice(startIdx, endIdx),
@@ -42,7 +62,6 @@ export const tradeStructureSection: Section = ({ t, fmt }) => {
                 color: tradeColors.exportTotal,
                 data: data.totalExports.slice(startIdx, endIdx),
                 label: {
-                  position: 'top',
                   color: tradeColors.exportTotal,
                 },
                 formatLabel: ({ value }) => fmt.number(value),
@@ -53,7 +72,6 @@ export const tradeStructureSection: Section = ({ t, fmt }) => {
                 color: tradeColors.importTotal,
                 data: data.totalImports.slice(startIdx, endIdx),
                 label: {
-                  position: 'top',
                   color: tradeColors.importTotal,
                 },
                 formatLabel: ({ value }) => fmt.number(value),
@@ -68,9 +86,6 @@ export const tradeStructureSection: Section = ({ t, fmt }) => {
                 data: data.tradeBalance.slice(startIdx, endIdx),
                 label: {
                   show: true,
-                  position: 'bottom',
-                  distance: 8,
-                  fontSize: 12,
                   formatter: (params: CallbackDataParams) => {
                     const num = Number(params.value);
                     return `${num > 0 ? '+' : ''}${fmt.number(num)}`;

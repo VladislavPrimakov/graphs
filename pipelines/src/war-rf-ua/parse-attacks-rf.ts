@@ -1,14 +1,14 @@
 import path from 'node:path';
-import type { AttackDataGroup } from '@graphs/types/war-rf-ua/strikes';
-import { fileExists, readJson, writeJson } from '@/utils/fs';
+import type { AttackDataGroup } from '@graphs/shared/types/war-rf-ua/strikes';
+import { fileExists, readJson, writeJsonAsync } from '@/utils/fs';
 import { fetchWithRetry } from '@/utils/http';
 import { getLogger } from '@/utils/logger';
 import { round, sum } from '@/utils/math';
-import { loadEnv, PIPELINES_SRC_DIR } from '@/utils/paths';
+import { loadEnv } from '@/utils/paths';
 
 loadEnv();
 
-const DATA_RF_PATH = path.resolve(PIPELINES_SRC_DIR, 'war-rf-ua/data-attacks-rf.json');
+const DATA_RF_PATH = `${import.meta.dir}/data-attacks-rf.json.br`;
 const KAGGLE_DATASET = 'piterfm/massive-missile-attacks-on-ukraine';
 
 /** Downloads a dataset file from Kaggle API following storage redirection directly in memory. */
@@ -16,9 +16,11 @@ async function fetchKaggleFile(fileName: string, token: string): Promise<string 
   const logger = getLogger();
   try {
     const url = `https://www.kaggle.com/api/v1/datasets/download/${KAGGLE_DATASET}/${fileName}`;
-    const res = await fetch(url, {
+    const res = await fetchWithRetry(url, {
       headers: { Authorization: `Bearer ${token}` },
       redirect: 'manual',
+      retries: 2,
+      timeoutMs: 15000,
     });
 
     let downloadUrl = url;
@@ -294,8 +296,10 @@ export function parseRfAttacksFromCsv(rawCsv: string, rawDict: string): AttackDa
 /** Fetches latest dataset version number from Kaggle API metadata endpoint. */
 async function getKaggleDatasetVersion(token: string): Promise<number | null> {
   try {
-    const res = await fetch(`https://www.kaggle.com/api/v1/datasets/view/${KAGGLE_DATASET}`, {
+    const res = await fetchWithRetry(`https://www.kaggle.com/api/v1/datasets/view/${KAGGLE_DATASET}`, {
       headers: { Authorization: `Bearer ${token}` },
+      retries: 2,
+      timeoutMs: 15000,
     });
     if (res.ok) {
       const data = (await res.json()) as { currentVersionNumber?: number };
@@ -360,7 +364,7 @@ export async function parseRfAttacks(forceUpdate = false): Promise<AttackDataGro
     lastUpdated: new Date().toISOString(),
   };
 
-  await writeJson(DATA_RF_PATH, attackGroup, 0);
+  await writeJsonAsync(DATA_RF_PATH, attackGroup);
   logger.debug(`Updated ${path.basename(DATA_RF_PATH)} with latest Kaggle attacks data (v${latestVersion ?? 'unknown'})`);
   return attackGroup;
 }

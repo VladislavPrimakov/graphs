@@ -250,12 +250,12 @@ function ScrubberThumb({
     >
       <div
         className={cn(
-          'w-1.5 h-3.5 rounded-xs bg-accent-primary border border-white/20 shadow-xs flex items-center justify-center transition-transform',
+          'w-1.5 h-3.5 rounded-xs bg-accent-primary border border-white/20 dark:border-surface-base/30 shadow-xs flex items-center justify-center transition-transform',
           'group-hover:scale-110 group-hover:bg-accent-hover',
           isDragging && 'scale-115 ring-2 ring-accent-primary/40',
         )}
       >
-        <div className="w-0.5 h-2 bg-white/70 rounded-full" />
+        <div className="w-0.5 h-2 bg-white/70 dark:bg-surface-base/80 rounded-full" />
       </div>
     </div>
   );
@@ -536,7 +536,7 @@ export function TimelineScrubber({ granularity, periods, density, dateFrom, date
               const markerLeftPercent = totalPeriods > 1 ? (firstIdx / (totalPeriods - 1)) * 100 : 0;
               return (
                 <div key={key} style={{ left: `${markerLeftPercent}%` }} className="absolute top-0 bottom-0 flex items-center pl-1.5 border-l border-border-subtle/80 pointer-events-none">
-                  <span className="text-[10px] font-mono font-bold text-content-secondary select-none tracking-wider">{label}</span>
+                  <span className="text-3xs font-mono font-bold text-content-secondary select-none tracking-wider">{label}</span>
                 </div>
               );
             })}

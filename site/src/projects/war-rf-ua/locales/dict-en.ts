@@ -1,4 +1,4 @@
-import type { WarLossCategory } from '@graphs/types/war-rf-ua/losses';
+import type { WarLossCategory } from '@graphs/shared/types/war-rf-ua/losses';
 
 export const dict = {
   timeline: {

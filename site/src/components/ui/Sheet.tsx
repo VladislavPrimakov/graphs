@@ -8,7 +8,7 @@ export const Sheet = DialogPrimitive.Root;
 
 const SheetOverlay: React.FC<React.ComponentProps<typeof DialogPrimitive.Overlay>> = ({ className, ...props }) => (
   <DialogPrimitive.Overlay
-    className={cn('fixed inset-0 z-50 bg-black/60 backdrop-blur-sm transition-opacity duration-200 data-[state=open]:opacity-100 data-[state=closed]:opacity-0', className)}
+    className={cn('fixed inset-0 z-50 bg-surface-base/80 backdrop-blur-xs transition-opacity duration-200 data-[state=open]:opacity-100 data-[state=closed]:opacity-0', className)}
     {...props}
   />
 );
@@ -31,7 +31,7 @@ export const SheetContent: React.FC<SheetContentProps> = ({ side = 'right', clas
   <DialogPrimitive.Portal>
     <SheetOverlay />
     <DialogPrimitive.Content
-      className={cn('fixed z-50 flex flex-col bg-surface-card/95 backdrop-blur-xl p-6 shadow-2xl transition-transform duration-200 ease-in-out focus:outline-hidden', SIDE_STYLES[side], className)}
+      className={cn('fixed z-50 flex flex-col bg-surface-overlay backdrop-blur-md p-6 shadow-2xl transition-transform duration-200 ease-in-out focus:outline-hidden', SIDE_STYLES[side], className)}
       {...props}
     >
       {children}

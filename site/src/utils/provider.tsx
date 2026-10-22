@@ -4,8 +4,8 @@ import RU from 'country-flag-icons/react/3x2/RU';
 import UA from 'country-flag-icons/react/3x2/UA';
 import { createContext, useContext, useEffect, useSyncExternalStore } from 'react';
 import { useHref, useLocation, useNavigate } from 'react-router';
-import type { LocaleCommon as commonEn } from '@/locales/common-en';
 import type { CatalogProject, ProjectTag } from '@/utils/project';
+import { LocaleCommon as commonEn } from '../locales/common-en';
 import { getThemeColors, type ResolvedTheme, type ThemeColors, type ThemeSetting } from '../styles/tokens';
 import { type CldrLocaleUnits, createFormat, type LocalizedFormatters } from './format';
 
@@ -352,7 +352,10 @@ export function usePath() {
 export function useTranslation() {
   const ctx = useContext(AppContext);
   if (!ctx) {
-    throw new Error('useTranslation must be used within an AppProvider');
+    return {
+      t: { common: commonEn },
+      getTagLabel: (tag: ProjectTag) => commonEn.tagNames[tag] || tag,
+    };
   }
   return {
     t: ctx.t,
@@ -364,7 +367,7 @@ export function useTranslation() {
 export function useFormat(): LocalizedFormatters {
   const ctx = useContext(AppContext);
   if (!ctx) {
-    throw new Error('useFormat must be used within an AppProvider');
+    return createFormat('en');
   }
   return ctx.fmt;
 }

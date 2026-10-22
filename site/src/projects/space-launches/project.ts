@@ -1,11 +1,11 @@
-import type { SpaceLaunchesDataset } from '@graphs/types/space-launches/data';
+import type { SpaceLaunchesDataset } from '@graphs/shared/types/space-launches/data';
 import { createElement } from 'react';
 import { defineProject, loadDataset, type ProjectSection } from '@/utils/project';
 import type { dict } from './locales/dict-en';
 import { meta } from './meta';
 
 const data = {
-  spaceLaunches: () => loadDataset<SpaceLaunchesDataset>('space-launches', 'data.json'),
+  spaceLaunchesData: () => loadDataset<SpaceLaunchesDataset>('space-launches', 'data.json'),
 };
 
 export type Section = ProjectSection<typeof data, typeof dict>;
@@ -15,9 +15,9 @@ export const project = defineProject<typeof dict, typeof data>({
   meta,
   data,
   sections: import.meta.glob('./sections/*.ts', { eager: true }),
-  toolbars: ({ spaceLaunches }, { t, fmt }) => [
+  toolbars: ({ spaceLaunchesData }, { t, fmt }) => [
     {
-      id: 'launches',
+      id: 'launchesStore',
       scope: 'all',
       controls: [
         {
@@ -26,12 +26,12 @@ export const project = defineProject<typeof dict, typeof data>({
           placeholder: t.proj.countries,
           emptyLabel: t.proj.noCountriesFound,
           allLabel: t.proj.allCountries,
-          allCount: spaceLaunches.totalLaunches,
-          items: spaceLaunches.entities.map((e) => ({
+          allCount: spaceLaunchesData.totalLaunches,
+          items: spaceLaunchesData.entities.map((e) => ({
             value: e.code,
             label: fmt.region(e.code),
             count: e.launches,
-            icon: createElement('span', { className: 'font-mono text-[10px] opacity-75' }, e.code),
+            icon: createElement('span', { className: 'font-mono text-3xs opacity-75' }, e.code),
           })),
         },
       ],

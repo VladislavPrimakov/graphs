@@ -77,7 +77,7 @@ export function renderTooltipHeader({ title, icon, withBorder = false, size = 'x
 }
 
 /** Renders a single key-value row with color dot, label, and formatted value. */
-export function renderTooltipRow(row: TooltipRowSpec, fallbackName = '', fallbackColor = '#60a5fa'): string {
+export function renderTooltipRow(row: TooltipRowSpec, fallbackName = '', fallbackColor = 'var(--color-accent-primary)'): string {
   const dot = row.dotColor !== false ? renderTooltipDot(row.dotColor ?? fallbackColor) : '';
   const { className, styleAttr } = resolveColor(row.color);
   const label = row.label ?? fallbackName;
@@ -111,7 +111,7 @@ export function renderTooltipTablePopup({ title, rows, footer }: { title?: strin
 
   return `<div class="text-xs min-w-50">
     ${headerHtml}
-    <table class="w-full border-collapse text-[11px] mb-1">
+    <table class="w-full border-collapse text-2xs mb-1">
       <tbody>${rowsHtml}</tbody>
     </table>
     ${footer ?? ''}
@@ -159,5 +159,5 @@ export function renderTooltipTableStructure({ columns, rows, footer }: { columns
     footerHtml = `<tfoot><tr class="border-t border-border-subtle/80">${footerCells}</tr></tfoot>`;
   }
 
-  return `<table class="w-full text-[11px] tabular-nums border-collapse"><thead><tr class="border-b border-border-subtle/80 text-content-muted">${colHeaders}</tr></thead><tbody>${bodyRows}</tbody>${footerHtml}</table>`;
+  return `<table class="w-full text-2xs tabular-nums border-collapse"><thead><tr class="border-b border-border-subtle/80 text-content-muted">${colHeaders}</tr></thead><tbody>${bodyRows}</tbody>${footerHtml}</table>`;
 }

@@ -1,4 +1,5 @@
 import type React from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Checkbox } from '@/components/ui/Checkbox';
 import { SearchSelect } from '@/components/ui/SearchSelect';
 import { Slider } from '@/components/ui/Slider';
@@ -25,13 +26,45 @@ interface ControlFieldProps {
 function ControlField({ spec, value, state, onChange, disabled: overrideDisabled, className, onReset, hasActiveFilters }: ControlFieldProps) {
   const fmt = useFormat();
   const { t } = useTranslation();
-  const isDisabled = overrideDisabled ?? Boolean(spec.disabled);
+  const isDisabled = overrideDisabled ?? (typeof spec.disabled === 'function' ? (state ? spec.disabled(state) : false) : Boolean(spec.disabled));
+
+  const debounceMs = spec.debounceMs ?? 0;
+  const [localValue, setLocalValue] = useState(value);
+  const latestValRef = useRef(value);
+  latestValRef.current = localValue;
+  const isPendingRef = useRef(false);
+
+  useEffect(() => {
+    setLocalValue(value);
+    latestValRef.current = value;
+  }, [value]);
+
+  const handleChange = async (nextVal: unknown) => {
+    setLocalValue(nextVal);
+    latestValRef.current = nextVal;
+
+    if (!debounceMs) {
+      onChange(nextVal);
+      return;
+    }
+
+    if (isPendingRef.current) return;
+    isPendingRef.current = true;
+
+    await new Promise((resolve) => setTimeout(resolve, debounceMs));
+    isPendingRef.current = false;
+    onChange(latestValRef.current);
+  };
 
   switch (spec.type) {
     case 'slider': {
-      const val = Number(value ?? spec.defaultValue);
-      const minLen = fmt.number(spec.min).length;
-      const maxLen = fmt.number(spec.max).length;
+      const min = typeof spec.min === 'function' ? spec.min(state || {}) : spec.min;
+      const max = typeof spec.max === 'function' ? spec.max(state || {}) : spec.max;
+      const effectiveMax = Math.max(min, max);
+      const rawVal = Number(localValue ?? spec.defaultValue);
+      const val = Math.min(Math.max(rawVal, min), effectiveMax);
+      const minLen = fmt.number(min).length;
+      const maxLen = fmt.number(effectiveMax).length;
       const maxChars = Math.max(minLen, maxLen);
       return (
         <div className={cn('control-panel inline-flex items-center gap-2.5 px-3 h-7 text-xs', isDisabled && 'opacity-50 pointer-events-none', className)}>
@@ -44,15 +77,19 @@ function ControlField({ spec, value, state, onChange, disabled: overrideDisabled
             </span>
           )}
           <div className="w-28 flex items-center">
-            <Slider min={spec.min} max={spec.max} step={spec.step} value={[val]} onValueChange={([v]) => onChange(v)} disabled={isDisabled} />
+            <Slider min={min} max={effectiveMax} step={spec.step} value={[val]} onValueChange={([v]) => handleChange(v)} disabled={isDisabled} />
           </div>
         </div>
       );
     }
     case 'range-slider': {
-      const range = (Array.isArray(value) && value.length === 2 ? value : (spec.defaultValue ?? [spec.min, spec.max])) as [number, number];
-      const minLen = fmt.number(spec.min).length;
-      const maxLen = fmt.number(spec.max).length;
+      const min = typeof spec.min === 'function' ? spec.min(state || {}) : spec.min;
+      const max = typeof spec.max === 'function' ? spec.max(state || {}) : spec.max;
+      const effectiveMax = Math.max(min, max);
+      const rawRange = (Array.isArray(localValue) && localValue.length === 2 ? localValue : (spec.defaultValue ?? [min, effectiveMax])) as [number, number];
+      const range: [number, number] = [Math.max(min, Math.min(effectiveMax, rawRange[0])), Math.max(min, Math.min(effectiveMax, rawRange[1]))];
+      const minLen = fmt.number(min).length;
+      const maxLen = fmt.number(effectiveMax).length;
       const maxChars = minLen + 3 + maxLen;
       return (
         <div className={cn('control-panel inline-flex items-center gap-2.5 px-3 h-7 text-xs', isDisabled && 'opacity-50 pointer-events-none', className)}>
@@ -66,12 +103,12 @@ function ControlField({ spec, value, state, onChange, disabled: overrideDisabled
           )}
           <div className="w-32 flex items-center">
             <Slider
-              min={spec.min}
-              max={spec.max}
+              min={min}
+              max={effectiveMax}
               step={spec.step ?? 1}
               minStepsBetweenThumbs={spec.minStepsBetweenThumbs ?? 0}
               value={range}
-              onValueChange={(val) => onChange(val as [number, number])}
+              onValueChange={(val) => handleChange(val as [number, number])}
               disabled={isDisabled}
             />
           </div>
@@ -79,14 +116,14 @@ function ControlField({ spec, value, state, onChange, disabled: overrideDisabled
       );
     }
     case 'toggle': {
-      const val = String(value ?? spec.defaultValue);
+      const val = String(localValue ?? spec.defaultValue);
       const options = typeof spec.options === 'function' ? spec.options(state || {}) : spec.options;
       return (
         <ToggleGroup
           type="single"
           value={val}
           onValueChange={(v) => {
-            if (v) onChange(v);
+            if (v) handleChange(v);
           }}
           className={cn(isDisabled && 'opacity-50 pointer-events-none', className)}
         >
@@ -99,11 +136,11 @@ function ControlField({ spec, value, state, onChange, disabled: overrideDisabled
       );
     }
     case 'checkbox': {
-      const isChecked = Boolean(value ?? spec.defaultValue);
+      const isChecked = Boolean(localValue ?? spec.defaultValue);
       const controlId = `ctrl-${spec.id}`;
       return (
         <div className={cn('control-panel inline-flex items-center gap-2 px-2.5 h-7 text-xs select-none', isDisabled && 'opacity-50 pointer-events-none', className)}>
-          <Checkbox id={controlId} checked={isChecked} onCheckedChange={(c) => onChange(Boolean(c))} disabled={isDisabled} />
+          <Checkbox id={controlId} checked={isChecked} onCheckedChange={(c) => handleChange(Boolean(c))} disabled={isDisabled} />
           {spec.label && (
             <label htmlFor={controlId} className="text-content-secondary font-medium cursor-pointer whitespace-nowrap">
               {spec.label}
@@ -114,15 +151,17 @@ function ControlField({ spec, value, state, onChange, disabled: overrideDisabled
     }
     case 'single-search-select': {
       const items = typeof spec.items === 'function' ? spec.items(state || {}) : spec.items;
-      const selectedVal = (value ?? spec.defaultValue ?? '') as string | number;
+      const placeholder = typeof spec.placeholder === 'function' ? spec.placeholder(state || {}) : spec.placeholder;
+      const selectedVal = (localValue ?? spec.defaultValue ?? '') as string | number;
       return (
         <SearchSelect
           mode="single"
           items={items}
           value={selectedVal}
-          onChange={(val) => onChange(val)}
-          onClear={() => onChange(spec.defaultValue ?? '')}
-          placeholder={spec.placeholder}
+          defaultValue={spec.defaultValue}
+          onChange={(val) => handleChange(val)}
+          onClear={() => handleChange(spec.defaultValue ?? '')}
+          placeholder={placeholder}
           emptyLabel={spec.emptyLabel}
           className={className}
           disabled={isDisabled}
@@ -131,8 +170,9 @@ function ControlField({ spec, value, state, onChange, disabled: overrideDisabled
     }
     case 'multi-search-select': {
       const items = typeof spec.items === 'function' ? spec.items(state || {}) : spec.items;
+      const placeholder = typeof spec.placeholder === 'function' ? spec.placeholder(state || {}) : spec.placeholder;
       const allCount = typeof spec.allCount === 'function' ? spec.allCount(state || {}) : spec.allCount;
-      const selected = (Array.isArray(value) ? value : (spec.defaultValue ?? [])) as (string | number)[];
+      const selected = (Array.isArray(localValue) ? localValue : (spec.defaultValue ?? [])) as (string | number)[];
       return (
         <SearchSelect
           mode="multi"
@@ -140,12 +180,12 @@ function ControlField({ spec, value, state, onChange, disabled: overrideDisabled
           selectedValues={selected}
           onSelect={(val) => {
             if (!selected.includes(val)) {
-              onChange([...selected, val]);
+              handleChange([...selected, val]);
             }
           }}
-          onRemove={(val) => onChange(selected.filter((v) => v !== val))}
-          onClear={() => onChange([])}
-          placeholder={spec.placeholder}
+          onRemove={(val) => handleChange(selected.filter((v) => v !== val))}
+          onClear={() => handleChange([])}
+          placeholder={placeholder}
           emptyLabel={spec.emptyLabel}
           allLabel={spec.allLabel ?? t.common.all}
           allCount={allCount}
@@ -155,7 +195,7 @@ function ControlField({ spec, value, state, onChange, disabled: overrideDisabled
       );
     }
     case 'timeline-scrubber': {
-      const range = (Array.isArray(value) && value.length === 2 ? value : (spec.defaultValue ?? [spec.periods[0], spec.periods[spec.periods.length - 1]])) as [string, string];
+      const range = (Array.isArray(localValue) && localValue.length === 2 ? localValue : (spec.defaultValue ?? [spec.periods[0], spec.periods[spec.periods.length - 1]])) as [string, string];
       return (
         <div className={cn('control-panel px-3 py-1.5 w-full', isDisabled && 'opacity-50 pointer-events-none', className)}>
           <TimelineScrubber
@@ -164,7 +204,7 @@ function ControlField({ spec, value, state, onChange, disabled: overrideDisabled
             density={spec.density as number[] | undefined}
             dateFrom={range[0]}
             dateTo={range[1]}
-            onChange={({ dateFrom, dateTo }) => onChange([dateFrom, dateTo])}
+            onChange={({ dateFrom, dateTo }) => handleChange([dateFrom, dateTo])}
             onReset={onReset}
             hasActiveFilters={hasActiveFilters}
           />
@@ -210,7 +250,16 @@ export function ControlBar({ store, controls, className }: ControlBarProps): Rea
             {compactControls.map((ctrl) => {
               const isDisabled = typeof ctrl.disabled === 'function' ? ctrl.disabled(state) : Boolean(ctrl.disabled);
               const value = state[ctrl.id];
-              return <ControlField key={ctrl.id} spec={ctrl} value={value} state={state} onChange={(val) => store.setState({ [ctrl.id]: val })} disabled={isDisabled} />;
+              return (
+                <ControlField
+                  key={ctrl.id}
+                  spec={ctrl}
+                  value={value}
+                  state={state}
+                  onChange={(val) => store.setState(ctrl.onChange ? ctrl.onChange(val, state) : { [ctrl.id]: val })}
+                  disabled={isDisabled}
+                />
+              );
             })}
           </div>
 
@@ -239,7 +288,7 @@ export function ControlBar({ store, controls, className }: ControlBarProps): Rea
             spec={ctrl}
             value={value}
             state={state}
-            onChange={(val) => store.setState({ [ctrl.id]: val })}
+            onChange={(val) => store.setState(ctrl.onChange ? ctrl.onChange(val, state) : { [ctrl.id]: val })}
             disabled={isDisabled}
             onReset={!hasCompactControls ? store.resetState : undefined}
             hasActiveFilters={!hasCompactControls ? Boolean(state.hasActiveFilters) : undefined}

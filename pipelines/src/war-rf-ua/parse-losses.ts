@@ -1,4 +1,3 @@
-import path from 'node:path';
 import {
   type LossCategoryChartData,
   type LossCategoryDetailData,
@@ -11,13 +10,12 @@ import {
   type LossTimelineBreakdownItem,
   WAR_LOSS_CATEGORIES,
   type WarLossCategory,
-} from '@graphs/types/war-rf-ua/losses';
+} from '@graphs/shared/types/war-rf-ua/losses';
 import { XMLParser } from 'fast-xml-parser';
-import { fileExists, readJson, writeJson } from '@/utils/fs';
+import { fileExists, readJson, writeJsonAsync } from '@/utils/fs';
 import { fetchWithRetry } from '@/utils/http';
 import { getLogger } from '@/utils/logger';
 import { ratio } from '@/utils/math';
-import { PIPELINES_SRC_DIR } from '@/utils/paths';
 
 export interface ParsedLossesResult {
   summary: LossSummaryData;
@@ -28,8 +26,8 @@ export interface ParsedLossesResult {
   map: LossesMapSectionData;
 }
 
-const DATA_FILE = path.resolve(PIPELINES_SRC_DIR, 'war-rf-ua/data-losses.json');
-const CLASSIFICATION_FILE = path.resolve(PIPELINES_SRC_DIR, 'war-rf-ua/classification.json');
+const DATA_FILE = `${import.meta.dir}/data-losses.json.br`;
+const CLASSIFICATION_FILE = `${import.meta.dir}/classification.json.br`;
 
 const GOOGLE_MAPS_KML_URL = 'https://www.google.com/maps/d/kml?mid=1dRn8TRMDLRkaaIBJad0YZvTt3dmiuxo&forcekml=1';
 
@@ -663,17 +661,13 @@ export async function parseLosses(forceUpdate = false): Promise<ParsedLossesResu
     placemarks = extracted.placemarks;
     totalPlacemarks = extracted.totalPlacemarks;
 
-    await writeJson(
-      DATA_FILE,
-      {
-        meta: {
-          lastUpdated: new Date().toISOString(),
-          totalPlacemarks,
-        },
-        placemarks,
+    await writeJsonAsync(DATA_FILE, {
+      meta: {
+        lastUpdated: new Date().toISOString(),
+        totalPlacemarks,
       },
-      0,
-    );
+      placemarks,
+    });
     logger.debug(`Saved ${placemarks.length.toLocaleString()} minimal placemarks to data-losses.json`);
   }
 

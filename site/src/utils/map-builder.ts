@@ -1,4 +1,4 @@
-import type { FrontlineMultiPolygonCoords } from '@graphs/types/war-rf-ua/frontline';
+import type { FrontlineMultiPolygonCoords } from '@graphs/shared/types/war-rf-ua/frontline';
 import type { FeatureCollection, MultiPolygon, Polygon } from 'geojson';
 import { type FillLayerSpecification, type LineLayerSpecification, type Map as MapLibreMap, setWorkerUrl } from 'maplibre-gl';
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';

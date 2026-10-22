@@ -58,14 +58,14 @@ export function FilterPills<T extends string | number = string | number>({ items
           onClick={handleAll}
           className={cn(
             'tag-pill transition-all cursor-pointer inline-flex items-center gap-1.5 focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-accent-primary/50',
-            isSmall ? 'px-2 py-0.5 text-[10px]' : 'px-2.5 py-1 text-[11px]',
+            isSmall ? 'px-2 py-0.5 text-3xs' : 'px-2.5 py-1 text-2xs',
             isAll
               ? 'bg-accent-glow text-accent-primary border-accent-primary/40 font-bold shadow-xs'
               : 'bg-surface-base/50 text-content-muted border-border-subtle hover:text-content-primary hover:border-border-muted',
           )}
         >
           <span className="leading-none">{allLabel}</span>
-          {allCount !== undefined && <span className="tabular-nums text-[10px] leading-none opacity-75">({format(allCount)})</span>}
+          {allCount !== undefined && <span className="tabular-nums text-3xs leading-none opacity-75">({format(allCount)})</span>}
         </button>
       )}
 
@@ -80,7 +80,7 @@ export function FilterPills<T extends string | number = string | number>({ items
             onClick={() => handleToggle(item.id)}
             className={cn(
               'tag-pill transition-all cursor-pointer inline-flex items-center gap-1.5 focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-accent-primary/50',
-              isSmall ? 'px-2 py-0.5 text-[10px]' : 'px-2.5 py-1 text-[11px]',
+              isSmall ? 'px-2 py-0.5 text-3xs' : 'px-2.5 py-1 text-2xs',
               isSelected
                 ? 'bg-accent-glow text-accent-primary border-accent-primary/40 font-bold shadow-xs'
                 : 'bg-surface-base/50 text-content-muted border-border-subtle hover:text-content-primary hover:border-border-muted',
@@ -89,7 +89,7 @@ export function FilterPills<T extends string | number = string | number>({ items
           >
             {item.icon && <span className="shrink-0 flex items-center leading-none">{item.icon}</span>}
             <span className="leading-none">{item.label}</span>
-            {item.count !== undefined && <span className="tabular-nums text-[10px] leading-none opacity-75">({format(item.count)})</span>}
+            {item.count !== undefined && <span className="tabular-nums text-3xs leading-none opacity-75">({format(item.count)})</span>}
           </button>
         );
       })}

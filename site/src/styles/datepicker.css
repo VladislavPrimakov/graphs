@@ -71,3 +71,8 @@
   outline: none;
   border-color: var(--color-accent-primary);
 }
+
+.dark .rdp-root .rdp-selected .rdp-day_button,
+.dark .rdp-root .rdp-day_button.rdp-selected {
+  color: var(--color-surface-base);
+}

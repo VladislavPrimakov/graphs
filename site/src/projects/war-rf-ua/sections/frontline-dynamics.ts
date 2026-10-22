@@ -1,4 +1,4 @@
-import type { FrontlineDynamicsSectionData } from '@graphs/types/war-rf-ua/frontline';
+import type { FrontlineDynamicsSectionData } from '@graphs/shared/types/war-rf-ua/frontline';
 import type { SeriesOption } from 'echarts';
 import { createChart } from '@/components/sections/SectionChart';
 import { chartOption, createBarSeries, resolveEffectiveMax, zipRecords } from '@/utils/chart-builder';
@@ -22,11 +22,12 @@ export const frontlineDynamicsSection = defineSection(({ t, fmt }: ProjectContex
       { name: 'LostArmour', url: 'https://lostarmour.info/map' },
     ],
     data: {
-      dynamics: () => loadDataset<FrontlineDynamicsSectionData>('war-rf-ua', 'frontline-dynamics.json'),
+      dynamicsData: () => loadDataset<FrontlineDynamicsSectionData>('war-rf-ua', 'frontline-dynamics.json'),
     },
     toolbars: [
       {
-        id: 'dynamics',
+        id: 'dynamicsStore',
+        urlPrefix: 'dynamics',
         controls: [
           {
             id: 'metric',
@@ -41,12 +42,12 @@ export const frontlineDynamicsSection = defineSection(({ t, fmt }: ProjectContex
         ] as const,
       },
     ] as const,
-    buildView: ({ dynamics: data }, { dynamics, frontline }) => {
-      const { monthly } = data;
-      const metric = dynamics?.metric ?? 'netChange';
-      const [dateFrom, dateTo] = frontline?.period ?? [monthly.months[0], monthly.months[monthly.months.length - 1]];
-      const fromMonth = dateFrom ? dateFrom.slice(0, 7) : monthly.months[0];
-      const toMonth = dateTo ? dateTo.slice(0, 7) : monthly.months[monthly.months.length - 1];
+    buildView: ({ dynamicsData }, { dynamicsStore, frontlineStore }) => {
+      const { monthly } = dynamicsData;
+      const metric = dynamicsStore.metric;
+      const [dateFrom, dateTo] = frontlineStore.period;
+      const fromMonth = dateFrom.slice(0, 7);
+      const toMonth = dateTo.slice(0, 7);
 
       const monthIndices = monthly.months
         .map((m, idx) => ({ month: m, idx }))

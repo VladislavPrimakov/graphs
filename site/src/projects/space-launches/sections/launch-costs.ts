@@ -10,11 +10,11 @@ export const launchCostsSection: Section = ({ t, fmt, tokens }) => ({
     { name: 'CSIS Aerospace Security Project & BryceTech', url: 'https://aerospace.csis.org/data/space-launch-cost/' },
     { name: 'The Space Devs — Launch Library 2 API', url: 'https://ll.thespacedevs.com/2.3.0/launches/' },
   ],
-  buildView: ({ spaceLaunches }, { launches }) => {
-    const data = spaceLaunches['launch-costs'];
+  buildView: ({ spaceLaunchesData }, { launchesStore }) => {
+    const data = spaceLaunchesData['launch-costs'];
     const summary = data.summary;
     const costRegions = Object.keys(data.decadeCosts.series);
-    const selectedRegions = launches?.countries?.length ? (launches.countries as string[]).filter((r) => costRegions.includes(r)) : costRegions;
+    const selectedRegions = launchesStore.countries.length ? (launchesStore.countries as string[]).filter((r) => costRegions.includes(r)) : costRegions;
     const activeCostRegions = selectedRegions.length > 0 ? selectedRegions : costRegions;
 
     return {

@@ -53,6 +53,10 @@ export interface BaseControl {
   id: string;
   label?: string;
   disabled?: boolean | ((state: State) => boolean);
+  /** Debounce delay in milliseconds before dispatching state changes to the store. If omitted or 0, updates fire immediately. @default 0 */
+  debounceMs?: number;
+  /** Optional custom state mutation dispatched on value change. When omitted, dispatches `{ [id]: value }`. */
+  onChange?: (value: unknown, state: State) => Record<string, unknown>;
 }
 
 /** Canonical mapping between control types and their emitted primitive value types. */
@@ -68,16 +72,16 @@ interface ControlValueMap {
 
 export interface SliderControl extends BaseControl {
   type: 'slider';
-  min: number;
-  max: number;
+  min: number | ((state: State) => number);
+  max: number | ((state: State) => number);
   step?: number;
   defaultValue: number;
 }
 
 export interface RangeSliderControl extends BaseControl {
   type: 'range-slider';
-  min: number;
-  max: number;
+  min: number | ((state: State) => number);
+  max: number | ((state: State) => number);
   step?: number;
   minStepsBetweenThumbs?: number;
   defaultValue?: readonly [number, number] | [number, number];
@@ -90,7 +94,7 @@ export interface CheckboxControl extends BaseControl {
 
 export interface SingleSearchSelectControl extends BaseControl {
   type: 'single-search-select';
-  placeholder?: string;
+  placeholder?: string | ((state: Record<string, unknown>) => string);
   emptyLabel?: string;
   items: readonly ControlSearchItem[] | ControlSearchItem[] | ((state: Record<string, unknown>) => readonly ControlSearchItem[] | ControlSearchItem[]);
   defaultValue?: string;
@@ -98,7 +102,7 @@ export interface SingleSearchSelectControl extends BaseControl {
 
 export interface MultiSearchSelectControl extends BaseControl {
   type: 'multi-search-select';
-  placeholder?: string;
+  placeholder?: string | ((state: Record<string, unknown>) => string);
   emptyLabel?: string;
   allLabel?: string;
   allCount?: number | ((state: Record<string, unknown>) => number | undefined);
@@ -175,6 +179,12 @@ export type ControlsToValues<C extends readonly Control[] | undefined = readonly
 export interface ToolbarSpec<Id extends string = string, C extends readonly Control[] = readonly Control[]> {
   /** Unique toolbar identifier used as key in reactive stores object. */
   id: Id;
+  /**
+   * Prefix for URL query parameters.
+   * If omitted, controls are stored without a namespace prefix (e.g. `?country=cn`).
+   * When specified, controls are namespaced as `${urlPrefix}.${controlId}` (e.g. `?frontline.period=...`).
+   */
+  urlPrefix?: string;
   /** Interactive control specifications rendered in the toolbar. */
   controls: C;
 }

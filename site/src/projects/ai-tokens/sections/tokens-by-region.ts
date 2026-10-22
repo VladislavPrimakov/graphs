@@ -16,7 +16,8 @@ export const tokensByRegionSection: Section = ({ t, fmt }) => {
     ],
     toolbars: [
       {
-        id: 'region',
+        id: 'regionStore',
+        urlPrefix: 'region',
         controls: [
           {
             id: 'mode',
@@ -31,9 +32,9 @@ export const tokensByRegionSection: Section = ({ t, fmt }) => {
         ] as const,
       },
     ] as const,
-    buildView: ({ aiTokens }, { region }) => {
-      const { summary, regions } = aiTokens;
-      const isShare = region.mode === 'share';
+    buildView: ({ aiTokensData }, { regionStore }) => {
+      const { summary, regions } = aiTokensData;
+      const isShare = regionStore.mode === 'share';
       return {
         kpisTop: [
           {
