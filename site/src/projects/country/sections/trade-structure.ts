@@ -20,7 +20,7 @@ export const tradeStructureSection: Section = ({ t, fmt }) => {
       const countryName = fmt.region(countryData.code);
       const title = `${countryName} — ${t.proj.tradeStructure.title}`;
       const years = countryData.years;
-      const [selStartYear, selEndYear] = countryStore.period;
+      const [selStartYear, selEndYear] = countryStore.years;
       const showLabels = countryStore.labels;
 
       const foundStartIdx = years.findIndex((y: number) => y >= selStartYear);

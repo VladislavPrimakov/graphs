@@ -3,6 +3,7 @@ import type React from 'react';
 import { useEffect, useRef, useState } from 'react';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { DayFrontlineEntry, FrontlineMapLayers, FrontlineMapSectionData } from '@graphs/shared/types/war-rf-ua/frontline';
+import { useSectionResize } from '@/components/sections/Section';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { createFillLayer, createLineLayer, decodeMultiPolygon, getMapTileStyle, multiPolygonToGeoJson, registerFallbackDot, UKRAINE_MAP_PRESETS } from '@/utils/map-builder';
 import { useFormat, useTheme } from '@/utils/provider';
@@ -149,23 +150,15 @@ export const FrontlineMap: React.FC<FrontlineMapProps> = ({ data, targetDate: ra
 
     mapRef.current = map;
 
-    const container = mapContainerRef.current;
-    let resizeTimer: ReturnType<typeof setTimeout> | null = null;
-    const resizeObserver = new ResizeObserver(() => {
-      if (resizeTimer) clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(() => {
-        map.resize();
-      }, 50);
-    });
-    if (container) resizeObserver.observe(container);
-
     return () => {
-      if (resizeTimer) clearTimeout(resizeTimer);
-      resizeObserver.disconnect();
       map.remove();
       mapRef.current = null;
     };
   }, [resolvedTheme, tokens.text.dim, data]);
+
+  useSectionResize(() => {
+    mapRef.current?.resize();
+  });
 
   // Reactive layer updates when selectedDate changes (cached or on-demand fetch)
   useEffect(() => {
@@ -266,7 +259,7 @@ export const FrontlineMap: React.FC<FrontlineMapProps> = ({ data, targetDate: ra
 
         {/* Centered Loading Overlay while downloading history bundle */}
         {isLoadingHistory && (
-          <div className="absolute inset-0 z-30 flex items-center justify-center bg-surface-base transition-opacity">
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-surface-base transition-opacity">
             <LoadingSpinner isVisible={true} fullscreen={false} size="md" />
           </div>
         )}

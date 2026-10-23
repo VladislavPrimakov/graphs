@@ -242,7 +242,7 @@ export const project = defineProject<typeof dict, typeof data>({
         scope: ['strikes-uav', 'strikes-missile'],
         controls: [
           {
-            id: 'period',
+            id: 'mode',
             type: 'toggle',
             defaultValue: 'monthly',
             label: t.common.period,

@@ -60,7 +60,7 @@ export const tradePartnersSection: Section = ({ t, fmt }) => {
               ],
             },
             {
-              id: 'count',
+              id: 'top',
               type: 'slider',
               min: minPartners,
               max: maxPartners,
@@ -85,7 +85,7 @@ export const tradePartnersSection: Section = ({ t, fmt }) => {
       const [selStartYear, selEndYear] = ukraineStore.years;
       const showLabels = ukraineStore.labels;
       const isPercent = partnersStore.mode === 'percent';
-      const count = partnersStore.count;
+      const top = partnersStore.top;
       const selectedCountries = partnersStore.countries as string[];
       const hasSelectedCountries = selectedCountries.length > 0;
 
@@ -113,7 +113,7 @@ export const tradePartnersSection: Section = ({ t, fmt }) => {
 
         for (let i = 0; i < visibleYears.length; i++) {
           const rawYearList = dataset[i] || [];
-          const yearTop = hasSelectedCountries ? rawYearList.filter(([code]) => selectedCountries.includes(code)) : rawYearList.slice(0, count);
+          const yearTop = hasSelectedCountries ? rawYearList.filter(([code]) => selectedCountries.includes(code)) : rawYearList.slice(0, top);
 
           filteredYearsData.push(yearTop);
           for (const [code] of yearTop) {
@@ -173,7 +173,7 @@ export const tradePartnersSection: Section = ({ t, fmt }) => {
       const effectivePercentBound = peakPercentStack > 0 ? Math.min(100, Math.ceil((peakPercentStack * 1.15) / 5) * 5 || 10) : 100;
 
       return {
-        title: hasSelectedCountries ? t.proj.tradePartners.title : `${t.proj.tradePartners.title} (${t.common.top} ${count})`,
+        title: hasSelectedCountries ? t.proj.tradePartners.title : `${t.proj.tradePartners.title} (${t.common.top} ${top})`,
         content: createChart(
           chartOption({
             tooltip: {

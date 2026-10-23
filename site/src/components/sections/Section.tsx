@@ -1,5 +1,5 @@
 import type React from 'react';
-import { createContext, Suspense, use, useContext } from 'react';
+import { createContext, Suspense, use, useContext, useEffect, useRef } from 'react';
 import { ExternalLinkIcon } from '@/components/icons';
 import { SectionHeader } from '@/components/sections/SectionHeader';
 import { ControlBar } from '@/components/ui/ControlBar';
@@ -8,13 +8,15 @@ import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import type { DashboardSectionSpec, DataLoader, DataLoadersMap, ProjectSource, ToolbarSpec } from '@/utils/project';
 import { useTranslation } from '@/utils/provider';
 import { type ControlStore, getOrCreateStoreFromControls, getStoreSnapshots, useCombinedStores } from '@/utils/store';
-import { SECTION_DATA_ATTR, useInView } from '@/utils/viewport';
+import { SECTION_DATA_ATTR, subscribeWindowResize, useInView } from '@/utils/viewport';
 
 /** Context value exposed to visualizers nested within a section card. */
 export interface SectionContextValue {
   sectionId: string;
   projectSlug: string;
   title?: string;
+  /** Defers execution until this section enters the viewport (or runs immediately if in view). */
+  deferUntilInView?: (action: () => void) => void;
 }
 
 export const SectionContext = createContext<SectionContextValue | null>(null);
@@ -22,6 +24,32 @@ export const SectionContext = createContext<SectionContextValue | null>(null);
 /** Hook accessing section identity and metadata within child visualizers. */
 export function useSectionContext(): SectionContextValue | null {
   return useContext(SectionContext);
+}
+
+/**
+ * React hook subscribing to application window resize within a section context.
+ * Automatically defers resize callback execution while the section is off-screen,
+ * flushing pending resize once the section scrolls into view.
+ */
+export function useSectionResize(callback: () => void): void {
+  const ctx = useSectionContext();
+  const defer = ctx?.deferUntilInView;
+  const callbackRef = useRef(callback);
+  callbackRef.current = callback;
+
+  const stableTrigger = useRef(() => {
+    callbackRef.current();
+  }).current;
+
+  useEffect(() => {
+    return subscribeWindowResize(() => {
+      if (defer) {
+        defer(stableTrigger);
+      } else {
+        stableTrigger();
+      }
+    });
+  }, [defer, stableTrigger]);
 }
 
 /** Props for the polymorphic Section renderer. */
@@ -41,14 +69,16 @@ export interface SectionProps {
 }
 
 /** Clean card loader placeholder with normalized height preserving page geometry. */
-function SectionLoader({ id, projectSlug, title }: { id: string; projectSlug?: string; title?: string }) {
+function SectionLoader({ id, projectSlug, title, deferUntilInView }: { id: string; projectSlug?: string; title?: string; deferUntilInView?: (action: () => void) => void }) {
   return (
-    <div className="card min-h-chart flex flex-col justify-between relative">
-      <SectionHeader sectionId={id} projectSlug={projectSlug} title={title} />
-      <div className="flex-1 flex items-center justify-center min-h-75 relative">
-        <LoadingSpinner fullscreen={false} size="sm" isVisible={true} />
+    <SectionContext.Provider value={{ sectionId: id, projectSlug: projectSlug ?? '', title, deferUntilInView }}>
+      <div className="card min-h-chart flex flex-col justify-between relative">
+        <SectionHeader sectionId={id} projectSlug={projectSlug} title={title} />
+        <div className="flex-1 flex items-center justify-center min-h-75 relative">
+          <LoadingSpinner fullscreen={false} size="sm" isVisible={true} />
+        </div>
       </div>
-    </div>
+    </SectionContext.Provider>
   );
 }
 
@@ -77,12 +107,11 @@ interface SectionLoadedContentProps {
   projectData?: Record<string, unknown>;
   sectionLoaders?: DataLoadersMap;
   externalStores?: Record<string, ControlStore>;
-  inViewRef: React.RefObject<boolean | null>;
-  subscribeInView: (listener: (inView: boolean) => void) => () => void;
+  deferUntilInView: (action: () => void) => void;
 }
 
 /** Inner section content unwrapping lazily fetched section dataset via React 19 use(). */
-function SectionLoadedContent({ section, projectSlug, projectData = {}, sectionLoaders, externalStores, inViewRef, subscribeInView }: SectionLoadedContentProps) {
+function SectionLoadedContent({ section, projectSlug, projectData = {}, sectionLoaders, externalStores, deferUntilInView }: SectionLoadedContentProps) {
   const allLoaders: Record<string, DataLoader> = {
     ...(sectionLoaders ?? {}),
     ...((section.data as Record<string, DataLoader>) ?? {}),
@@ -120,12 +149,12 @@ function SectionLoadedContent({ section, projectSlug, projectData = {}, sectionL
   }
 
   const stores = { ...externalStores, ...internalStores };
-  const storeValues = useCombinedStores(stores, inViewRef, subscribeInView) ?? {};
+  const storeValues = useCombinedStores(stores, deferUntilInView) ?? {};
 
   const { content, title = section.title, kpisTop = section.kpisTop, kpisBottom = section.kpisBottom } = section.buildView(mergedData, storeValues);
 
   return (
-    <SectionContext.Provider value={{ sectionId: section.id, projectSlug, title }}>
+    <SectionContext.Provider value={{ sectionId: section.id, projectSlug, title, deferUntilInView }}>
       <KpiRow kpis={kpisTop} />
       <div className="card">
         <SectionHeader sectionId={section.id} projectSlug={projectSlug} title={title} />
@@ -147,25 +176,24 @@ function SectionLoadedContent({ section, projectSlug, projectData = {}, sectionL
 
 /** Universal dashboard section scaffolding coordinating anchor links, generic controls, dynamic KPI rows, and inner visualizers. */
 export const Section: React.FC<SectionProps> = ({ section, projectSlug, projectData, sectionLoaders, initialInView = false, externalStores }) => {
-  const { ref, hasEnteredView, inViewRef, subscribeInView } = useInView<HTMLElement>(section.id, initialInView);
+  const { ref, hasEnteredView, deferUntilInView } = useInView<HTMLElement>(section.id, initialInView);
   const shouldLoad = hasEnteredView;
 
   return (
     <section ref={ref} id={section.id} {...{ [SECTION_DATA_ATTR]: section.id }} className="scroll-mt-16 flex flex-col gap-4">
       {shouldLoad ? (
-        <Suspense fallback={<SectionLoader id={section.id} projectSlug={projectSlug} title={section.title} />}>
+        <Suspense fallback={<SectionLoader id={section.id} projectSlug={projectSlug} title={section.title} deferUntilInView={deferUntilInView} />}>
           <SectionLoadedContent
             section={section}
             projectSlug={projectSlug}
             projectData={projectData}
             sectionLoaders={sectionLoaders}
             externalStores={externalStores}
-            inViewRef={inViewRef}
-            subscribeInView={subscribeInView}
+            deferUntilInView={deferUntilInView}
           />
         </Suspense>
       ) : (
-        <SectionLoader id={section.id} projectSlug={projectSlug} title={section.title} />
+        <SectionLoader id={section.id} projectSlug={projectSlug} title={section.title} deferUntilInView={deferUntilInView} />
       )}
     </section>
   );

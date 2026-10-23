@@ -1,6 +1,5 @@
 import { cloneDeep, isEqual } from 'lodash-es';
 import queryString from 'query-string';
-import type React from 'react';
 import { startTransition, useEffect, useReducer, useRef, useSyncExternalStore } from 'react';
 import type { Control } from '@/utils/project';
 
@@ -22,6 +21,8 @@ export interface ControlStore {
   getState: () => State;
   /** Subscribes a listener callback to state changes. */
   subscribe: (listener: () => void) => () => void;
+  /** Disposes active timers and clears subscriber listeners. */
+  dispose?: () => void;
 }
 
 /** Configuration options for store creation. */
@@ -292,17 +293,34 @@ function createControlStore(controls?: readonly Control[] | Control[], options?:
     return useSyncExternalStore(subscribe, getState, getState);
   }
 
+  function dispose(): void {
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+      debounceTimer = null;
+    }
+    listeners.clear();
+  }
+
   return {
     getState,
     setState,
     resetState,
     subscribe,
     useStore,
+    dispose,
   };
 }
 
 // Module-level registry maintaining referentially stable stores per scope ID across renders
 const storeRegistry = new Map<string, ControlStore>();
+
+/** Clears all cached stores in the registry and disposes their active timers. */
+export function clearStoreRegistry(): void {
+  for (const store of storeRegistry.values()) {
+    store.dispose?.();
+  }
+  storeRegistry.clear();
+}
 
 /** Retrieves an existing store instance or instantiates and caches a new store derived from controls. */
 export function getOrCreateStoreFromControls(scopeId: string, controls?: readonly Control[] | Control[], options?: StoreOptions): ControlStore {
@@ -333,29 +351,17 @@ export function getStoreSnapshots(stores?: Record<string, ControlStore>): Record
  * Returns a dictionary of current state snapshots indexed by store ID,
  * or undefined if no stores are provided.
  *
- * When an optional inViewRef and subscribeInView are provided, skips re-rendering
- * while off-screen and flushes pending updates when entering the viewport (isDirty pattern).
+ * When an optional deferUntilInView dispatcher is provided, defers re-rendering
+ * while off-screen and flushes pending updates when entering the viewport.
  */
-export function useCombinedStores<TStores extends Record<string, ControlStore>>(
-  stores?: TStores,
-  inViewRef?: React.RefObject<boolean | null>,
-  subscribeInView?: (listener: (inView: boolean) => void) => () => void,
-): { [K in keyof TStores]: State } | undefined {
+export function useCombinedStores<TStores extends Record<string, ControlStore>>(stores?: TStores, deferUntilInView?: (action: () => void) => void): { [K in keyof TStores]: State } | undefined {
   const [, forceUpdate] = useReducer((x) => x + 1, 0);
-  const isDirtyRef = useRef(false);
 
-  // Subscribe to inView changes to flush pending updates when scrolling into view
-  useEffect(() => {
-    if (!subscribeInView) return;
-    return subscribeInView((inView) => {
-      if (inView && isDirtyRef.current) {
-        isDirtyRef.current = false;
-        startTransition(() => {
-          forceUpdate();
-        });
-      }
+  const stableTrigger = useRef(() => {
+    startTransition(() => {
+      forceUpdate();
     });
-  }, [subscribeInView]);
+  }).current;
 
   const storeKeys = stores ? Object.keys(stores).join('::') : '';
 
@@ -366,20 +372,18 @@ export function useCombinedStores<TStores extends Record<string, ControlStore>>(
     if (storeList.length === 0) return;
 
     const handleStoreChange = () => {
-      if (inViewRef && !inViewRef.current) {
-        isDirtyRef.current = true;
-        return;
+      if (deferUntilInView) {
+        deferUntilInView(stableTrigger);
+      } else {
+        stableTrigger();
       }
-      startTransition(() => {
-        forceUpdate();
-      });
     };
 
     const unsubs = storeList.map((store) => store.subscribe(handleStoreChange));
     return () => {
       for (let i = 0; i < unsubs.length; i++) unsubs[i]();
     };
-  }, [storeKeys]);
+  }, [storeKeys, deferUntilInView, stableTrigger]);
 
   if (!stores || Object.keys(stores).length === 0) return undefined;
 

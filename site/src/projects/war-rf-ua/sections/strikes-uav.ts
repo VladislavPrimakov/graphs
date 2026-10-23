@@ -25,7 +25,7 @@ export const strikesUavSection = defineSection(({ t, fmt }: ProjectContext<typeo
       const rf = strikesData.rfAttacks.summary;
       const ua = strikesData.uaAttacks.summary;
       const timeline = strikesData.unifiedTimeline;
-      const isDaily = strikesStore.period === 'daily';
+      const isDaily = strikesStore.mode === 'daily';
 
       return {
         title: isDaily ? t.proj.uavStrikes.titleDaily : t.proj.uavStrikes.titleMonthly,

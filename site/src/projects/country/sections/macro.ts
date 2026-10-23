@@ -21,7 +21,7 @@ export const macroSection: Section = ({ t, fmt, tokens }) => {
       const countryName = fmt.region(countryData.code);
       const title = `${countryName} — ${t.proj.macro.title}`;
       const years = countryData.years;
-      const [selStartYear, selEndYear] = countryStore.period;
+      const [selStartYear, selEndYear] = countryStore.years;
       const showLabels = countryStore.labels;
 
       const foundStartIdx = years.findIndex((y: number) => y >= selStartYear);

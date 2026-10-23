@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.2] - 2026-10-23
+
+### Pipelines (@graphs/pipelines)
+
+#### Fixed
+- Fixed that UN Comtrade commercial services requests silently truncated at 100,000 rows by batching countries into groups of 40 (`BATCH_SIZE_SERVICES_COUNTRIES = 40`) and guarding against response overflow in `syncServicesStage`.
+
+---
+
+### Site (@graphs/site)
+
+#### Added
+- Added `useSectionResize` and `subscribeWindowResize` consolidating per-component `ResizeObserver` instances into a single global listener with viewport-aware deferred execution (`deferUntilInView`), pausing canvas and layout recalculations while sections are scrolled off-screen.
+- Added `SectionHeader.tsx` unifying responsive 3-column title centering, anchor buttons, and automatic row transfer with centered anchor button when section titles exceed available single-row card width.
+
+#### Changed
+- Streamlined site header on mobile viewports by hiding the brand group in favor of dedicated burger navigation and full-width section outline pills, simplifying `BrandGroup` component props down to `compact` and `className`.
+
+#### Fixed
+- Fixed that wrapping toolbar controls shifted secondary rows to the left by switching compact control layout to line-scoped float clearance, allowing row 1 to reserve Reset button space while subsequent rows expand across 100% card width.
+- Fixed that multi-row chart legends overlapped grid series on dynamic filter updates by applying horizontal clearance padding before calculating vertical multi-row wrapping height.
+- Fixed that multi-row chart legends and toolbox export icons drifted out of horizontal alignment with the Y-axis title label by computing container-width fluid typography in pass 1 to scale legend markers and toolbox buttons, anchoring row 1 or the bottom row along the exact axis baseline in pass 2.
+- Fixed that bar series inside labels rendered with an unstyled 10px fallback font on iOS Safari (WebKit) when overflowing narrow bars by replacing `fontSize: 0` with off-screen positioning `{ x: -9999, y: -9999 }`.
+- Fixed that interactive control stores retained non-default filter state in memory across page navigations without reflecting it in the URL by clearing `storeRegistry` and active debounce timers upon `ProjectDashboard` unmount.
+- Fixed that map and section loading overlays overlapped sticky dashboard toolbars during scroll flight by raising `DashboardToolbars` and `SearchSelect` dropdowns to `z-40` while bounding in-card loaders to `z-20`.
+- Fixed that `TimelineScrubber` date pickers overflowed the screen on narrow viewports by grouping them into a unified wrapping flexbox, naturally stacking them with aligned widths when constrained while maintaining vertical centering of the Reset button.
+
+---
+
 ## [1.3.1] - 2026-10-22
 
 ### Tooling & Shared (@graphs/shared)

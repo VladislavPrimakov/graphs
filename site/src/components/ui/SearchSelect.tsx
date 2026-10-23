@@ -203,7 +203,7 @@ export const SearchSelect: React.FC<SearchSelectProps> = (props) => {
         </div>
 
         {isOpen && (
-          <Command.List className="glass-overlay absolute top-full left-0 right-0 mt-1 z-30 max-h-60 overflow-y-auto p-1 shadow-2xl rounded-lg">
+          <Command.List className="glass-overlay absolute top-full left-0 right-0 mt-1 z-40 max-h-60 overflow-y-auto p-1 shadow-2xl rounded-lg">
             <Command.Empty className="px-3 py-2 text-xs text-content-muted text-center">{emptyLabel}</Command.Empty>
             {!isSingle && props.allLabel && (
               <Command.Item

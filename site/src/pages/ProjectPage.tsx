@@ -1,4 +1,4 @@
-import { use } from 'react';
+import { use, useEffect } from 'react';
 import { useParams } from 'react-router';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { SectionNav } from '@/components/layout/SectionNav';
@@ -7,7 +7,7 @@ import { DashboardToolbars } from '@/components/ui/ControlBar';
 import NotFoundPage from '@/pages/NotFoundPage';
 import { type DashboardSectionSpec, type DashboardToolbarSpec, loadProjectBundle, STATIC_PROJECT_MAP } from '@/utils/project';
 import { type Language, useFormat, useLanguage, useTheme, useTranslation } from '@/utils/provider';
-import { type ControlStore, getOrCreateStoreFromControls } from '@/utils/store';
+import { type ControlStore, clearStoreRegistry, getOrCreateStoreFromControls } from '@/utils/store';
 import { getAbsoluteUrl } from '@/utils/version';
 import metadata from '../../public/data/metadata.json';
 
@@ -35,6 +35,12 @@ function ProjectDashboard({ slug, section, lang }: ProjectDashboardProps) {
   const lastUpdated = (metadata as Record<string, string>)[project.id];
   // biome-ignore lint/suspicious/noExplicitAny: polymorphic dispatch across dynamic project specifications
   const buildCtx = { lang, t: t as any, fmt, theme: resolvedTheme, tokens };
+
+  useEffect(() => {
+    return () => {
+      clearStoreRegistry();
+    };
+  }, []);
 
   // Resolve project-level data loaders (if defined)
   const projectData: Record<string, unknown> = {};
