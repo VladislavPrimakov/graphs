@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { cn } from '@/utils/cn';
 import { usePath } from '@/utils/provider';
-import { scrollToSection, useScrollSpy } from '@/utils/viewport';
+import { scrollToSection, subscribeWindowResize, useScrollSpy } from '@/utils/viewport';
 
 /** Props for the SectionNav outline component. */
 export interface SectionNavProps {
@@ -52,15 +52,7 @@ export const SectionNav: React.FC<SectionNavProps> = ({ sections, projectSlug, s
     centerPill('smooth');
 
     const handleResize = () => centerPill('instant');
-    window.addEventListener('resize', handleResize, { passive: true });
-
-    const observer = new ResizeObserver(handleResize);
-    observer.observe(containerRef.current);
-
-    return () => {
-      window.removeEventListener('resize', handleResize);
-      observer.disconnect();
-    };
+    return subscribeWindowResize(handleResize);
   }, [activeId]);
 
   if (!portalTarget || sections.length <= 1) return null;

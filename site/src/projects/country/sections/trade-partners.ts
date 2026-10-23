@@ -79,7 +79,7 @@ export const tradePartnersSection: Section = ({ t, fmt }) => {
               onChange: (level) => ({ level, categories: [] }),
             },
             {
-              id: 'count',
+              id: 'top',
               type: 'slider',
               min: minPartners,
               max: maxPartners,
@@ -112,11 +112,11 @@ export const tradePartnersSection: Section = ({ t, fmt }) => {
     },
     buildView: ({ countryData }, { countryStore, partnersStore }) => {
       const years = countryData.years;
-      const [selStartYear, selEndYear] = countryStore.period;
+      const [selStartYear, selEndYear] = countryStore.years;
       const showLabels = countryStore.labels;
       const isPercent = partnersStore.mode === 'percent';
       const isDetailed = partnersStore.level === 'detailed';
-      const count = partnersStore.count;
+      const top = partnersStore.top;
 
       const selectedCountries = (partnersStore.countries as string[]) || [];
       const hasSelectedCountries = selectedCountries.length > 0;
@@ -231,7 +231,7 @@ export const tradePartnersSection: Section = ({ t, fmt }) => {
             }
 
             positiveEntries.sort((a, b) => b[1] - a[1]);
-            const topCount = Math.min(count, positiveEntries.length);
+            const topCount = Math.min(top, positiveEntries.length);
             for (let k = 0; k < topCount; k++) {
               const [pCodeUpper, val] = positiveEntries[k];
               const share = percentage(val, yearBaseTotal, 1);
@@ -291,7 +291,7 @@ export const tradePartnersSection: Section = ({ t, fmt }) => {
         }
       }
 
-      const topPart = hasSelectedCountries ? '' : ` (${t.common.top} ${count})`;
+      const topPart = hasSelectedCountries ? '' : ` (${t.common.top} ${top})`;
       const title = `${countryName} — ${t.proj.tradePartners.title}${catTitlePart}${topPart}`;
 
       const effectivePercentBound =

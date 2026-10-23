@@ -11,13 +11,13 @@ import { SITE_VERSION } from '@/utils/version';
 const FLAG_STYLE = 'w-4 h-3 rounded-xs shadow-xs border border-border-subtle/80 shrink-0';
 
 interface BrandGroupProps {
+  className?: string;
   onNavigate?: () => void;
-  hideLabelOnMobile?: boolean;
-  hideVersionOnMobile?: boolean;
+  compact?: boolean;
 }
 
 /** Brand logo, site title, and changelog version badge link. */
-const BrandGroup: React.FC<BrandGroupProps> = ({ onNavigate, hideLabelOnMobile, hideVersionOnMobile }) => {
+const BrandGroup: React.FC<BrandGroupProps> = ({ className, onNavigate, compact }) => {
   const { getPath } = usePath();
   const { t } = useTranslation();
   const location = useLocation();
@@ -25,22 +25,17 @@ const BrandGroup: React.FC<BrandGroupProps> = ({ onNavigate, hideLabelOnMobile, 
   const isChangelogActive = location.pathname === changelogPath || location.pathname.startsWith(`${changelogPath}/`);
 
   return (
-    <div className="flex items-center gap-2 shrink-0">
+    <div className={cn('flex items-center gap-2 shrink-0', className)}>
       <Link to={getPath('/')} onClick={onNavigate} className="flex items-center gap-2 group">
         <div className="w-8 h-8 rounded-lg bg-linear-to-tr from-blue-600 via-indigo-500 to-sky-400 flex items-center justify-center shadow-lg shadow-blue-500/20 group-hover:scale-105 transition-transform shrink-0">
           <LogoIcon className="w-5 h-5 text-white" />
         </div>
-        <span className={cn('font-bold text-lg leading-none text-content-primary tracking-tight group-hover:text-accent-primary transition-colors', hideLabelOnMobile && 'hidden lg:inline')}>
+        <span className={cn('font-bold text-lg leading-none text-content-primary tracking-tight group-hover:text-accent-primary transition-colors', compact && 'hidden lg:inline')}>
           {t.common.graphs}
         </span>
       </Link>
 
-      <Link
-        to={changelogPath}
-        onClick={onNavigate}
-        className={cn('nav-pill', isChangelogActive ? 'nav-pill-active' : 'nav-pill-idle', hideVersionOnMobile && 'hidden md:inline-flex')}
-        aria-label={`${t.common.changelog} (v${SITE_VERSION})`}
-      >
+      <Link to={changelogPath} onClick={onNavigate} className={cn('nav-pill', isChangelogActive ? 'nav-pill-active' : 'nav-pill-idle')} aria-label={`${t.common.changelog} (v${SITE_VERSION})`}>
         v{SITE_VERSION}
       </Link>
     </div>
@@ -134,7 +129,7 @@ export const SiteLayout: React.FC<{ children: React.ReactNode }> = ({ children }
               <MenuIcon className="w-5 h-5" />
             </button>
 
-            <BrandGroup hideLabelOnMobile={true} hideVersionOnMobile={true} />
+            <BrandGroup className="hidden md:flex" compact />
           </div>
 
           <div id="header-section-nav" className="flex-1 flex items-center justify-center min-w-0 max-w-full overflow-hidden" />

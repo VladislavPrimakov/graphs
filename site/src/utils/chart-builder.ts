@@ -231,21 +231,38 @@ function resolveTooltipPosition(point: [number, number], _params: unknown, _dom:
   return [posX, posY];
 }
 
+/** Computes fluid font size for line labels, axes, legend, and toolbox based on container/canvas width. */
+export function computeFluidLineFontSize(canvasWidth?: number): number {
+  const { minFontSize, maxFontSize, mobileBreakpoint, desktopBreakpoint, baseFontSize, quantizeStep } = CHART_CONFIG.typography.line;
+  if (!canvasWidth || canvasWidth <= 0) return baseFontSize;
+  const ratio = Math.max(0, Math.min(1, (canvasWidth - mobileBreakpoint) / (desktopBreakpoint - mobileBreakpoint)));
+  const raw = minFontSize + ratio * (maxFontSize - minFontSize);
+  return Math.max(minFontSize, Math.min(maxFontSize, Math.round(raw / quantizeStep) * quantizeStep));
+}
+
 /** Resolves theme invariants providing typography, borders, and grid boundaries for a concrete theme palette. */
-function getCanvasInvariants(tokens: ThemeColors): CanvasInvariants {
+function getCanvasInvariants(tokens: ThemeColors, lineFontSize: number = CHART_CONFIG.typography.line.baseFontSize, hasDataZoom = false): CanvasInvariants {
+  const itemHeight = lineFontSize;
+  const itemWidth = Math.round(lineFontSize * (CHART_CONFIG.typography.legend.itemWidth / CHART_CONFIG.typography.legend.itemHeight));
+  const toolboxButtons = hasDataZoom ? 2 : 1;
+  const toolboxWidth = CHART_CONFIG.toolbox.right + toolboxButtons * lineFontSize + (toolboxButtons - 1) * CHART_CONFIG.toolbox.itemGap;
+  const toolboxPaddingRight = toolboxWidth + CHART_CONFIG.typography.axis.nameGap;
+  const baseGridTop = CHART_CONFIG.layout.topClearance + lineFontSize + CHART_CONFIG.typography.axis.nameGap;
+
   return {
     fontFamily: themeFonts.sansFamily,
     layout: CHART_CONFIG.layout,
     legend: {
+      top: CHART_CONFIG.layout.topClearance,
       left: 'center',
-      padding: 0,
-      itemHeight: CHART_CONFIG.typography.legend.itemHeight,
-      itemWidth: CHART_CONFIG.typography.legend.itemWidth,
+      padding: [0, toolboxPaddingRight, 0, 0],
+      itemHeight,
+      itemWidth,
       itemGap: CHART_CONFIG.typography.legend.itemGap,
       textStyle: {
         color: tokens.text.secondary,
-        fontSize: CHART_CONFIG.typography.legend.fontSize,
-        lineHeight: CHART_CONFIG.typography.legend.fontSize,
+        fontSize: lineFontSize,
+        lineHeight: lineFontSize,
         fontFamily: themeFonts.sansFamily,
       },
     },
@@ -253,19 +270,12 @@ function getCanvasInvariants(tokens: ThemeColors): CanvasInvariants {
       left: 0,
       right: 0,
       bottom: 0,
-      top: 0,
-      outerBounds: {
-        left: 0,
-        right: 0,
-        bottom: 0,
-        top: 0,
-      },
-      outerBoundsContain: 'all',
+      top: baseGridTop,
     },
     xAxis: {
       axisLabel: {
         color: tokens.text.secondary,
-        fontSize: CHART_CONFIG.typography.axis.fontSize,
+        fontSize: lineFontSize,
       },
       axisLine: {
         lineStyle: { color: tokens.border.muted },
@@ -276,8 +286,8 @@ function getCanvasInvariants(tokens: ThemeColors): CanvasInvariants {
       nameGap: CHART_CONFIG.typography.axis.nameGap,
       nameTextStyle: {
         color: tokens.text.muted,
-        fontSize: CHART_CONFIG.typography.axis.fontSize,
-        lineHeight: CHART_CONFIG.typography.axis.fontSize,
+        fontSize: lineFontSize,
+        lineHeight: lineFontSize,
         align: 'right',
       },
       splitLine: {
@@ -292,7 +302,7 @@ function getCanvasInvariants(tokens: ThemeColors): CanvasInvariants {
     },
     toolbox: {
       right: CHART_CONFIG.toolbox.right,
-      itemSize: CHART_CONFIG.toolbox.itemSize,
+      itemSize: lineFontSize,
       itemGap: CHART_CONFIG.toolbox.itemGap,
       padding: CHART_CONFIG.toolbox.padding,
     },
@@ -310,7 +320,7 @@ interface OptInTemplates {
 }
 
 /** Resolves opt-in feature templates applied only when explicitly declared in the user option. */
-function getOptInTemplates(tokens: ThemeColors): OptInTemplates {
+function getOptInTemplates(tokens: ThemeColors, lineFontSize: number = CHART_CONFIG.typography.line.baseFontSize): OptInTemplates {
   return {
     dataZoom: {
       bottom: CHART_CONFIG.dataZoom.bottom,
@@ -318,7 +328,7 @@ function getOptInTemplates(tokens: ThemeColors): OptInTemplates {
       borderColor: tokens.border.muted,
       fillerColor: tokens.accent.glow,
       handleStyle: { color: tokens.accent.primary },
-      textStyle: { color: tokens.text.muted },
+      textStyle: { color: tokens.text.muted, fontSize: lineFontSize },
     },
   };
 }
@@ -598,7 +608,7 @@ function enhanceSingleSeries(series: SeriesOption, labelStyle: SeriesLabelStyle)
     } else {
       enhanced.labelLayout = (params: LabelLayoutOptionCallbackParams) => {
         const userRes = userFn ? userFn(params) : userLayoutObj;
-        let fontSizeOverride: number | undefined;
+        let isOverflowing = false;
 
         if (hideIfOverflow && isInsideLabel && params.rect && params.labelRect) {
           const barWidth = Math.abs(params.rect.width);
@@ -607,14 +617,14 @@ function enhanceSingleSeries(series: SeriesOption, labelStyle: SeriesLabelStyle)
           const labelHeight = Math.abs(params.labelRect.height);
 
           if ((labelHeight > 0 && barHeight + 1 < labelHeight) || (labelWidth > 0 && barWidth + 1 < labelWidth)) {
-            fontSizeOverride = 0;
+            isOverflowing = true;
           }
         }
 
         return {
           hideOverlap,
           ...userRes,
-          ...(fontSizeOverride !== undefined ? { fontSize: fontSizeOverride } : {}),
+          ...(isOverflowing ? { x: -9999, y: -9999 } : {}),
         };
       };
     }
@@ -631,27 +641,10 @@ function enhanceSeries(series: EChartsOption['series'], labelStyle: SeriesLabelS
   return Array.isArray(series) ? list : list[0];
 }
 
-/** Baseline vertical layout offsets for legend, grid, and toolbox. */
-interface LayoutOffsets {
-  legendTop: number;
-  initialOuterTop: number;
-  initialToolboxTop: number;
-  isShowLegend: boolean;
-}
-
-/** Computes baseline vertical layout offsets for legend, grid, and toolbox. */
-function computeLayoutOffsets(option: EChartsOption): LayoutOffsets {
+/** Inspects whether legend is enabled in user options. */
+function isLegendEnabled(option: EChartsOption): boolean {
   const optLegend = Array.isArray(option.legend) ? option.legend[0] : option.legend;
-  const isShowLegend = optLegend?.show !== false;
-  const legendTop = CHART_CONFIG.layout.topClearance;
-  const initialOuterTop = CHART_CONFIG.layout.topClearance;
-
-  return {
-    legendTop,
-    initialOuterTop,
-    initialToolboxTop: initialOuterTop,
-    isShowLegend,
-  };
+  return optLegend?.show !== false;
 }
 
 /** Localized action button labels for ECharts toolbox. */
@@ -1010,17 +1003,18 @@ export function exportChartAsPng(chart: ECharts, title: string | undefined, expo
 const EXPORT_ICON_PATH = 'path://M4.7,22.9L29.3,45.5L54.7,23.4M4.6,43.6L4.6,58L53.8,58L53.8,43.6M29.2,45.1L29.2,0';
 
 /** Merges user-specified native ECharts option with theme defaults, fonts, and localized export controls. */
-export function enhanceOption(option: EChartsOption, labels: ToolboxLabels, _exportName: string, tokens: ThemeColors, onExport?: () => void): EChartsOption {
-  const invariants = getCanvasInvariants(tokens);
-  const optInTemplates = getOptInTemplates(tokens);
-  const defaultLabelStyle = getDefaultLabelStyle(tokens);
-  const layout = computeLayoutOffsets(option);
-
+export function enhanceOption(option: EChartsOption, labels: ToolboxLabels, _exportName: string, tokens: ThemeColors, onExport?: () => void, canvasWidth?: number): EChartsOption {
   // Fast zero-allocation dataZoom inspection
   const dz = option.dataZoom;
   const hasDataZoom = Array.isArray(dz)
     ? dz.some((item) => item && typeof item === 'object' && ('show' in item ? item.show !== false : 'disabled' in item ? !item.disabled : true))
     : Boolean(dz && typeof dz === 'object' && ('show' in dz ? dz.show !== false : 'disabled' in dz ? !dz.disabled : true));
+
+  const lineFontSize = computeFluidLineFontSize(canvasWidth);
+  const invariants = getCanvasInvariants(tokens, lineFontSize, hasDataZoom);
+  const optInTemplates = getOptInTemplates(tokens, lineFontSize);
+  const defaultLabelStyle = getDefaultLabelStyle(tokens);
+  const showLegend = isLegendEnabled(option);
 
   const optTooltip = Array.isArray(option.tooltip) ? option.tooltip[0] : option.tooltip;
   const endLabelClearance = computeEndLabelClearance(option.series);
@@ -1028,7 +1022,7 @@ export function enhanceOption(option: EChartsOption, labels: ToolboxLabels, _exp
 
   const toolboxDefaults = {
     right: invariants.toolbox.right,
-    top: layout.initialToolboxTop,
+    top: CHART_CONFIG.layout.topClearance,
     itemSize: invariants.toolbox.itemSize,
     itemGap: invariants.toolbox.itemGap,
     padding: invariants.toolbox.padding,
@@ -1047,22 +1041,15 @@ export function enhanceOption(option: EChartsOption, labels: ToolboxLabels, _exp
 
   const baseGrid = {
     ...invariants.grid,
-    top: 0,
     right: endLabelClearance,
     bottom: bottomClearance,
-    outerBounds: {
-      ...invariants.grid.outerBounds,
-      top: layout.initialOuterTop,
-      right: endLabelClearance,
-      bottom: bottomClearance,
-    },
   };
 
   return {
     backgroundColor: 'transparent',
     textStyle: { fontFamily: invariants.fontFamily, ...option.textStyle },
     title: { show: false },
-    legend: layout.isShowLegend ? (option.legend ? smartMerge({ ...invariants.legend, top: layout.legendTop }, option.legend) : { ...invariants.legend, top: layout.legendTop }) : { show: false },
+    legend: showLegend ? (option.legend ? smartMerge(invariants.legend, option.legend) : invariants.legend) : { show: false },
     grid: option.grid ? smartMerge(baseGrid, option.grid) : baseGrid,
     xAxis: enhanceAxis(option.xAxis, invariants.xAxis),
     yAxis: enhanceAxis(option.yAxis, invariants.yAxis),
@@ -1105,17 +1092,20 @@ export function adjustChartLayout(chart: ECharts, hasEndLabel?: boolean): void {
     const hasDataZoom = Boolean(dataZoomModel && dataZoomModel.get('show') !== false);
 
     const yAxisModel = model.getComponent('yAxis');
-    const componentGap = Number(yAxisModel?.get('nameGap') ?? 0);
+    const componentGap = Number(yAxisModel?.get('nameGap') ?? CHART_CONFIG.typography.axis.nameGap);
 
-    const defaultLegendItemHeight = CHART_CONFIG.typography.legend.itemHeight;
-    const itemHeight = Number(legendModel?.get('itemHeight') ?? defaultLegendItemHeight);
+    // 2. Stream 1: Dynamic typography & sizing engine (fluid lineFontSize, matching legend markers & toolbox icons)
+    const canvasWidth = chart.getWidth?.() ?? 0;
+    const lineFontSize = computeFluidLineFontSize(canvasWidth);
+    const itemHeight = lineFontSize;
+    const itemWidth = Math.round(lineFontSize * (CHART_CONFIG.typography.legend.itemWidth / CHART_CONFIG.typography.legend.itemHeight));
+    const toolboxItemSize = lineFontSize;
 
-    // 2. Baseline vertical alignment established in enhanceOption (all 3 elements share baseTop)
-    const baseTop = Number(legendModel?.get('top') ?? currentGrid.outerBounds?.top ?? 0);
-    let outerTop = baseTop;
-    let legendUpdate: Record<string, unknown> | null = null;
+    // 3. Baseline vertical alignment established in enhanceOption (all elements share baseTop)
+    const baseTop = Number(legendModel?.get('top') ?? currentGrid.top ?? CHART_CONFIG.layout.topClearance);
+    let legendHeight = itemHeight;
 
-    // 3. Resolve horizontal boundaries and multi-line wrapping clearance for legend
+    // 4. Resolve horizontal boundaries and multi-line wrapping clearance for legend
     if (isLegendActive && legendModel) {
       const legendGroup = chart['getViewOfComponentModel']?.(legendModel)?.group;
       if (legendGroup) {
@@ -1123,51 +1113,63 @@ export function adjustChartLayout(chart: ECharts, hasEndLabel?: boolean): void {
 
         let toolboxPaddingRight = 0;
         if (isToolboxActive && toolboxModel) {
-          const toolboxItemSize = Number(toolboxModel.get('itemSize') ?? 0);
-          const toolboxItemGap = Number(toolboxModel.get('itemGap') ?? 0);
-          const toolboxRight = Number(toolboxModel.get('right') ?? 0);
+          const toolboxItemGap = Number(toolboxModel.get('itemGap') ?? CHART_CONFIG.toolbox.itemGap);
+          const toolboxRight = Number(toolboxModel.get('right') ?? CHART_CONFIG.toolbox.right);
           const toolboxButtons = hasDataZoom ? 2 : 1;
           const toolboxWidth = toolboxRight + toolboxButtons * toolboxItemSize + (toolboxButtons - 1) * toolboxItemGap;
           toolboxPaddingRight = toolboxWidth + componentGap;
         }
 
         const targetPadding = [0, toolboxPaddingRight, 0, minLegendLeft];
-
-        const legendHeight = legendGroup.getBoundingRect?.()?.height || itemHeight;
-        if (legendHeight > itemHeight) {
-          outerTop = baseTop + (legendHeight - itemHeight);
-        }
-
         const currentLegend = legendModel.option;
         const curPad = currentLegend?.padding;
         const curPadL = Array.isArray(curPad) ? curPad[3] : 0;
         const curPadR = Array.isArray(curPad) ? curPad[1] : 0;
 
-        if (currentLegend?.left !== 'center' || currentLegend?.width !== undefined || currentLegend?.top !== baseTop || curPadL !== minLegendLeft || curPadR !== toolboxPaddingRight) {
-          legendUpdate = {
-            top: baseTop,
-            left: 'center',
-            width: undefined,
-            padding: targetPadding,
-          };
+        // Apply horizontal padding clearance & dynamic marker dimensions first so multi-row legend wraps accurately
+        if (
+          currentLegend?.left !== 'center' ||
+          currentLegend?.width !== undefined ||
+          currentLegend?.top !== baseTop ||
+          currentLegend?.itemHeight !== itemHeight ||
+          currentLegend?.itemWidth !== itemWidth ||
+          currentLegend?.textStyle?.fontSize !== lineFontSize ||
+          curPadL !== minLegendLeft ||
+          curPadR !== toolboxPaddingRight
+        ) {
+          chart.setOption(
+            {
+              legend: {
+                top: baseTop,
+                left: 'center',
+                width: undefined,
+                padding: targetPadding,
+                itemHeight,
+                itemWidth,
+                textStyle: {
+                  fontSize: lineFontSize,
+                  lineHeight: lineFontSize,
+                },
+              },
+            },
+            false,
+          );
         }
+
+        const settledGroup = chart['getViewOfComponentModel']?.(legendModel)?.group || legendGroup;
+        legendHeight = settledGroup.getBoundingRect?.()?.height || itemHeight;
       }
     }
 
-    // 4. Two-Stream Responsive Typography & Clearance Engine
+    const rowOffset = isLegendActive && legendHeight > itemHeight ? legendHeight - itemHeight : 0;
+    const targetLineTop = baseTop + rowOffset;
+    const targetLineBottom = targetLineTop + itemHeight;
+    const outerTop = targetLineBottom + componentGap;
+
+    // 5. Single-pass series classification & bar sizing
     const seriesModels = model.getSeries?.();
-    const canvasWidth = chart.getWidth?.() ?? 0;
     const xAxisOption = model.getComponent('xAxis')?.option;
     const totalCategories = Array.isArray(xAxisOption?.data) ? xAxisOption.data.length : 0;
-
-    // Stream 1: Lines, EndLabels, Axes, Legend & DataZoom (Fluid continuous typography)
-    const { minFontSize: minLineSize, maxFontSize: maxLineSize, mobileBreakpoint, desktopBreakpoint, baseFontSize: baseLineSize, quantizeStep: lineQuantizeStep } = CHART_CONFIG.typography.line;
-    let lineFontSize: number = baseLineSize;
-    if (canvasWidth > 0) {
-      const ratio = Math.max(0, Math.min(1, (canvasWidth - mobileBreakpoint) / (desktopBreakpoint - mobileBreakpoint)));
-      const raw = minLineSize + ratio * (maxLineSize - minLineSize);
-      lineFontSize = Math.max(minLineSize, Math.min(maxLineSize, Math.round(raw / lineQuantizeStep) * lineQuantizeStep));
-    }
 
     // Single-pass series classification
     let shouldCheckEndLabel = hasEndLabel ?? false;
@@ -1252,18 +1254,16 @@ export function adjustChartLayout(chart: ECharts, hasEndLabel?: boolean): void {
     let targetToolboxTop: number | undefined;
     let needsToolboxUpdate = false;
     if (isToolboxActive && toolboxModel) {
-      const tbView = chart['getViewOfComponentModel']?.(toolboxModel);
-      const toolboxHeight = tbView?.group?.getBoundingRect?.()?.height || itemHeight;
-      targetToolboxTop = Math.round(baseTop + (itemHeight - toolboxHeight) / 2);
-      needsToolboxUpdate = toolboxModel.option?.top !== targetToolboxTop;
+      targetToolboxTop = targetLineTop;
+      needsToolboxUpdate = toolboxModel.option?.top !== targetToolboxTop || toolboxModel.option?.itemSize !== toolboxItemSize;
     }
 
-    const needsTopUpdate = currentGrid.outerBounds?.top !== outerTop || needsToolboxUpdate;
+    const needsTopUpdate = currentGrid.top !== outerTop || needsToolboxUpdate;
     const needsRightUpdate = dynamicRight !== undefined && Math.abs(currentRight - dynamicRight) >= CHART_CONFIG.layout.toleranceThreshold;
     const needsTypographyUpdate = hasXAxisFontChange || hasYAxisFontChange || hasLegendFontChange || hasDataZoomFontChange || hasSeriesFontChange;
 
     // 6. Atomically apply layout updates only when coordinates have drifted
-    if (legendUpdate || needsTopUpdate || needsRightUpdate || needsTypographyUpdate) {
+    if (needsTopUpdate || needsRightUpdate || needsTypographyUpdate) {
       const targetRight = needsRightUpdate ? dynamicRight : currentRight;
 
       const xAxisPatch = xAxisModels.length > 1 ? xAxisModels.map(() => ({ axisLabel: { fontSize: lineFontSize } })) : { axisLabel: { fontSize: lineFontSize } };
@@ -1281,16 +1281,11 @@ export function adjustChartLayout(chart: ECharts, hasEndLabel?: boolean): void {
 
       chart.setOption(
         {
-          legend: legendUpdate || (hasLegendFontChange ? { textStyle: { fontSize: lineFontSize, lineHeight: lineFontSize } } : undefined),
-          toolbox: needsToolboxUpdate && targetToolboxTop !== undefined ? { top: targetToolboxTop } : undefined,
+          ...(hasLegendFontChange ? { legend: { itemHeight, itemWidth, textStyle: { fontSize: lineFontSize, lineHeight: lineFontSize } } } : {}),
+          ...(needsToolboxUpdate && targetToolboxTop !== undefined ? { toolbox: { top: targetToolboxTop, itemSize: toolboxItemSize } } : {}),
           grid: {
             top: outerTop,
             right: targetRight,
-            outerBounds: {
-              ...currentGrid.outerBounds,
-              top: outerTop,
-              right: targetRight,
-            },
           },
           ...(hasXAxisFontChange ? { xAxis: xAxisPatch } : {}),
           ...(hasYAxisFontChange ? { yAxis: yAxisPatch } : {}),

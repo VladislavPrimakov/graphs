@@ -66,7 +66,7 @@ export const tradeCategoriesSection: Section = ({ t, fmt }) => {
       return [
         {
           id: 'tradeCategoriesStore',
-          urlPrefix: 'tradeCategories',
+          urlPrefix: 'categories',
           controls: [
             {
               id: 'mode',
@@ -90,7 +90,7 @@ export const tradeCategoriesSection: Section = ({ t, fmt }) => {
               onChange: (level) => ({ level, categories: [] }),
             },
             {
-              id: 'count',
+              id: 'top',
               type: 'slider',
               min: minCategories,
               max: maxCategories,
@@ -130,7 +130,7 @@ export const tradeCategoriesSection: Section = ({ t, fmt }) => {
       const countryName = fmt.region(countryData.code);
       const isPercent = tradeCategoriesStore.mode === 'percent';
       const isDetailed = tradeCategoriesStore.level === 'detailed';
-      const count = tradeCategoriesStore.count;
+      const top = tradeCategoriesStore.top;
       const selectedCountries = (tradeCategoriesStore.countries as string[]) || [];
       const hasSelectedCountries = selectedCountries.length > 0;
 
@@ -139,11 +139,11 @@ export const tradeCategoriesSection: Section = ({ t, fmt }) => {
       const selectedCategories = rawSelectedCategories.filter((c) => validCodesSet.has(c));
       const hasSelectedCategories = selectedCategories.length > 0;
 
-      const baseTitle = hasSelectedCategories ? t.proj.tradeCategories.title : `${t.proj.tradeCategories.title} (${t.common.top} ${count})`;
+      const baseTitle = hasSelectedCategories ? t.proj.tradeCategories.title : `${t.proj.tradeCategories.title} (${t.common.top} ${top})`;
       const title = `${countryName} — ${baseTitle}`;
 
       const years = countryData.years;
-      const [selStartYear, selEndYear] = countryStore.period;
+      const [selStartYear, selEndYear] = countryStore.years;
       const showLabels = countryStore.labels;
 
       const foundStartIdx = years.findIndex((y: number) => y >= selStartYear);
@@ -241,7 +241,7 @@ export const tradeCategoriesSection: Section = ({ t, fmt }) => {
               if (val > 0) positiveEntries.push([code, val]);
             }
             positiveEntries.sort((a, b) => b[1] - a[1]);
-            const topCount = Math.min(count, positiveEntries.length);
+            const topCount = Math.min(top, positiveEntries.length);
             for (let k = 0; k < topCount; k++) {
               const [code, val] = positiveEntries[k];
               const roundedVal = round(val, 2);

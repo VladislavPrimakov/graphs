@@ -25,7 +25,7 @@ export const strikesMissileSection = defineSection(({ t, fmt }: ProjectContext<t
       const rf = strikesData.rfAttacks.summary;
       const ua = strikesData.uaAttacks.summary;
       const timeline = strikesData.unifiedTimeline;
-      const isDaily = strikesStore.period === 'daily';
+      const isDaily = strikesStore.mode === 'daily';
 
       return {
         title: isDaily ? t.proj.missileDynamics.titleDaily : t.proj.missileDynamics.titleMonthly,

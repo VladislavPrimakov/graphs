@@ -21,6 +21,7 @@ export const START_YEAR = 1990;
 export const CURRENT_YEAR = new Date().getFullYear() - 1;
 export const CHUNK_SIZE_GOODS = 4;
 export const CHUNK_SIZE_SERVICES = 12;
+export const BATCH_SIZE_SERVICES_COUNTRIES = 40;
 export const CHUNK_SIZE = 12;
 
 const comtradeKey = process.env.COMTRADE_API_KEY || '';
@@ -589,23 +590,34 @@ export async function syncServicesStage(cache: CountryPipelineCache, catalog: Av
   const yearChunks = chunkYears(sortedYears, CHUNK_SIZE_SERVICES);
   let hasChanges = false;
 
-  stage.info(`${countryMissingMap.size} countries missing services across ${yearChunks.length} period chunks.`);
+  interface ServicesTask {
+    chunk: number[];
+    batchCountries: CountryEntry[];
+  }
 
-  for (let cIdx = 0; cIdx < yearChunks.length; cIdx++) {
+  const tasks: ServicesTask[] = [];
+  for (const chunk of yearChunks) {
+    const chunkCountries = countriesToSync.filter((c) => {
+      const missing = countryMissingMap.get(c);
+      return missing?.some((y) => chunk.includes(y));
+    });
+    if (chunkCountries.length === 0) continue;
+    const countryBatches = chunkArray(chunkCountries, BATCH_SIZE_SERVICES_COUNTRIES);
+    for (const batch of countryBatches) {
+      tasks.push({ chunk, batchCountries: batch });
+    }
+  }
+
+  stage.info(`${countryMissingMap.size} countries missing services across ${tasks.length} requests (${yearChunks.length} period chunks, batch size ${BATCH_SIZE_SERVICES_COUNTRIES}).`);
+
+  for (let tIdx = 0; tIdx < tasks.length; tIdx++) {
     if (isComtradeQuotaExhausted()) {
       stage.warn('Comtrade quota exhausted. Stopping services stage.');
       break;
     }
 
-    const chunk = yearChunks[cIdx];
-    const chunkCountries = countriesToSync.filter((c) => {
-      const missing = countryMissingMap.get(c);
-      return missing?.some((y) => chunk.includes(y));
-    });
-
-    if (chunkCountries.length === 0) continue;
-
-    const reporterCodesParam = chunkCountries.map((c) => c.id).join(',');
+    const { chunk, batchCountries } = tasks[tIdx];
+    const reporterCodesParam = batchCountries.map((c) => c.id).join(',');
     const periodParam = chunk.join(',');
     const serviceUrl = `https://comtradeapi.un.org/data/v1/get/S/A/EB?period=${periodParam}&reporterCode=${reporterCodesParam}&flowCode=M,X&partnerCode=0`;
 
@@ -615,10 +627,14 @@ export async function syncServicesStage(cache: CountryPipelineCache, catalog: Av
         const sJson = (await sRes.json()) as { data?: ServiceRow[] };
         const rows = sJson.data || [];
 
-        stage.progress(cIdx + 1, yearChunks.length, `Years ${chunk[0]}..${chunk[chunk.length - 1]} (${chunkCountries.length} countries): ${rows.length} rows`);
+        if (rows.length >= 100000) {
+          stage.warn(`Hit Comtrade 100,000 row ceiling! Data truncated for periods ${periodParam} (${batchCountries.length} countries). Reduce batch size.`);
+        }
 
-        // Initialize queried countries and years in this chunk: default to null
-        for (const country of chunkCountries) {
+        stage.progress(tIdx + 1, tasks.length, `Years ${chunk[0]}..${chunk[chunk.length - 1]} (${batchCountries.length} countries): ${rows.length} rows`);
+
+        // Initialize queried countries and years in this batch: confirmed no trade defaults to null
+        for (const country of batchCountries) {
           if (!cache.countries[country.code]) {
             cache.countries[country.code] = { code: country.code, years: {} };
           }
@@ -629,8 +645,8 @@ export async function syncServicesStage(cache: CountryPipelineCache, catalog: Av
             if (missing.includes(y)) {
               const yStr = String(y);
               if (!profile.years[yStr]) profile.years[yStr] = {};
-              if (profile.years[yStr].servicesExports === undefined) profile.years[yStr].servicesExports = null;
-              if (profile.years[yStr].servicesImports === undefined) profile.years[yStr].servicesImports = null;
+              profile.years[yStr].servicesExports = null;
+              profile.years[yStr].servicesImports = null;
             }
           }
         }
@@ -662,7 +678,7 @@ export async function syncServicesStage(cache: CountryPipelineCache, catalog: Av
         }
 
         // Update checksums and clean profiles
-        for (const country of chunkCountries) {
+        for (const country of batchCountries) {
           const profile = cache.countries[country.code];
           if (!profile) continue;
           const missing = countryMissingMap.get(country) || [];

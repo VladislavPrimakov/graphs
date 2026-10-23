@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { COUNTRIES, COUNTRY_BY_CODE, COUNTRY_BY_ID, COUNTRY_BY_ISO3, SUPPORTED_COUNTRIES } from './countries';
-import { buildProductionProfile, CHUNK_SIZE, chunkYears, detectMissingStreams, isCountryComplete, type RawCountryProfile, type RawYearData } from './index';
+import { BATCH_SIZE_SERVICES_COUNTRIES, buildProductionProfile, CHUNK_SIZE, chunkArray, chunkYears, detectMissingStreams, isCountryComplete, type RawCountryProfile, type RawYearData } from './index';
 
 const TEST_YEARS = [2020, 2021, 2022, 2023, 2024];
 
@@ -248,6 +248,18 @@ describe('Year Chunking Logic (chunkYears)', () => {
     expect(chunks[1].length).toBe(12);
     expect(chunks[2].length).toBe(12);
     expect(chunks[3]).toEqual([2026]);
+  });
+
+  test('chunkArray batches 192 countries by BATCH_SIZE_SERVICES_COUNTRIES (40) into 5 batches', () => {
+    expect(BATCH_SIZE_SERVICES_COUNTRIES).toBe(40);
+    const countryBatches = chunkArray(COUNTRIES, BATCH_SIZE_SERVICES_COUNTRIES);
+    expect(countryBatches.length).toBe(5);
+    expect(countryBatches[0].length).toBe(40);
+    expect(countryBatches[1].length).toBe(40);
+    expect(countryBatches[2].length).toBe(40);
+    expect(countryBatches[3].length).toBe(40);
+    expect(countryBatches[4].length).toBe(32);
+    expect(countryBatches.flat().length).toBe(192);
   });
 });
 

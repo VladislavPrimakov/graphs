@@ -35,7 +35,7 @@ const init = echarts.init;
 
 import type React from 'react';
 import { createElement, useEffect, useEffectEvent, useRef, useState } from 'react';
-import { useSectionContext } from '@/components/sections/Section';
+import { useSectionContext, useSectionResize } from '@/components/sections/Section';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { bindChartEvents, cancelQueuedChartRender, enhanceOption, exportChartAsPng, queueChartRender, resizeChart } from '@/utils/chart-builder';
 import { cn } from '@/utils/cn';
@@ -94,20 +94,7 @@ export const SectionChart: React.FC<SectionChartProps> = ({ option: rawOption, e
     bindChartEvents(chart);
     chartInstance.current = chart;
 
-    let resizeRaf: number | null = null;
-    const resizeObserver = new ResizeObserver(() => {
-      if (resizeRaf !== null) cancelAnimationFrame(resizeRaf);
-      resizeRaf = requestAnimationFrame(() => {
-        if (chartInstance.current) {
-          resizeChart(chartInstance.current);
-        }
-      });
-    });
-    resizeObserver.observe(chartRef.current);
-
     return () => {
-      if (resizeRaf !== null) cancelAnimationFrame(resizeRaf);
-      resizeObserver.disconnect();
       cancelQueuedChartRender(chart);
       chart.dispose();
       chartInstance.current = null;
@@ -115,10 +102,17 @@ export const SectionChart: React.FC<SectionChartProps> = ({ option: rawOption, e
     };
   }, [resolvedTheme]);
 
+  useSectionResize(() => {
+    if (chartInstance.current) {
+      resizeChart(chartInstance.current);
+    }
+  });
+
   // 2. Reactively render enhanced option whenever rawOption, theme, or localization changes
   useEffect(() => {
     if (!chartInstance.current) return;
-    const enhanced = enhanceOption(rawOption, t.common, effectiveExportName, tokens, handleExport);
+    const canvasWidth = chartInstance.current.getWidth?.() || chartRef.current?.clientWidth || 0;
+    const enhanced = enhanceOption(rawOption, t.common, effectiveExportName, tokens, handleExport, canvasWidth);
     queueChartRender(chartInstance.current, enhanced, () => {
       setIsReady(true);
     });

@@ -13,7 +13,7 @@ export const tradeCategoriesSection: Section = ({ t, fmt }) => {
     toolbars: [
       {
         id: 'tradeCategoriesStore',
-        urlPrefix: 'tradeCategories',
+        urlPrefix: 'categories',
         controls: [
           {
             id: 'mode',

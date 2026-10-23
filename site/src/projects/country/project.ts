@@ -42,7 +42,7 @@ export const project = defineProject<typeof dict, typeof data, typeof sectionDat
           })),
         },
         {
-          id: 'period',
+          id: 'years',
           type: 'range-slider',
           min: toolbarMeta.minYear,
           max: toolbarMeta.maxYear,

@@ -20,7 +20,7 @@ export const macroGrowthSection: Section = ({ t, fmt, tokens }) => {
       const countryName = fmt.region(countryData.code);
       const title = `${countryName} — ${t.proj.macroGrowth.title}`;
       const years = countryData.years;
-      const [selStartYear, selEndYear] = countryStore.period;
+      const [selStartYear, selEndYear] = countryStore.years;
 
       const foundStartIdx = years.findIndex((y: number) => y >= selStartYear);
       const startIdx = foundStartIdx === -1 ? years.length : foundStartIdx;

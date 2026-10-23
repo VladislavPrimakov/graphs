@@ -4,6 +4,7 @@ import type React from 'react';
 import { useEffect, useEffectEvent, useRef } from 'react';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { LossesMapSectionData, LossMapPoint, WarLossCategory, WarLossesFilterState } from '@graphs/shared/types/war-rf-ua/losses';
+import { useSectionResize } from '@/components/sections/Section';
 import { getMapTileStyle, registerFallbackDot } from '@/utils/map-builder';
 import { useFormat, useTheme, useTranslation } from '@/utils/provider';
 import { renderTooltipTablePopup } from '@/utils/tooltip-builder';
@@ -306,26 +307,17 @@ export const LossesMap: React.FC<LossesMapProps> = ({ data, t, filters }) => {
 
     mapRef.current = map;
 
-    // Responsive resize observer
-    const container = mapContainerRef.current;
-    let resizeTimer: ReturnType<typeof setTimeout> | null = null;
-    const resizeObserver = new ResizeObserver(() => {
-      if (resizeTimer) clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(() => {
-        map.resize();
-      }, 50);
-    });
-    if (container) resizeObserver.observe(container);
-
     return () => {
-      if (resizeTimer) clearTimeout(resizeTimer);
       activePopupRef.current?.remove();
-      resizeObserver.disconnect();
       map.remove();
       mapRef.current = null;
       mapSourceLoadedRef.current = false;
     };
   }, [data, resolvedTheme]);
+
+  useSectionResize(() => {
+    mapRef.current?.resize();
+  });
 
   // Update GeoJSON source when filters change (preserves camera position and zoom)
   useEffect(() => {

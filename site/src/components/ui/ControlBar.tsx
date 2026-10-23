@@ -238,44 +238,41 @@ export function ControlBar({ store, controls, className }: ControlBarProps): Rea
   const fullWidthControls = controls.filter((c) => c.type === 'timeline-scrubber');
   const hasCompactControls = compactControls.length > 0;
 
+  const resetButton = (
+    <button
+      type="button"
+      onClick={store.resetState}
+      className={cn(
+        'text-xs text-content-muted hover:text-accent-primary transition-opacity underline cursor-pointer select-none whitespace-nowrap',
+        !state.hasActiveFilters && 'invisible pointer-events-none',
+      )}
+    >
+      {t.common.reset}
+    </button>
+  );
+
   return (
     <div className={cn('control-bar flex flex-col gap-2 w-full min-w-0', className)}>
       {hasCompactControls && (
-        <div className="grid grid-cols-[1fr_auto] sm:grid-cols-[1fr_auto_1fr] items-start w-full gap-2 min-w-0">
-          {/* Desktop spacer keeping center column mathematically centered */}
-          <div className="hidden sm:block" aria-hidden="true" />
-
-          {/* Centered controls that wrap internally */}
-          <div className="flex flex-wrap items-center justify-center gap-2.5 min-w-0">
-            {compactControls.map((ctrl) => {
-              const isDisabled = typeof ctrl.disabled === 'function' ? ctrl.disabled(state) : Boolean(ctrl.disabled);
-              const value = state[ctrl.id];
-              return (
-                <ControlField
-                  key={ctrl.id}
-                  spec={ctrl}
-                  value={value}
-                  state={state}
-                  onChange={(val) => store.setState(ctrl.onChange ? ctrl.onChange(val, state) : { [ctrl.id]: val })}
-                  disabled={isDisabled}
-                />
-              );
-            })}
+        <div className="relative w-full text-center min-h-7">
+          {/* Row 1 only: Left clearance spacer balancing reset button */}
+          <div className="float-left h-7 flex items-center invisible pointer-events-none select-none" aria-hidden="true">
+            {resetButton}
           </div>
 
-          {/* Right-aligned reset button staying on row 1 */}
-          <div className="flex justify-end items-center h-7 shrink-0">
-            <button
-              type="button"
-              onClick={store.resetState}
-              className={cn(
-                'text-xs text-content-muted hover:text-accent-primary transition-opacity underline cursor-pointer select-none whitespace-nowrap',
-                !state.hasActiveFilters && 'invisible pointer-events-none',
-              )}
-            >
-              {t.common.reset}
-            </button>
-          </div>
+          {/* Row 1 only: Right-floated reset button */}
+          <div className="float-right h-7 flex items-center justify-end shrink-0">{resetButton}</div>
+
+          {/* Inline-level controls: Row 1 flows between floats, Row 2+ flows across full 100% width */}
+          {compactControls.map((ctrl) => {
+            const isDisabled = typeof ctrl.disabled === 'function' ? ctrl.disabled(state) : Boolean(ctrl.disabled);
+            const value = state[ctrl.id];
+            return (
+              <div key={ctrl.id} className="inline-flex align-middle mx-1 my-0.5">
+                <ControlField spec={ctrl} value={value} state={state} onChange={(val) => store.setState(ctrl.onChange ? ctrl.onChange(val, state) : { [ctrl.id]: val })} disabled={isDisabled} />
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -313,7 +310,7 @@ export interface DashboardToolbarsProps {
  */
 export const DashboardToolbars: React.FC<DashboardToolbarsProps> = ({ toolbars, stores }) => {
   return (
-    <div {...{ [STICKY_TOOLBAR_DATA_ATTR]: '' }} className="sticky top-16 z-30 glass-bar -mx-6 px-6 py-2 transition-all flex flex-col gap-2">
+    <div {...{ [STICKY_TOOLBAR_DATA_ATTR]: '' }} className="sticky top-16 z-40 glass-bar -mx-6 px-6 py-2 transition-all flex flex-col gap-2">
       {toolbars.map((tb) => (
         <ControlBar key={tb.id} store={stores[tb.id]} controls={tb.controls} />
       ))}

@@ -447,55 +447,55 @@ export function TimelineScrubber({ granularity, periods, density, dateFrom, date
             </button>
           )}
 
-          <DatePickerPopover
-            mode={granularity}
-            value={periods[startIdx]}
-            minDate={periods[0]}
-            maxDate={periods[endIdx]}
-            label={formattedStart}
-            minChars={maxDateChars}
-            onSelect={(dateStr) => {
-              const newIdx = findPeriodIndex(periods, dateStr, 'start', granularity);
-              commitIndices(Math.min(newIdx, endIdx), endIdx);
-            }}
-            onStepPrev={(e) => {
-              const step = e.shiftKey ? (granularity === 'yearly' ? 10 : granularity === 'monthly' ? 12 : 7) : 1;
-              commitIndices(Math.max(0, startIdx - step), endIdx);
-            }}
-            canStepPrev={startIdx > 0}
-            onStepNext={(e) => {
-              const step = e.shiftKey ? (granularity === 'yearly' ? 10 : granularity === 'monthly' ? 12 : 7) : 1;
-              commitIndices(Math.min(endIdx, startIdx + step), endIdx);
-            }}
-            canStepNext={startIdx < endIdx}
-            title={tCommon.from}
-          />
+          <div className="flex flex-wrap items-center gap-1">
+            <DatePickerPopover
+              mode={granularity}
+              value={periods[startIdx]}
+              minDate={periods[0]}
+              maxDate={periods[endIdx]}
+              label={formattedStart}
+              minChars={maxDateChars}
+              onSelect={(dateStr) => {
+                const newIdx = findPeriodIndex(periods, dateStr, 'start', granularity);
+                commitIndices(Math.min(newIdx, endIdx), endIdx);
+              }}
+              onStepPrev={(e) => {
+                const step = e.shiftKey ? (granularity === 'yearly' ? 10 : granularity === 'monthly' ? 12 : 7) : 1;
+                commitIndices(Math.max(0, startIdx - step), endIdx);
+              }}
+              canStepPrev={startIdx > 0}
+              onStepNext={(e) => {
+                const step = e.shiftKey ? (granularity === 'yearly' ? 10 : granularity === 'monthly' ? 12 : 7) : 1;
+                commitIndices(Math.min(endIdx, startIdx + step), endIdx);
+              }}
+              canStepNext={startIdx < endIdx}
+              title={tCommon.from}
+            />
 
-          <span className="text-content-dim font-bold text-xs select-none">—</span>
-
-          <DatePickerPopover
-            mode={granularity}
-            value={periods[endIdx]}
-            minDate={periods[startIdx]}
-            maxDate={periods[totalPeriods - 1]}
-            label={formattedEnd}
-            minChars={maxDateChars}
-            onSelect={(dateStr) => {
-              const newIdx = findPeriodIndex(periods, dateStr, 'end', granularity);
-              commitIndices(startIdx, Math.max(startIdx, newIdx));
-            }}
-            onStepPrev={(e) => {
-              const step = e.shiftKey ? (granularity === 'yearly' ? 10 : granularity === 'monthly' ? 12 : 7) : 1;
-              commitIndices(startIdx, Math.max(startIdx, endIdx - step));
-            }}
-            canStepPrev={endIdx > startIdx}
-            onStepNext={(e) => {
-              const step = e.shiftKey ? (granularity === 'yearly' ? 10 : granularity === 'monthly' ? 12 : 7) : 1;
-              commitIndices(startIdx, Math.min(totalPeriods - 1, endIdx + step));
-            }}
-            canStepNext={endIdx < totalPeriods - 1}
-            title={tCommon.to}
-          />
+            <DatePickerPopover
+              mode={granularity}
+              value={periods[endIdx]}
+              minDate={periods[startIdx]}
+              maxDate={periods[totalPeriods - 1]}
+              label={formattedEnd}
+              minChars={maxDateChars}
+              onSelect={(dateStr) => {
+                const newIdx = findPeriodIndex(periods, dateStr, 'end', granularity);
+                commitIndices(startIdx, Math.max(startIdx, newIdx));
+              }}
+              onStepPrev={(e) => {
+                const step = e.shiftKey ? (granularity === 'yearly' ? 10 : granularity === 'monthly' ? 12 : 7) : 1;
+                commitIndices(startIdx, Math.max(startIdx, endIdx - step));
+              }}
+              canStepPrev={endIdx > startIdx}
+              onStepNext={(e) => {
+                const step = e.shiftKey ? (granularity === 'yearly' ? 10 : granularity === 'monthly' ? 12 : 7) : 1;
+                commitIndices(startIdx, Math.min(totalPeriods - 1, endIdx + step));
+              }}
+              canStepNext={endIdx < totalPeriods - 1}
+              title={tCommon.to}
+            />
+          </div>
         </div>
       </div>
 

@@ -139,6 +139,60 @@ export interface UseInViewResult<T extends HTMLElement = HTMLDivElement> {
   inViewRef: React.RefObject<boolean>;
   /** Subscribes a listener to real-time viewport intersection state changes. */
   subscribeInView: (listener: (inView: boolean) => void) => () => void;
+  /** Executes an action immediately if in view, or defers execution until the element enters the viewport. */
+  deferUntilInView: (action: () => void) => void;
+}
+
+const windowResizeSubscribers = new Set<() => void>();
+let windowResizeBound = false;
+let windowResizeObserver: ResizeObserver | null = null;
+let lastViewportWidth = typeof document !== 'undefined' ? document.documentElement.clientWidth : 0;
+let lastViewportHeight = typeof window !== 'undefined' ? window.innerHeight : 0;
+
+function handleWindowResize() {
+  const currentWidth = document.documentElement.clientWidth;
+  const currentHeight = window.innerHeight;
+
+  if (Math.abs(currentWidth - lastViewportWidth) < 1 && Math.abs(currentHeight - lastViewportHeight) < 1) {
+    return;
+  }
+
+  lastViewportWidth = currentWidth;
+  lastViewportHeight = currentHeight;
+
+  for (const cb of windowResizeSubscribers) {
+    cb();
+  }
+}
+
+/**
+ * Subscribes a callback to the unified application window resize event.
+ * Coordinates a single passive window resize listener and document observer across the entire application.
+ * Returns an unbind cleanup function.
+ */
+export function subscribeWindowResize(callback: () => void): () => void {
+  if (typeof window === 'undefined') return () => {};
+
+  if (!windowResizeBound) {
+    windowResizeBound = true;
+    window.addEventListener('resize', handleWindowResize, { passive: true });
+    if (typeof ResizeObserver !== 'undefined' && document.body) {
+      windowResizeObserver = new ResizeObserver(handleWindowResize);
+      windowResizeObserver.observe(document.body);
+    }
+  }
+
+  windowResizeSubscribers.add(callback);
+
+  return () => {
+    windowResizeSubscribers.delete(callback);
+    if (windowResizeSubscribers.size === 0 && windowResizeBound) {
+      window.removeEventListener('resize', handleWindowResize);
+      windowResizeObserver?.disconnect();
+      windowResizeObserver = null;
+      windowResizeBound = false;
+    }
+  };
 }
 
 /**
@@ -151,6 +205,25 @@ export function useInView<T extends HTMLElement = HTMLDivElement>(id: string, in
   const hasEnteredViewRef = useRef(initialInView);
   const inViewRef = useRef(initialInView);
   const inViewListeners = useRef<Set<(inView: boolean) => void>>(new Set());
+  const pendingActions = useRef<Set<() => void>>(new Set());
+
+  const flushPendingActions = useEffectEvent(() => {
+    if (pendingActions.current.size > 0) {
+      const actions = Array.from(pendingActions.current);
+      pendingActions.current.clear();
+      for (let i = 0; i < actions.length; i++) {
+        actions[i]();
+      }
+    }
+  });
+
+  const deferUntilInView = (action: () => void) => {
+    if (inViewRef.current) {
+      action();
+    } else {
+      pendingActions.current.add(action);
+    }
+  };
 
   const subscribeInView = (listener: (inView: boolean) => void) => {
     inViewListeners.current.add(listener);
@@ -175,6 +248,9 @@ export function useInView<T extends HTMLElement = HTMLDivElement>(id: string, in
         for (const listener of inViewListeners.current) {
           listener(inView);
         }
+      }
+      if (inView) {
+        flushPendingActions();
       }
     };
 
@@ -243,6 +319,7 @@ export function useInView<T extends HTMLElement = HTMLDivElement>(id: string, in
     hasEnteredView,
     inViewRef,
     subscribeInView,
+    deferUntilInView,
     get isInView() {
       return inViewRef.current;
     },
