@@ -5,8 +5,6 @@ import { type Browser, chromium } from 'playwright';
 const distDir = path.resolve(import.meta.dirname, '../dist/client');
 const ogDir = path.resolve(import.meta.dirname, '../public/og');
 const port = 4173;
-const rawBase = process.env.BASE_URL ?? '/graphs';
-const base = rawBase.startsWith('/') ? rawBase : `/${rawBase}`;
 
 if (!fs.existsSync(distDir)) {
   console.error('❌ dist/client directory not found. Please run "bun run build:site" first.');
@@ -51,12 +49,7 @@ const server = Bun.serve({
   port,
   fetch(req) {
     const url = new URL(req.url);
-    let pathname = decodeURIComponent(url.pathname);
-
-    if (base !== '/' && pathname.startsWith(base)) {
-      pathname = pathname.slice(base.length) || '/';
-    }
-
+    const pathname = decodeURIComponent(url.pathname);
     const fullPath = path.join(distDir, pathname);
 
     if (fs.existsSync(fullPath)) {
@@ -80,7 +73,7 @@ const server = Bun.serve({
   },
 });
 
-console.log(`🚀 Preview server running on http://127.0.0.1:${server.port}${base}`);
+console.log(`🚀 Preview server running on http://127.0.0.1:${server.port}/`);
 
 async function captureSection(browser: Browser, slug: string, sectionId: string) {
   const context = await browser.newContext({
@@ -91,7 +84,7 @@ async function captureSection(browser: Browser, slug: string, sectionId: string)
   const page = await context.newPage();
 
   try {
-    const targetUrl = `http://127.0.0.1:${server.port}${base}/${slug}/${sectionId}`;
+    const targetUrl = `http://127.0.0.1:${server.port}/${slug}/${sectionId}`;
     const outputPath = path.join(ogDir, `${slug}-${sectionId}.png`);
 
     await page.goto(targetUrl, { waitUntil: 'networkidle', timeout: 30000 });

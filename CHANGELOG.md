@@ -5,16 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.4] - 2026-10-24
+
+### Pipelines (@graphs/pipelines)
+
+#### Changed
+- Changed frontline daily history export from a monolithic 72.7 MB bundle to yearly JSON files (`frontline-history-${year}.json`), keeping each static asset well below the Cloudflare 25 MiB file size limit, and stripped duplicate decoded layer coordinates from `frontline-map.json`.
+
+---
+
+### Site (@graphs/site)
+
+#### Changed
+- Changed `FrontlineMap` historical playback to load yearly datasets in parallel via project-level loaders, resolving territorial layers synchronously from memory on initial load and scrubbing without client spinners or deep-linked date desync.
+
+#### Fixed
+- Fixed that continuous pointer dragging on `TimelineScrubber` triggered infinite update loops (`Maximum update depth exceeded`) and UI lag by isolating visual drag updates from reactive store synchronization and throttling external store dispatches to animation frames.
+
+#### Removed
+- Removed legacy `BASE_URL` subpath handling and `graphs` directory duplication in favor of root routing, consolidating `getHref` and `getPath` into a single unified path resolver.
+
+---
+
 ## [1.3.3] - 2026-10-24
 
 ### Site (@graphs/site)
 
 #### Added
-- Added `InitialLoadingVeil` full-screen veil in `root.tsx` with a smooth 200ms fade-out triggered via `dismissInitialLoader` across all page routes, masking DOM hydration and initial layout assembly without intermediate skeleton layout shifts.
-- Added `PageLoader` content-area indicator for client-side route transitions inside `SiteLayout`, keeping the site header, branding, navigation, and theme/language controls stable and interactive.
+- Added `InitialLoadingVeil` with a smooth fade-out masking initial DOM hydration and layout assembly without skeleton layout shifts, and `PageLoader` scoped strictly to content areas during client-side navigation.
 
 #### Changed
-- Changed root route `Suspense` fallbacks from full-screen blocking overlays to content-scoped indicators, preventing viewport backdrop flashes during client-side navigation, dictionary fetching, and project dataset loading.
+- Changed root route fallbacks from full-screen blocking overlays to content-scoped indicators, preventing viewport backdrop flashes during client-side navigation, dictionary fetching, and project dataset loading.
 
 #### Removed
 - Removed artificial `window.scrollTo({ top: 0 })` overrides across page components and `useScrollSpy`, restoring native browser scroll preservation.

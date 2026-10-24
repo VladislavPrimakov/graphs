@@ -331,14 +331,14 @@ export function useInView<T extends HTMLElement = HTMLDivElement>(id: string, in
  * auto-scrolling to deep-linked targets on mount, and synchronizing the URL path and document title
  * upon scrollend via history.replaceState.
  */
-export function useScrollSpy(getHref: (activeId: string) => string, initialId?: string, resolveTitle?: (activeId: string) => string | undefined): string {
+export function useScrollSpy(getPath: (activeId: string) => string, initialId?: string, resolveTitle?: (activeId: string) => string | undefined): string {
   const [activeId, setActiveId] = useState<string>(initialId || '');
 
   // Non-reactive callback synchronizing browser URL path and title without triggering effect re-subscriptions
   const onScrollSettle = useEffectEvent((activeSection: string) => {
-    const targetHref = getHref(activeSection);
-    if (window.location.pathname !== targetHref) {
-      history.replaceState(null, '', targetHref + window.location.search);
+    const targetPath = getPath(activeSection);
+    if (window.location.pathname !== targetPath) {
+      history.replaceState(null, '', targetPath + window.location.search);
     }
 
     if (resolveTitle) {

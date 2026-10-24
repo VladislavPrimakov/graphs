@@ -16,9 +16,10 @@ export const frontlineMapSection = defineSection(({ t }: ProjectContext<typeof d
   data: {
     frontlineData: () => loadDataset<FrontlineMapSectionData>('war-rf-ua', 'frontline-map.json'),
   },
-  buildView: ({ frontlineData }, { frontlineStore }) => ({
+  buildView: ({ frontlineData, frontlineHistory }, { frontlineStore }) => ({
     content: createElement(FrontlineMap, {
       data: frontlineData,
+      history: frontlineHistory,
       targetDate: frontlineStore.period[1],
       t: t.proj,
     }),

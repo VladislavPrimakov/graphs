@@ -363,7 +363,8 @@ export type ProjectSection<
  * Type-safe dashboard section builder.
  */
 export function defineSection<
-  TProjectData = Record<string, unknown>,
+  // biome-ignore lint/suspicious/noExplicitAny: default open project data record allows undeclared coordinated project loaders
+  TProjectData = Record<string, any>,
   const TSectionData extends DataLoadersMap = Record<string, never>,
   D = Record<string, unknown>,
   const TToolbars extends readonly ToolbarSpec[] | undefined = undefined,
@@ -521,7 +522,7 @@ async function fetchDatasetJson<T>(...segments: string[]): Promise<T> {
     const filePath = resolve(process.cwd(), publicDir, ...segments);
     return JSON.parse(await readFile(filePath, 'utf-8')) as T;
   }
-  const url = `${import.meta.env.BASE_URL}data/${subPath}`;
+  const url = `/data/${subPath}`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`HTTP ${res.status} fetching ${subPath}`);
   return (await res.json()) as T;

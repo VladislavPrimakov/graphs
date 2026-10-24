@@ -1,3 +1,4 @@
+import type { DayFrontlineEntry } from '@graphs/shared/types/war-rf-ua/frontline';
 import { WAR_LOSS_CATEGORIES } from '@graphs/shared/types/war-rf-ua/losses';
 import type { WarRfUaToolbarMeta } from '@graphs/shared/types/war-rf-ua/toolbar-meta';
 import { createElement } from 'react';
@@ -37,8 +38,29 @@ function getPeriodIndices(periods: string[], periodState?: unknown): [number, nu
   return [Math.max(0, startIdx), Math.min(periods.length - 1, endIdx)];
 }
 
+const START_YEAR = 2022;
+const CURRENT_YEAR = new Date().getFullYear();
+const FRONTLINE_YEARS = Array.from({ length: CURRENT_YEAR - START_YEAR + 1 }, (_, i) => String(START_YEAR + i));
+
+let frontlineHistoryPromise: Promise<Record<string, DayFrontlineEntry>> | null = null;
+
+/** Loads and merges partitioned yearly frontline history datasets with singleton promise caching. */
+function loadFrontlineHistory(): Promise<Record<string, DayFrontlineEntry>> {
+  if (!frontlineHistoryPromise) {
+    frontlineHistoryPromise = Promise.all(FRONTLINE_YEARS.map((year) => loadDataset<Record<string, DayFrontlineEntry>>('war-rf-ua', `frontline-history-${year}.json`))).then((datasets) => {
+      const merged: Record<string, DayFrontlineEntry> = {};
+      for (const dataset of datasets) {
+        Object.assign(merged, dataset);
+      }
+      return merged;
+    });
+  }
+  return frontlineHistoryPromise;
+}
+
 const data = {
   toolbarMeta: () => loadDataset<WarRfUaToolbarMeta>('war-rf-ua', 'toolbar-meta.json'),
+  frontlineHistory: loadFrontlineHistory,
 };
 
 export type Section = ProjectSection<typeof data, typeof dict>;
