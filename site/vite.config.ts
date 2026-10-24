@@ -38,11 +38,8 @@ function reactCompilerPlugin(): Plugin {
   };
 }
 
-const rawBase = process.env.BASE_URL ?? '/graphs';
-const base = rawBase.endsWith('/') ? rawBase : `${rawBase}/`;
-
 export default defineConfig(({ command }) => ({
-  base,
+  base: '/',
   plugins: [reactCompilerPlugin(), reactRouter(), tailwindcss()],
   server: {
     port: 3000,

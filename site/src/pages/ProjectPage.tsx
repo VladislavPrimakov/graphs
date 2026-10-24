@@ -6,7 +6,7 @@ import { Section } from '@/components/sections/Section';
 import { DashboardToolbars } from '@/components/ui/ControlBar';
 import { dismissInitialLoader } from '@/components/ui/LoadingSpinner';
 import NotFoundPage from '@/pages/NotFoundPage';
-import { type DashboardSectionSpec, type DashboardToolbarSpec, loadProjectBundle, STATIC_PROJECT_MAP } from '@/utils/project';
+import { type DashboardSectionSpec, type DashboardToolbarSpec, loadProjectBundle, type Project, STATIC_PROJECT_MAP } from '@/utils/project';
 import { type Language, useFormat, useLanguage, useTheme, useTranslation } from '@/utils/provider';
 import { type ControlStore, clearStoreRegistry, getOrCreateStoreFromControls } from '@/utils/store';
 import { getAbsoluteUrl } from '@/utils/version';
@@ -16,6 +16,22 @@ interface ProjectDashboardProps {
   slug: string;
   section?: string;
   lang: Language;
+}
+
+const projectDataPromisesCache = new WeakMap<Project, Record<string, Promise<unknown>>>();
+
+/** Pre-caches project-level data loader promises per project specification instance to maintain referential stability for use(). */
+function getProjectDataPromises(project: Project): Record<string, Promise<unknown>> {
+  if (!project.data) return {};
+  let cached = projectDataPromisesCache.get(project);
+  if (!cached) {
+    cached = {};
+    for (const key in project.data) {
+      cached[key] = project.data[key]();
+    }
+    projectDataPromisesCache.set(project, cached);
+  }
+  return cached;
 }
 
 /** Dynamic content view resolving project datasets, building interactive toolbars, and coordinating sections. */
@@ -47,10 +63,7 @@ function ProjectDashboard({ slug, section, lang }: ProjectDashboardProps) {
   // Resolve project-level data loaders (if defined)
   const projectData: Record<string, unknown> = {};
   if (project.data) {
-    const promises: Record<string, Promise<unknown>> = {};
-    for (const key in project.data) {
-      promises[key] = project.data[key]();
-    }
+    const promises = getProjectDataPromises(project);
     for (const key in promises) {
       projectData[key] = use(promises[key]);
     }

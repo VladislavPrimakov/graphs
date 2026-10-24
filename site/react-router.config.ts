@@ -4,9 +4,6 @@ import type { Config } from '@react-router/dev/config';
 import { NON_DEFAULT_LANGUAGES } from './src/utils/language';
 import { parseChangelogVersions } from './src/utils/version';
 
-const rawBase = process.env.BASE_URL ?? '/graphs';
-const basename = rawBase.endsWith('/') ? rawBase : `${rawBase}/`;
-
 /** Discovers project slugs and their canonical section paths dynamically from the filesystem tree. */
 function getProjectRoutes(): { slug: string; sections: string[] }[] {
   const projectsDir = path.resolve(import.meta.dirname, 'src/projects');
@@ -37,7 +34,7 @@ function getChangelogVersions(): string[] {
 export default {
   appDirectory: 'src',
   buildDirectory: process.env.BUILD_DIR || 'dist',
-  basename,
+  basename: '/',
   ssr: false,
   future: {
     v8_middleware: true,

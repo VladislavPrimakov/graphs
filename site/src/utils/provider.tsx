@@ -3,7 +3,7 @@ import GB from 'country-flag-icons/react/3x2/GB';
 import RU from 'country-flag-icons/react/3x2/RU';
 import UA from 'country-flag-icons/react/3x2/UA';
 import { createContext, useContext, useEffect, useSyncExternalStore } from 'react';
-import { useHref, useLocation, useNavigate } from 'react-router';
+import { useLocation, useNavigate } from 'react-router';
 import type { CatalogProject, ProjectTag } from '@/utils/project';
 import { LocaleCommon as commonEn } from '../locales/common-en';
 import { getThemeColors, type ResolvedTheme, type ThemeColors, type ThemeSetting } from '../styles/tokens';
@@ -60,10 +60,8 @@ export interface AppContextValue {
   fmt: LocalizedFormatters;
   /** Switches current language and navigates to the localized URL. */
   setLanguage: (targetLang: Language) => void;
-  /** Prepends language prefix to an app-relative path (for React Router Link/Navigate). */
+  /** Resolves localized application path with language prefix. */
   getPath: (path: string) => string;
-  /** Resolves absolute browser URL path with language prefix and router basename (for history.replaceState, <a>, and clipboard). */
-  getHref: (path: string) => string;
   /** Resolves localized human-readable label for a project category tag. */
   getTagLabel: (tag: ProjectTag) => string;
 }
@@ -191,8 +189,6 @@ const AppContext = createContext<AppContextValue | null>(null);
 export const AppProvider: React.FC<AppProviderProps> = ({ lang, common, cldr, projects, children }) => {
   const location = useLocation();
   const navigate = useNavigate();
-  const rootHref = useHref('/');
-  const basePrefix = rootHref === '/' ? '' : rootHref.replace(/\/+$/, '');
 
   // Theme state synchronized with localStorage and OS preference via useSyncExternalStore
   const theme = useSyncExternalStore(subscribeTheme, getThemeSnapshot, getServerThemeSnapshot);
@@ -268,7 +264,6 @@ export const AppProvider: React.FC<AppProviderProps> = ({ lang, common, cldr, pr
   };
 
   const getPath = (path: string) => getLocalizedPath(path, lang);
-  const getHref = (path: string) => `${basePrefix}${getLocalizedPath(path, lang)}`;
   const getTagLabel = (tag: ProjectTag) => common.tagNames[tag] || tag;
   const fmt = createFormat(lang, cldr);
 
@@ -286,7 +281,6 @@ export const AppProvider: React.FC<AppProviderProps> = ({ lang, common, cldr, pr
     fmt,
     setLanguage,
     getPath,
-    getHref,
     getTagLabel,
   };
 
@@ -333,18 +327,16 @@ export function useLanguage() {
   };
 }
 
-/** React hook resolving localized application paths and hrefs. */
+/** React hook resolving localized application paths. */
 export function usePath() {
   const ctx = useContext(AppContext);
   if (!ctx) {
     return {
       getPath: (p: string) => p,
-      getHref: (p: string) => p,
     };
   }
   return {
     getPath: ctx.getPath,
-    getHref: ctx.getHref,
   };
 }
 

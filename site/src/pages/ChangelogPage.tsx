@@ -56,10 +56,10 @@ interface ChangelogContentProps {
 
 function ChangelogContent({ html, releases, normalizedVersion }: ChangelogContentProps) {
   const { t } = useTranslation();
-  const { getHref } = usePath();
+  const { getPath } = usePath();
 
   const activeId = useScrollSpy(
-    (id) => (id ? getHref(`/changelog/${id}`) : getHref('/changelog')),
+    (id) => (id ? getPath(`/changelog/${id}`) : getPath('/changelog')),
     normalizedVersion,
     (id) => {
       const ver = (id || normalizedVersion || `v${SITE_VERSION}`).replace(/^v/, '');
@@ -109,16 +109,16 @@ function ChangelogContent({ html, releases, normalizedVersion }: ChangelogConten
               {releases.map(({ version: ver, date }) => {
                 const id = `v${ver}`;
                 const isActive = activeId === id;
-                const targetHref = getHref(`/changelog/${id}`);
+                const targetPath = getPath(`/changelog/${id}`);
 
                 return (
                   <a
                     key={ver}
-                    href={targetHref}
+                    href={targetPath}
                     onClick={(e) => {
                       e.preventDefault();
                       scrollToSection(id, 'smooth');
-                      history.replaceState(null, '', targetHref + window.location.search);
+                      history.replaceState(null, '', targetPath + window.location.search);
                       document.title = `${t.common.changelog} (v${ver})`;
                     }}
                     className={cn(

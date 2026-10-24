@@ -90,7 +90,7 @@ export interface WarFrontlineDataset {
   /** Daily time series of territorial claims and discrepancies spanning full history. */
   timeline: FrontlineTimelinePoint[];
   /** Latest map layers with decoded multi-polygon coordinates. */
-  layers: FrontlineMapLayers;
+  layers?: FrontlineMapLayers;
   /** Daily historical map layers indexed by YYYY-MM-DD date. */
   days?: Record<string, DayFrontlineEntry>;
 }

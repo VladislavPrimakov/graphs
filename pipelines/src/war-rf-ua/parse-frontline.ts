@@ -17,7 +17,9 @@ import { round } from '@/utils/math';
 import { getSiteDataPath } from '@/utils/paths';
 
 const DATA_FRONTLINE_PATH = `${import.meta.dir}/data-frontline.json.br`;
-const FRONTLINE_HISTORY_PATH = getSiteDataPath('war-rf-ua', 'frontline-history.json');
+function getYearlyHistoryPath(year: string): string {
+  return getSiteDataPath('war-rf-ua', `frontline-history-${year}.json`);
+}
 const UKRAINE_TOTAL_KM2 = 603628;
 const BASELINE_DATE = '2022-02-23';
 const START_DATE = '2022-04-03';
@@ -469,8 +471,8 @@ export async function parseFrontline(forceUpdate = false): Promise<WarFrontlineD
       existing.timeline = enrichTimelineWithDeltas(existing.timeline);
       await writeJsonAsync(DATA_FRONTLINE_PATH, existing);
     }
-    if (!(await fileExists(FRONTLINE_HISTORY_PATH))) {
-      logger.debug('Public frontline history bundle missing, exporting to site/public/data/war-rf-ua/frontline-history.json...');
+    if (!(await hasAllYearlyBundles(existingDays))) {
+      logger.debug('Public yearly frontline history bundles missing or incomplete, exporting...');
       await exportFrontlineHistory(existingDays);
     }
     return existing;
@@ -803,16 +805,37 @@ export async function parseFrontline(forceUpdate = false): Promise<WarFrontlineD
   logger.info(`Saving complete daily frontline dataset (${finalTimeline.length} days, latest: ${finalLatestDate})...`);
   await writeJsonAsync(DATA_FRONTLINE_PATH, finalDataset);
 
-  logger.info('Exporting frontline history bundle to site/public/data/war-rf-ua/frontline-history.json...');
+  logger.info('Exporting yearly frontline history bundles to site/public/data/war-rf-ua/frontline-history-${year}.json...');
   await exportFrontlineHistory(sortedDays);
 
   return finalDataset;
 }
 
-/** Exports all daily frontline layers as a single compact JSON bundle to site/public/data/war-rf-ua/frontline-history.json */
+/** Checks whether all yearly frontline bundles exist on disk in site/public/data/war-rf-ua. */
+async function hasAllYearlyBundles(days: Record<string, DayFrontlineEntry>): Promise<boolean> {
+  const years = new Set(Object.keys(days).map((d) => d.slice(0, 4)));
+  for (const year of years) {
+    if (!(await fileExists(getYearlyHistoryPath(year)))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/** Exports daily frontline layers partitioned by year into site/public/data/war-rf-ua/frontline-history-${year}.json */
 async function exportFrontlineHistory(days: Record<string, DayFrontlineEntry>): Promise<void> {
-  await ensureDir(dirname(FRONTLINE_HISTORY_PATH));
-  await writeJsonAsync(FRONTLINE_HISTORY_PATH, days);
+  const byYear: Record<string, Record<string, DayFrontlineEntry>> = {};
+  for (const [date, entry] of Object.entries(days)) {
+    const year = date.slice(0, 4);
+    if (!byYear[year]) byYear[year] = {};
+    byYear[year][date] = entry;
+  }
+
+  for (const [year, yearDays] of Object.entries(byYear)) {
+    const path = getYearlyHistoryPath(year);
+    await ensureDir(dirname(path));
+    await writeJsonAsync(path, yearDays);
+  }
 }
 
 if (import.meta.main) {

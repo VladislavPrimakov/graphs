@@ -23,10 +23,10 @@ export interface SectionNavProps {
 export const SectionNav: React.FC<SectionNavProps> = ({ sections, projectSlug, sectionTitles, projectTitle, initialSection }) => {
   const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
   const containerRef = useRef<HTMLElement>(null);
-  const { getHref } = usePath();
+  const { getPath } = usePath();
 
   const activeId = useScrollSpy(
-    (id) => (id ? getHref(`/${projectSlug}/${id}`) : getHref(`/${projectSlug}`)),
+    (id) => (id ? getPath(`/${projectSlug}/${id}`) : getPath(`/${projectSlug}`)),
     initialSection,
     (id) => (id && sectionTitles[id] ? `${projectTitle} — ${sectionTitles[id]}` : projectTitle),
   );
@@ -61,12 +61,12 @@ export const SectionNav: React.FC<SectionNavProps> = ({ sections, projectSlug, s
     <nav aria-label="Section navigation" ref={containerRef} className="flex items-center justify-center-safe gap-1.5 overflow-x-auto scrollbar-none py-1 max-w-full px-2 mask-fade-x">
       {sections.map((sectionId) => {
         const isActive = activeId === sectionId;
-        const targetHref = getHref(`/${projectSlug}/${sectionId}`);
+        const targetPath = getPath(`/${projectSlug}/${sectionId}`);
 
         return (
           <a
             key={sectionId}
-            href={targetHref}
+            href={targetPath}
             data-nav-section={sectionId}
             onClick={(e) => {
               e.preventDefault();

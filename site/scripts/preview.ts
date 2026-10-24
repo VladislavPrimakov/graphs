@@ -3,8 +3,6 @@ import path from 'node:path';
 
 const distDir = path.resolve(import.meta.dirname, '../dist/client');
 const defaultPort = Number(process.env.PORT ?? 3001);
-const rawBase = process.env.BASE_URL ?? '/graphs';
-const base = rawBase.startsWith('/') ? rawBase : `/${rawBase}`;
 
 function startServer(port: number, maxAttempts = 10) {
   try {
@@ -12,13 +10,7 @@ function startServer(port: number, maxAttempts = 10) {
       port,
       fetch(req) {
         const url = new URL(req.url);
-        let pathname = decodeURIComponent(url.pathname);
-
-        // Normalize base URL prefix
-        if (base !== '/' && pathname.startsWith(base)) {
-          pathname = pathname.slice(base.length) || '/';
-        }
-
+        const pathname = decodeURIComponent(url.pathname);
         const fullPath = path.join(distDir, pathname);
 
         // 1. Check if path exists directly or as directory
@@ -53,7 +45,7 @@ function startServer(port: number, maxAttempts = 10) {
       },
     });
 
-    console.log(`\n  ➜  Preview: http://localhost:${server.port}${base === '/' ? '/' : `${base}/`}\n`);
+    console.log(`\n  ➜  Preview: http://localhost:${server.port}/\n`);
     return server;
   } catch (err: unknown) {
     if (typeof err === 'object' && err !== null && 'code' in err && err.code === 'EADDRINUSE' && maxAttempts > 0) {

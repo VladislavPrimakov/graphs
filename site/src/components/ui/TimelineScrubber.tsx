@@ -1,5 +1,5 @@
 import type React from 'react';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { cn } from '@/utils/cn';
 import { useFormat, useTranslation } from '@/utils/provider';
 import { DatePickerPopover } from './DatePickerPopover';
@@ -278,6 +278,7 @@ export function TimelineScrubber({ granularity, periods, density, dateFrom, date
 
   const trackRef = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState<'left' | 'right' | null>(null);
+  const [dragRange, setDragRange] = useState<[number, number] | null>(null);
 
   const dragInfoRef = useRef<{
     pointerId: number;
@@ -287,6 +288,19 @@ export function TimelineScrubber({ granularity, periods, density, dateFrom, date
     trackWidth: number;
   }>({ pointerId: 0, startX: 0, initialStartIdx: 0, initialEndIdx: 0, trackWidth: 0 });
 
+  const lastCommittedRef = useRef<[number, number]>([0, 0]);
+  const pendingCommitRef = useRef<[number, number] | null>(null);
+  const rafIdRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (rafIdRef.current !== null) {
+        cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
+      }
+    };
+  }, []);
+
   const totalPeriods = periods.length;
   if (totalPeriods === 0) return null;
 
@@ -294,35 +308,64 @@ export function TimelineScrubber({ granularity, periods, density, dateFrom, date
   const rawEndIdx = dateTo ? findPeriodIndex(periods, dateTo, 'end', granularity) : totalPeriods - 1;
   const endIdx = Math.max(startIdx, rawEndIdx);
 
+  const effectiveStartIdx = dragRange ? dragRange[0] : startIdx;
+  const effectiveEndIdx = dragRange ? dragRange[1] : endIdx;
+
+  if (!dragging) {
+    lastCommittedRef.current = [startIdx, endIdx];
+  }
+
   const presets = getPeriodPresets(periods, granularity, fmt);
   const trackMarkers = getTrackMarkers(periods, granularity);
   const densityBars = getDensityBars(periods, density);
 
-  const isAllTime = startIdx === 0 && endIdx === totalPeriods - 1;
+  const isAllTime = effectiveStartIdx === 0 && effectiveEndIdx === totalPeriods - 1;
   let activePreset: string | null = isAllTime ? 'all' : null;
 
   if (!isAllTime) {
     for (const entry of presets) {
-      if (startIdx === entry.firstIdx && endIdx === entry.lastIdx) {
+      if (effectiveStartIdx === entry.firstIdx && effectiveEndIdx === entry.lastIdx) {
         activePreset = entry.id;
         break;
       }
     }
   }
 
-  const leftPercent = totalPeriods > 1 ? (startIdx / (totalPeriods - 1)) * 100 : 0;
-  const rightPercent = totalPeriods > 1 ? (endIdx / (totalPeriods - 1)) * 100 : 100;
+  const leftPercent = totalPeriods > 1 ? (effectiveStartIdx / (totalPeriods - 1)) * 100 : 0;
+  const rightPercent = totalPeriods > 1 ? (effectiveEndIdx / (totalPeriods - 1)) * 100 : 100;
   const widthPercent = Math.max(0, rightPercent - leftPercent);
 
   const commitIndices = (nextStart: number, nextEnd: number) => {
+    if (lastCommittedRef.current[0] === nextStart && lastCommittedRef.current[1] === nextEnd) return;
+    lastCommittedRef.current = [nextStart, nextEnd];
     onChange({ dateFrom: periods[nextStart], dateTo: periods[nextEnd] });
   };
 
+  const scheduleCommit = (nextStart: number, nextEnd: number) => {
+    pendingCommitRef.current = [nextStart, nextEnd];
+    if (rafIdRef.current === null) {
+      rafIdRef.current = requestAnimationFrame(() => {
+        rafIdRef.current = null;
+        if (pendingCommitRef.current) {
+          const [s, e] = pendingCommitRef.current;
+          pendingCommitRef.current = null;
+          commitIndices(s, e);
+        }
+      });
+    }
+  };
+
   const applyRangePreset = (first: string, last: string) => {
-    onChange({
-      dateFrom: first,
-      dateTo: last,
-    });
+    if (rafIdRef.current !== null) {
+      cancelAnimationFrame(rafIdRef.current);
+      rafIdRef.current = null;
+    }
+    pendingCommitRef.current = null;
+    setDragRange(null);
+    setDragging(null);
+    const newStart = findPeriodIndex(periods, first, 'start', granularity);
+    const newEnd = findPeriodIndex(periods, last, 'end', granularity);
+    commitIndices(newStart, newEnd);
   };
 
   const handlePointerDown = (type: 'left' | 'right', e: React.PointerEvent<HTMLDivElement>) => {
@@ -334,8 +377,8 @@ export function TimelineScrubber({ granularity, periods, density, dateFrom, date
     dragInfoRef.current = {
       pointerId: e.pointerId,
       startX: e.clientX,
-      initialStartIdx: startIdx,
-      initialEndIdx: endIdx,
+      initialStartIdx: effectiveStartIdx,
+      initialEndIdx: effectiveEndIdx,
       trackWidth: rect.width,
     };
 
@@ -343,21 +386,23 @@ export function TimelineScrubber({ granularity, periods, density, dateFrom, date
       e.currentTarget.setPointerCapture(e.pointerId);
     } catch {}
     setDragging(type);
+    setDragRange([effectiveStartIdx, effectiveEndIdx]);
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!dragging || !trackRef.current) return;
+    e.stopPropagation();
     const { startX, initialStartIdx, initialEndIdx, trackWidth } = dragInfoRef.current;
     if (trackWidth <= 0 || totalPeriods <= 1) return;
 
     const deltaX = e.clientX - startX;
     const deltaIdx = Math.round((deltaX / trackWidth) * (totalPeriods - 1));
 
-    if (dragging === 'left') {
-      commitIndices(Math.max(0, Math.min(initialEndIdx, initialStartIdx + deltaIdx)), initialEndIdx);
-    } else if (dragging === 'right') {
-      commitIndices(initialStartIdx, Math.max(initialStartIdx, Math.min(totalPeriods - 1, initialEndIdx + deltaIdx)));
-    }
+    const nextStart = dragging === 'left' ? Math.max(0, Math.min(initialEndIdx, initialStartIdx + deltaIdx)) : initialStartIdx;
+    const nextEnd = dragging === 'right' ? Math.max(initialStartIdx, Math.min(totalPeriods - 1, initialEndIdx + deltaIdx)) : initialEndIdx;
+
+    setDragRange([nextStart, nextEnd]);
+    scheduleCommit(nextStart, nextEnd);
   };
 
   const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -365,6 +410,21 @@ export function TimelineScrubber({ granularity, periods, density, dateFrom, date
       try {
         e.currentTarget.releasePointerCapture(e.pointerId);
       } catch {}
+
+      if (rafIdRef.current !== null) {
+        cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
+      }
+
+      if (pendingCommitRef.current) {
+        const [s, e] = pendingCommitRef.current;
+        pendingCommitRef.current = null;
+        commitIndices(s, e);
+      } else if (dragRange) {
+        commitIndices(dragRange[0], dragRange[1]);
+      }
+
+      setDragRange(null);
       setDragging(null);
     }
   };
@@ -375,21 +435,21 @@ export function TimelineScrubber({ granularity, periods, density, dateFrom, date
     const clickRatio = (e.clientX - rect.left) / rect.width;
     const clickedIdx = Math.max(0, Math.min(totalPeriods - 1, Math.round(clickRatio * (totalPeriods - 1))));
 
-    const distToStart = Math.abs(clickedIdx - startIdx);
-    const distToEnd = Math.abs(clickedIdx - endIdx);
+    const distToStart = Math.abs(clickedIdx - effectiveStartIdx);
+    const distToEnd = Math.abs(clickedIdx - effectiveEndIdx);
     const targetThumb: 'left' | 'right' = distToStart < distToEnd ? 'left' : 'right';
 
-    if (targetThumb === 'left') {
-      commitIndices(clickedIdx, endIdx);
-    } else {
-      commitIndices(startIdx, clickedIdx);
-    }
+    const nextStart = targetThumb === 'left' ? clickedIdx : effectiveStartIdx;
+    const nextEnd = targetThumb === 'right' ? clickedIdx : effectiveEndIdx;
+
+    setDragRange([nextStart, nextEnd]);
+    scheduleCommit(nextStart, nextEnd);
 
     dragInfoRef.current = {
       pointerId: e.pointerId,
       startX: e.clientX,
-      initialStartIdx: targetThumb === 'left' ? clickedIdx : startIdx,
-      initialEndIdx: targetThumb === 'right' ? clickedIdx : endIdx,
+      initialStartIdx: nextStart,
+      initialEndIdx: nextEnd,
       trackWidth: rect.width,
     };
 
@@ -400,8 +460,8 @@ export function TimelineScrubber({ granularity, periods, density, dateFrom, date
   };
 
   const maxDateChars = getMaxPeriodLabelChars(fmt, granularity);
-  const formattedStart = formatPeriodLabel(fmt, periods[startIdx], granularity);
-  const formattedEnd = formatPeriodLabel(fmt, periods[endIdx], granularity);
+  const formattedStart = formatPeriodLabel(fmt, periods[effectiveStartIdx], granularity);
+  const formattedEnd = formatPeriodLabel(fmt, periods[effectiveEndIdx], granularity);
 
   return (
     <div className={cn('flex flex-col gap-1.5 w-full select-none', className)}>
@@ -450,49 +510,49 @@ export function TimelineScrubber({ granularity, periods, density, dateFrom, date
           <div className="flex flex-wrap items-center gap-1">
             <DatePickerPopover
               mode={granularity}
-              value={periods[startIdx]}
+              value={periods[effectiveStartIdx]}
               minDate={periods[0]}
-              maxDate={periods[endIdx]}
+              maxDate={periods[effectiveEndIdx]}
               label={formattedStart}
               minChars={maxDateChars}
               onSelect={(dateStr) => {
                 const newIdx = findPeriodIndex(periods, dateStr, 'start', granularity);
-                commitIndices(Math.min(newIdx, endIdx), endIdx);
+                commitIndices(Math.min(newIdx, effectiveEndIdx), effectiveEndIdx);
               }}
               onStepPrev={(e) => {
                 const step = e.shiftKey ? (granularity === 'yearly' ? 10 : granularity === 'monthly' ? 12 : 7) : 1;
-                commitIndices(Math.max(0, startIdx - step), endIdx);
+                commitIndices(Math.max(0, effectiveStartIdx - step), effectiveEndIdx);
               }}
-              canStepPrev={startIdx > 0}
+              canStepPrev={effectiveStartIdx > 0}
               onStepNext={(e) => {
                 const step = e.shiftKey ? (granularity === 'yearly' ? 10 : granularity === 'monthly' ? 12 : 7) : 1;
-                commitIndices(Math.min(endIdx, startIdx + step), endIdx);
+                commitIndices(Math.min(effectiveEndIdx, effectiveStartIdx + step), effectiveEndIdx);
               }}
-              canStepNext={startIdx < endIdx}
+              canStepNext={effectiveStartIdx < effectiveEndIdx}
               title={tCommon.from}
             />
 
             <DatePickerPopover
               mode={granularity}
-              value={periods[endIdx]}
-              minDate={periods[startIdx]}
+              value={periods[effectiveEndIdx]}
+              minDate={periods[effectiveStartIdx]}
               maxDate={periods[totalPeriods - 1]}
               label={formattedEnd}
               minChars={maxDateChars}
               onSelect={(dateStr) => {
                 const newIdx = findPeriodIndex(periods, dateStr, 'end', granularity);
-                commitIndices(startIdx, Math.max(startIdx, newIdx));
+                commitIndices(effectiveStartIdx, Math.max(effectiveStartIdx, newIdx));
               }}
               onStepPrev={(e) => {
                 const step = e.shiftKey ? (granularity === 'yearly' ? 10 : granularity === 'monthly' ? 12 : 7) : 1;
-                commitIndices(startIdx, Math.max(startIdx, endIdx - step));
+                commitIndices(effectiveStartIdx, Math.max(effectiveStartIdx, effectiveEndIdx - step));
               }}
-              canStepPrev={endIdx > startIdx}
+              canStepPrev={effectiveEndIdx > effectiveStartIdx}
               onStepNext={(e) => {
                 const step = e.shiftKey ? (granularity === 'yearly' ? 10 : granularity === 'monthly' ? 12 : 7) : 1;
-                commitIndices(startIdx, Math.min(totalPeriods - 1, endIdx + step));
+                commitIndices(effectiveStartIdx, Math.min(totalPeriods - 1, effectiveEndIdx + step));
               }}
-              canStepNext={endIdx < totalPeriods - 1}
+              canStepNext={effectiveEndIdx < totalPeriods - 1}
               title={tCommon.to}
             />
           </div>

@@ -4,13 +4,12 @@ declare const __SITE_VERSION__: string;
 export const SITE_VERSION = typeof __SITE_VERSION__ !== 'undefined' ? __SITE_VERSION__ : '0.0.0';
 
 /** Canonical production domain origin used for absolute OpenGraph and Twitter card URLs. */
-export const SITE_ORIGIN = 'https://vladislavprimakov.github.io';
+export const SITE_ORIGIN = 'https://graphs.prima.ovh';
 
 /** Resolves an absolute canonical URL for social media preview cards. */
 export function getAbsoluteUrl(relPath: string): string {
-  const base = (import.meta.env.BASE_URL || '/').replace(/\/+$/, '');
   const cleanRel = relPath.startsWith('/') ? relPath : `/${relPath}`;
-  return `${SITE_ORIGIN}${base}${cleanRel}`;
+  return `${SITE_ORIGIN}${cleanRel}`;
 }
 
 /** Structured changelog release entry containing version string and optional release date. */

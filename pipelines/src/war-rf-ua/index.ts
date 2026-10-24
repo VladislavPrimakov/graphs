@@ -333,7 +333,6 @@ export async function runWarRfUaPipeline(forceUpdate = false, verbose?: boolean)
         {
           summary: frontline.summary,
           timeline: frontline.timeline,
-          layers: frontline.layers,
         },
         'frontline-map.json',
       );

@@ -1,10 +1,9 @@
 import { type GeoJSONSource, Map as MapLibreMap, NavigationControl } from 'maplibre-gl';
 import type React from 'react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { DayFrontlineEntry, FrontlineMapLayers, FrontlineMapSectionData } from '@graphs/shared/types/war-rf-ua/frontline';
 import { useSectionResize } from '@/components/sections/Section';
-import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { createFillLayer, createLineLayer, decodeMultiPolygon, getMapTileStyle, multiPolygonToGeoJson, registerFallbackDot, UKRAINE_MAP_PRESETS } from '@/utils/map-builder';
 import { useFormat, useTheme } from '@/utils/provider';
 import type { dict as enDict } from '../locales/dict-en';
@@ -12,19 +11,27 @@ import { frontlineColors } from '../tokens';
 
 interface FrontlineMapProps {
   data: FrontlineMapSectionData;
+  history: Record<string, DayFrontlineEntry>;
   targetDate?: string;
   t: typeof enDict;
 }
 
+const EMPTY_LAYERS: FrontlineMapLayers = {
+  consensusRf: [],
+  disputed: [],
+  deepstate: [],
+  lostarmour: [],
+};
+
 /** Resolves and decodes layers for a target date from history bundle, traversing reference chains. */
-function resolveHistoryDayLayers(days: Record<string, DayFrontlineEntry>, targetDate: string, fallbackLayers: FrontlineMapLayers): FrontlineMapLayers {
+function resolveHistoryDayLayers(days: Record<string, DayFrontlineEntry>, targetDate: string): FrontlineMapLayers {
   let entry = days[targetDate];
   let depth = 0;
   while (entry && 'ref' in entry && depth < 20) {
     entry = days[entry.ref];
     depth++;
   }
-  if (!entry || 'ref' in entry) return fallbackLayers;
+  if (!entry || 'ref' in entry) return EMPTY_LAYERS;
   if ('consensusRf' in entry) return entry;
   return {
     consensusRf: decodeMultiPolygon(entry.c),
@@ -34,31 +41,38 @@ function resolveHistoryDayLayers(days: Record<string, DayFrontlineEntry>, target
   };
 }
 
-let cachedHistoryDays: Record<string, DayFrontlineEntry> | null = null;
-let cachedHistoryPromise: Promise<Record<string, DayFrontlineEntry>> | null = null;
+/** Updates MapLibre vector GeoJSON sources with the decoded frontline layers. */
+function applyFrontlineLayers(map: MapLibreMap | null, layers: FrontlineMapLayers): void {
+  if (!map?.isStyleLoaded()) return;
 
-/** Lazily loads the single compressed frontline history bundle containing all historical dates. */
-function loadFrontlineHistory(): Promise<Record<string, DayFrontlineEntry>> {
-  if (cachedHistoryDays) return Promise.resolve(cachedHistoryDays);
-  if (cachedHistoryPromise) return cachedHistoryPromise;
+  const consensusSource = map.getSource('consensus-rf') as GeoJSONSource | undefined;
+  if (consensusSource) {
+    consensusSource.setData(multiPolygonToGeoJson(layers.consensusRf));
+  }
+  const disputedSource = map.getSource('disputed') as GeoJSONSource | undefined;
+  if (disputedSource) {
+    disputedSource.setData(multiPolygonToGeoJson(layers.disputed));
+  }
+  const dsSource = map.getSource('deepstate') as GeoJSONSource | undefined;
+  if (dsSource) {
+    dsSource.setData(multiPolygonToGeoJson(layers.deepstate ?? []));
+  }
+  const laSource = map.getSource('lostarmour') as GeoJSONSource | undefined;
+  if (laSource) {
+    laSource.setData(multiPolygonToGeoJson(layers.lostarmour ?? []));
+  }
+}
 
-  const url = `${import.meta.env.BASE_URL}data/war-rf-ua/frontline-history.json`;
-  const promise = fetch(url)
-    .then((res) => {
-      if (!res.ok) throw new Error(`HTTP ${res.status} fetching ${url}`);
-      return res.json() as Promise<Record<string, DayFrontlineEntry>>;
-    })
-    .then((days) => {
-      cachedHistoryDays = days;
-      return days;
-    })
-    .catch((err) => {
-      cachedHistoryPromise = null;
-      throw err;
-    });
+const decodedCache = new Map<string, FrontlineMapLayers>();
 
-  cachedHistoryPromise = promise;
-  return promise;
+/** Resolves and memoizes decoded map layers for a date across scrubbing interactions. */
+function getDecodedLayers(history: Record<string, DayFrontlineEntry>, date: string): FrontlineMapLayers {
+  let cached = decodedCache.get(date);
+  if (!cached) {
+    cached = resolveHistoryDayLayers(history, date);
+    decodedCache.set(date, cached);
+  }
+  return cached;
 }
 
 const timelineDatesCache = new WeakMap<FrontlineMapSectionData, string[]>();
@@ -73,33 +87,24 @@ function getTimelineDates(data: FrontlineMapSectionData): string[] {
   return cached;
 }
 
-export const FrontlineMap: React.FC<FrontlineMapProps> = ({ data, targetDate: rawTargetDate, t }) => {
+export const FrontlineMap: React.FC<FrontlineMapProps> = ({ data, history, targetDate: rawTargetDate, t }) => {
   const { resolvedTheme, tokens } = useTheme();
   const fmt = useFormat();
 
   const dates = getTimelineDates(data);
   const selectedDate = rawTargetDate ? (rawTargetDate.length === 7 ? (dates.findLast((d) => d.startsWith(rawTargetDate)) ?? rawTargetDate) : rawTargetDate) : data.summary.latestDate;
-  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
 
-  const decodedCacheRef = useRef<Map<string, FrontlineMapLayers>>(new Map(data.layers && data.summary.latestDate ? [[data.summary.latestDate, data.layers]] : []));
   const activeDateRef = useRef<string>(selectedDate);
   activeDateRef.current = selectedDate;
-
-  // Keep cache synchronized if dataset changes
-  useEffect(() => {
-    if (data.layers && data.summary.latestDate) {
-      decodedCacheRef.current.set(data.summary.latestDate, data.layers);
-    }
-  }, [data]);
+  const historyRef = useRef<Record<string, DayFrontlineEntry>>(history);
+  historyRef.current = history;
 
   // Map initialization
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
-
-    const initialLayers = data.layers;
 
     const map = new MapLibreMap({
       container: mapContainerRef.current,
@@ -114,38 +119,36 @@ export const FrontlineMap: React.FC<FrontlineMapProps> = ({ data, targetDate: ra
     map.addControl(new NavigationControl({ showCompass: true, showZoom: true }), 'top-right');
 
     map.on('load', () => {
+      const activeLayers = getDecodedLayers(historyRef.current, activeDateRef.current);
+
       // 1. Consensus Russian control multi-polygons (Red Fill)
       map.addSource('consensus-rf', {
         type: 'geojson',
-        data: multiPolygonToGeoJson(initialLayers.consensusRf),
+        data: multiPolygonToGeoJson(activeLayers.consensusRf),
       });
       map.addLayer(createFillLayer('consensus-rf-fill', 'consensus-rf', frontlineColors.consensusRf, 0.3));
 
       // 2. Disputed & Grey zone multi-polygons (Grey / Contested Fill)
       map.addSource('disputed', {
         type: 'geojson',
-        data: multiPolygonToGeoJson(initialLayers.disputed),
+        data: multiPolygonToGeoJson(activeLayers.disputed),
       });
       map.addLayer(createFillLayer('disputed-fill', 'disputed', frontlineColors.disputed, 0.4));
       map.addLayer(createLineLayer('disputed-line', 'disputed', frontlineColors.disputedStroke, 1, 0.7));
 
       // 3. DeepState Frontline Line (Cyan / Sky)
-      if (initialLayers.deepstate) {
-        map.addSource('deepstate', {
-          type: 'geojson',
-          data: multiPolygonToGeoJson(initialLayers.deepstate),
-        });
-        map.addLayer(createLineLayer('deepstate-line', 'deepstate', frontlineColors.deepstateLine, 2, 0.95));
-      }
+      map.addSource('deepstate', {
+        type: 'geojson',
+        data: multiPolygonToGeoJson(activeLayers.deepstate ?? []),
+      });
+      map.addLayer(createLineLayer('deepstate-line', 'deepstate', frontlineColors.deepstateLine, 2, 0.95));
 
       // 4. LostArmour Frontline Line (Rose / Red Solid)
-      if (initialLayers.lostarmour) {
-        map.addSource('lostarmour', {
-          type: 'geojson',
-          data: multiPolygonToGeoJson(initialLayers.lostarmour),
-        });
-        map.addLayer(createLineLayer('lostarmour-line', 'lostarmour', frontlineColors.lostarmourLine, 2, 0.95));
-      }
+      map.addSource('lostarmour', {
+        type: 'geojson',
+        data: multiPolygonToGeoJson(activeLayers.lostarmour ?? []),
+      });
+      map.addLayer(createLineLayer('lostarmour-line', 'lostarmour', frontlineColors.lostarmourLine, 2, 0.95));
     });
 
     mapRef.current = map;
@@ -154,83 +157,17 @@ export const FrontlineMap: React.FC<FrontlineMapProps> = ({ data, targetDate: ra
       map.remove();
       mapRef.current = null;
     };
-  }, [resolvedTheme, tokens.text.dim, data]);
+  }, [resolvedTheme, tokens.text.dim]);
 
   useSectionResize(() => {
     mapRef.current?.resize();
   });
 
-  // Reactive layer updates when selectedDate changes (cached or on-demand fetch)
+  // Reactive layer updates when selectedDate changes (synchronous 0.8ms resolution from memory)
   useEffect(() => {
-    const map = mapRef.current;
-    if (!map?.isStyleLoaded()) return;
-
-    const applyLayers = (layers: FrontlineMapLayers) => {
-      const consensusSource = map.getSource('consensus-rf') as GeoJSONSource | undefined;
-      if (consensusSource) {
-        consensusSource.setData(multiPolygonToGeoJson(layers.consensusRf));
-      }
-      const disputedSource = map.getSource('disputed') as GeoJSONSource | undefined;
-      if (disputedSource) {
-        disputedSource.setData(multiPolygonToGeoJson(layers.disputed));
-      }
-      const dsSource = map.getSource('deepstate') as GeoJSONSource | undefined;
-      if (dsSource && layers.deepstate) {
-        dsSource.setData(multiPolygonToGeoJson(layers.deepstate));
-      }
-      const laSource = map.getSource('lostarmour') as GeoJSONSource | undefined;
-      if (laSource && layers.lostarmour) {
-        laSource.setData(multiPolygonToGeoJson(layers.lostarmour));
-      }
-    };
-
-    const targetDate = selectedDate;
-
-    // 1. If latest day, apply instantly
-    if (targetDate === data.summary.latestDate && data.layers) {
-      applyLayers(data.layers);
-      return;
-    }
-
-    // 2. If already decoded in memory, apply instantly (0ms)
-    const cached = decodedCacheRef.current.get(targetDate);
-    if (cached) {
-      applyLayers(cached);
-      return;
-    }
-
-    // 3. If history bundle is already loaded, decode in ~0.8ms and apply instantly
-    if (cachedHistoryDays) {
-      const decoded = resolveHistoryDayLayers(cachedHistoryDays, targetDate, data.layers);
-      decodedCacheRef.current.set(targetDate, decoded);
-      applyLayers(decoded);
-      return;
-    }
-
-    // 4. Download history bundle on first scrub to historical date
-    let cancelled = false;
-    setIsLoadingHistory(true);
-    loadFrontlineHistory()
-      .then((days) => {
-        if (cancelled) return;
-        setIsLoadingHistory(false);
-        const decoded = resolveHistoryDayLayers(days, targetDate, data.layers);
-        decodedCacheRef.current.set(targetDate, decoded);
-        if (activeDateRef.current === targetDate) {
-          applyLayers(decoded);
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setIsLoadingHistory(false);
-          console.warn(`Failed to load frontline history for ${targetDate}:`, err);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedDate, data]);
+    const layers = getDecodedLayers(history, selectedDate);
+    applyFrontlineLayers(mapRef.current, layers);
+  }, [selectedDate, history]);
 
   const activePoint = data.timeline?.find((p) => p.date === selectedDate);
   const summary = activePoint
@@ -256,13 +193,6 @@ export const FrontlineMap: React.FC<FrontlineMapProps> = ({ data, targetDate: ra
     <div className="flex flex-col gap-2 w-full">
       <div className="relative w-full h-145 rounded-xl overflow-hidden border border-border-subtle bg-surface-base/90 shadow-inner">
         <div ref={mapContainerRef} className="w-full h-full" />
-
-        {/* Centered Loading Overlay while downloading history bundle */}
-        {isLoadingHistory && (
-          <div className="absolute inset-0 z-20 flex items-center justify-center bg-surface-base transition-opacity">
-            <LoadingSpinner isVisible={true} fullscreen={false} size="md" />
-          </div>
-        )}
 
         {/* Floating Dark Glassmorphic Map Legend */}
         <div className="absolute bottom-4 left-4 z-10 glass-overlay p-3.5 text-xs max-w-90 shadow-lg flex flex-col gap-2.5 pointer-events-auto">

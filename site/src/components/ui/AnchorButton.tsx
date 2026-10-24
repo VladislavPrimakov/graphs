@@ -18,14 +18,14 @@ export interface AnchorButtonProps {
 export const AnchorButton: React.FC<AnchorButtonProps> = ({ sectionId, projectSlug, className }) => {
   const [copied, setCopied] = useState(false);
   const { t } = useTranslation();
-  const { getHref } = usePath();
+  const { getPath } = usePath();
 
   const handleCopy = (e: React.MouseEvent) => {
     e.preventDefault();
     if (!sectionId) return;
-    const href = projectSlug ? getHref(`/${projectSlug}/${sectionId}`) : `${window.location.pathname.replace(/\/+$/, '')}/${sectionId}`;
+    const path = projectSlug ? getPath(`/${projectSlug}/${sectionId}`) : `${window.location.pathname.replace(/\/+$/, '')}/${sectionId}`;
     const search = typeof window !== 'undefined' ? window.location.search : '';
-    const url = `${window.location.origin}${href}${search}`;
+    const url = `${window.location.origin}${path}${search}`;
     navigator.clipboard
       .writeText(url)
       .then(() => {
