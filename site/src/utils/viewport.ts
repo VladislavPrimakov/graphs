@@ -353,8 +353,6 @@ export function useScrollSpy(getHref: (activeId: string) => string, initialId?: 
   useIsomorphicLayoutEffect(() => {
     if (initialId) {
       scrollToSection(initialId, 'instant');
-    } else {
-      window.scrollTo({ top: 0, behavior: 'instant' });
     }
   }, [initialId]);
 

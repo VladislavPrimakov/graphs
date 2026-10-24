@@ -1,4 +1,6 @@
+import { useEffect } from 'react';
 import { Link } from 'react-router';
+import { dismissInitialLoader } from '@/components/ui/LoadingSpinner';
 import { usePath, useTranslation } from '@/utils/provider';
 
 /** Bare 404 error page presenting a message and a single localized link to the catalog root. */
@@ -8,6 +10,10 @@ export default function NotFoundPage() {
   const homePath = getPath('/');
   const title = `404 — ${t.common.pageNotFound}`;
   const description = t.common.pageNotFoundDescription;
+
+  useEffect(() => {
+    dismissInitialLoader();
+  }, []);
 
   return (
     <div className="flex flex-col items-center justify-center py-20 text-center">

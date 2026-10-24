@@ -1,5 +1,6 @@
 import { use, useEffect } from 'react';
 import { useParams } from 'react-router';
+import { dismissInitialLoader } from '@/components/ui/LoadingSpinner';
 import NotFoundPage from '@/pages/NotFoundPage';
 import { cn } from '@/utils/cn';
 import { usePath, useTranslation } from '@/utils/provider';
@@ -72,6 +73,10 @@ function ChangelogContent({ html, releases, normalizedVersion }: ChangelogConten
   useEffect(() => {
     document.title = pageTitle;
   }, [pageTitle]);
+
+  useEffect(() => {
+    dismissInitialLoader();
+  }, []);
 
   const changelogDesc = `Release history and changelog for Graphs (v${activeVersion})`;
 

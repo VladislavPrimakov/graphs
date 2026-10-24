@@ -2,6 +2,7 @@ import { startTransition, useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import { ArrowRightIcon, ClockIcon, FilterIcon } from '@/components/icons';
 import { FilterPills } from '@/components/ui/FilterPills';
+import { dismissInitialLoader } from '@/components/ui/LoadingSpinner';
 import { TagBadge } from '@/components/ui/TagBadge';
 import { cn } from '@/utils/cn';
 import { ALL_UNIQUE_TAGS, type ProjectTag } from '@/utils/project';
@@ -17,7 +18,7 @@ export default function CatalogPage() {
   const fmt = useFormat();
 
   useEffect(() => {
-    window.scrollTo({ top: 0, behavior: 'instant' });
+    dismissInitialLoader();
   }, []);
 
   const isAllActive = selectedTags.length === 0;
