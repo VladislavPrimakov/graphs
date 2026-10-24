@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.3] - 2026-10-24
+
+### Site (@graphs/site)
+
+#### Added
+- Added `InitialLoadingVeil` full-screen veil in `root.tsx` with a smooth 200ms fade-out triggered via `dismissInitialLoader` across all page routes, masking DOM hydration and initial layout assembly without intermediate skeleton layout shifts.
+- Added `PageLoader` content-area indicator for client-side route transitions inside `SiteLayout`, keeping the site header, branding, navigation, and theme/language controls stable and interactive.
+
+#### Changed
+- Changed root route `Suspense` fallbacks from full-screen blocking overlays to content-scoped indicators, preventing viewport backdrop flashes during client-side navigation, dictionary fetching, and project dataset loading.
+
+#### Removed
+- Removed artificial `window.scrollTo({ top: 0 })` overrides across page components and `useScrollSpy`, restoring native browser scroll preservation.
+
+---
+
 ## [1.3.2] - 2026-10-23
 
 ### Pipelines (@graphs/pipelines)

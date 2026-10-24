@@ -2,7 +2,7 @@ import type React from 'react';
 import { Suspense, use } from 'react';
 import { Links, Meta, Outlet, Scripts, useLocation } from 'react-router';
 import { SiteLayout } from '@/components/layout/SiteLayout';
-import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
+import { InitialLoadingVeil, PageLoader } from '@/components/ui/LoadingSpinner';
 import type { CldrLocaleUnits } from '@/utils/format';
 import { type CatalogProject, loadCatalog } from '@/utils/project';
 import { AppProvider, getLanguageFromPath, type Language, type LocaleCommonDict } from '@/utils/provider';
@@ -68,7 +68,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <Links />
       </head>
       <body className="bg-surface-base text-content-primary flex flex-col min-h-screen">
-        <Suspense fallback={<LoadingSpinner />}>{children}</Suspense>
+        <InitialLoadingVeil />
+        <Suspense fallback={null}>{children}</Suspense>
         <Scripts />
       </body>
     </html>
@@ -83,7 +84,7 @@ export default function App() {
   return (
     <AppProvider key={lang} lang={lang} common={common} cldr={cldr} projects={projects}>
       <SiteLayout>
-        <Suspense fallback={<LoadingSpinner />}>
+        <Suspense fallback={<PageLoader />}>
           <Outlet />
         </Suspense>
       </SiteLayout>

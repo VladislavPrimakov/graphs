@@ -4,6 +4,7 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { SectionNav } from '@/components/layout/SectionNav';
 import { Section } from '@/components/sections/Section';
 import { DashboardToolbars } from '@/components/ui/ControlBar';
+import { dismissInitialLoader } from '@/components/ui/LoadingSpinner';
 import NotFoundPage from '@/pages/NotFoundPage';
 import { type DashboardSectionSpec, type DashboardToolbarSpec, loadProjectBundle, STATIC_PROJECT_MAP } from '@/utils/project';
 import { type Language, useFormat, useLanguage, useTheme, useTranslation } from '@/utils/provider';
@@ -17,7 +18,7 @@ interface ProjectDashboardProps {
   lang: Language;
 }
 
-/** Internal dashboard content view coordinating polymorphic section rendering. */
+/** Dynamic content view resolving project datasets, building interactive toolbars, and coordinating sections. */
 function ProjectDashboard({ slug, section, lang }: ProjectDashboardProps) {
   const { t: localeT } = useTranslation();
   const fmt = useFormat();
@@ -37,6 +38,7 @@ function ProjectDashboard({ slug, section, lang }: ProjectDashboardProps) {
   const buildCtx = { lang, t: t as any, fmt, theme: resolvedTheme, tokens };
 
   useEffect(() => {
+    dismissInitialLoader();
     return () => {
       clearStoreRegistry();
     };
