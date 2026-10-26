@@ -1235,6 +1235,33 @@ export function buildProductionProfile(raw: RawCountryProfile, allCountries?: Re
   };
 }
 
+/**
+ * Computes annual USD deflator multipliers normalized to 2021 = 1.0 based on US CPI inflation (pcpipch).
+ * Multiplier k_t = CPI_2021 / CPI_t converts nominal current USD of year t into constant 2021 USD.
+ */
+export function buildUsdDeflator2021(usRawProfile: RawCountryProfile | undefined, minYear = START_YEAR, maxYear = CURRENT_YEAR, baseYear = 2021): Record<number, number> {
+  const deflator: Record<number, number> = {};
+  const yearsData = usRawProfile?.years || {};
+
+  const k: Record<number, number> = { [baseYear]: 1.0 };
+
+  for (let y = baseYear; y > minYear; y--) {
+    const rate = yearsData[String(y)]?.pcpipch;
+    k[y - 1] = rate != null ? k[y] * (1 + rate / 100) : k[y];
+  }
+
+  for (let y = baseYear + 1; y <= maxYear; y++) {
+    const rate = yearsData[String(y)]?.pcpipch;
+    k[y] = rate != null ? k[y - 1] / (1 + rate / 100) : k[y - 1];
+  }
+
+  for (let y = minYear; y <= maxYear; y++) {
+    deflator[y] = round(k[y] ?? 1.0, 4);
+  }
+
+  return deflator;
+}
+
 /** Exports all individual country datasets and toolbar metadata to site/public/data/country. */
 export async function exportCountryDatasets(countries: Record<string, RawCountryProfile>): Promise<void> {
   const countryRank = new Map(SUPPORTED_COUNTRIES.map((code, idx) => [code, idx]));
@@ -1294,11 +1321,13 @@ export async function exportCountryDatasets(countries: Record<string, RawCountry
     categories: COUNTRY_CATEGORIES_META,
   };
 
+  const deflator = buildUsdDeflator2021(countries.us, minYear, maxYear);
+  await exportProjectMeta('country', deflator, 'deflator.json');
   await exportProjectMeta('country', toolbarMeta, 'toolbar-meta.json');
   await updateMetadata('country');
 
   const exportLogger = getPipelineLogger('country');
-  exportLogger.exported(`${countryList.length} complete country profiles and toolbar-meta.json`);
+  exportLogger.exported(`${countryList.length} complete country profiles, deflator.json, and toolbar-meta.json`);
 }
 
 /** Runs the standalone Country ETL Pipeline checking 1990..CURRENT_YEAR dynamically with smart incremental fetching. */

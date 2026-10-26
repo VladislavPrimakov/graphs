@@ -1,6 +1,6 @@
 import type React from 'react';
 import { Suspense, use } from 'react';
-import { Links, Meta, Outlet, Scripts, useLocation } from 'react-router';
+import { Links, Meta, Outlet, Scripts, ScrollRestoration, useLocation } from 'react-router';
 import { SiteLayout } from '@/components/layout/SiteLayout';
 import { InitialLoadingVeil, PageLoader } from '@/components/ui/LoadingSpinner';
 import type { CldrLocaleUnits } from '@/utils/format';
@@ -70,6 +70,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
       <body className="bg-surface-base text-content-primary flex flex-col min-h-screen">
         <InitialLoadingVeil />
         <Suspense fallback={null}>{children}</Suspense>
+        <ScrollRestoration />
         <Scripts />
       </body>
     </html>

@@ -10,9 +10,6 @@ export const dict: typeof enDict = {
   gdpPerCapita: {
     title: 'BIP pro Kopf nach KKP (konstante Preise 2021 $)',
   },
-  machineryTurnover: {
-    title: 'Handelsumsatz für Maschinen & Elektronik (HS 84-85)',
-  },
   electricityGeneration: {
     title: 'Bruttostromerzeugung',
   },
@@ -21,5 +18,8 @@ export const dict: typeof enDict = {
   },
   electricityPerCapita: {
     title: 'Stromverbrauch pro Kopf',
+  },
+  passengerCars: {
+    title: 'Personenkraftwagen pro 1.000 Einwohner',
   },
 };

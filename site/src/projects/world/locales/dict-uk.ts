@@ -10,9 +10,6 @@ export const dict: typeof enDict = {
   gdpPerCapita: {
     title: 'ВВП на душу населення за ПКС (у цінах 2021 р.)',
   },
-  machineryTurnover: {
-    title: 'Товарообіг машинобудування та електроніки (HS 84-85)',
-  },
   electricityGeneration: {
     title: 'Валова генерація електроенергії',
   },
@@ -21,5 +18,8 @@ export const dict: typeof enDict = {
   },
   electricityPerCapita: {
     title: 'Споживання електроенергії на душу населення',
+  },
+  passengerCars: {
+    title: 'Легкові автомобілі на 1 000 осіб',
   },
 };

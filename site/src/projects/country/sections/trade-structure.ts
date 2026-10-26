@@ -1,3 +1,4 @@
+import { round } from '@graphs/shared/math';
 import type { DefaultLabelFormatterCallbackParams as CallbackDataParams } from 'echarts';
 import { createChart } from '@/components/sections/SectionChart';
 import { chartOption, createBarSeries } from '@/utils/chart-builder';
@@ -16,12 +17,12 @@ export const tradeStructureSection: Section = ({ t, fmt }) => {
         url: 'https://comtradeplus.un.org/',
       },
     ],
-    buildView: ({ countryData }, { countryStore }) => {
+    buildView: ({ countryData, deflator }, { countryStore }) => {
       const countryName = fmt.region(countryData.code);
       const title = `${countryName} — ${t.proj.tradeStructure.title}`;
       const years = countryData.years;
       const [selStartYear, selEndYear] = countryStore.years;
-      const showLabels = countryStore.labels;
+      const useConst = Boolean(countryStore.inConstant2021);
 
       const foundStartIdx = years.findIndex((y: number) => y >= selStartYear);
       const startIdx = foundStartIdx === -1 ? years.length : foundStartIdx;
@@ -38,17 +39,18 @@ export const tradeStructureSection: Section = ({ t, fmt }) => {
 
       for (let i = 0; i < count; i++) {
         const y = visibleTimeline[i];
+        const k = useConst ? (deflator?.[y.year] ?? 1) : 1;
         visibleYears[i] = y.year;
-        visibleBalances[i] = y.netBalanceUsd;
+        visibleBalances[i] = y.netBalanceUsd != null ? round(y.netBalanceUsd * k, 2) : null;
         exportsData[i] = {
-          value: y.exports.total,
-          goods: y.exports.goods,
-          services: y.exports.services,
+          value: y.exports.total != null ? round(y.exports.total * k, 2) : null,
+          goods: y.exports.goods != null ? round(y.exports.goods * k, 2) : null,
+          services: y.exports.services != null ? round(y.exports.services * k, 2) : null,
         };
         importsData[i] = {
-          value: y.imports.total,
-          goods: y.imports.goods,
-          services: y.imports.services,
+          value: y.imports.total != null ? round(y.imports.total * k, 2) : null,
+          goods: y.imports.goods != null ? round(y.imports.goods * k, 2) : null,
+          services: y.imports.services != null ? round(y.imports.services * k, 2) : null,
         };
       }
 
@@ -89,7 +91,7 @@ export const tradeStructureSection: Section = ({ t, fmt }) => {
             },
             yAxis: {
               type: 'value',
-              name: `${fmt.scale(BILLIONS_SCALE)} ($)`,
+              name: `${fmt.scale(BILLIONS_SCALE)} (${useConst ? '2021 $' : '$'})`,
             },
             series: [
               createBarSeries({
@@ -98,7 +100,7 @@ export const tradeStructureSection: Section = ({ t, fmt }) => {
                 color: tradeColors.exportTotal,
                 data: exportsData,
                 label: {
-                  show: showLabels,
+                  show: true,
                   color: tradeColors.exportTotal,
                 },
                 formatLabel: ({ value }) => fmt.number(value),
@@ -109,7 +111,7 @@ export const tradeStructureSection: Section = ({ t, fmt }) => {
                 color: tradeColors.importTotal,
                 data: importsData,
                 label: {
-                  show: showLabels,
+                  show: true,
                   color: tradeColors.importTotal,
                 },
                 formatLabel: ({ value }) => fmt.number(value),
@@ -123,7 +125,7 @@ export const tradeStructureSection: Section = ({ t, fmt }) => {
                 lineStyle: { width: BALANCE_LINE_WIDTH, type: 'dashed' },
                 data: visibleBalances,
                 label: {
-                  show: showLabels,
+                  show: true,
                   formatter: (params: CallbackDataParams) => {
                     const num = Number(params.value);
                     if (Number.isNaN(num)) return '';

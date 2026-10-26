@@ -1,4 +1,4 @@
-import type { CountryProfileData, CountryToolbarMeta } from '@graphs/shared/types/country';
+import type { CountryDeflatorData, CountryProfileData, CountryToolbarMeta } from '@graphs/shared/types/country';
 import { CONTROL_DELAYS } from '@/projects/constants';
 import { defineProject, loadDataset, type ProjectSection } from '@/utils/project';
 import type { State } from '@/utils/store';
@@ -15,6 +15,7 @@ const sectionData = {
     const code = (stores?.countryStore?.country as string) || DEFAULT_COUNTRY_CODE;
     return loadDataset<CountryProfileData>('country', `${code.toLowerCase()}.json`);
   },
+  deflator: () => loadDataset<CountryDeflatorData>('country', 'deflator.json'),
 };
 
 export type Section = ProjectSection<typeof sectionData, typeof dict>;
@@ -55,6 +56,12 @@ export const project = defineProject<typeof dict, typeof data, typeof sectionDat
           type: 'checkbox',
           defaultValue: true,
           label: t.common.labels,
+        },
+        {
+          id: 'inConstant2021',
+          type: 'checkbox',
+          defaultValue: false,
+          label: t.proj.inConstant2021,
         },
       ],
     },

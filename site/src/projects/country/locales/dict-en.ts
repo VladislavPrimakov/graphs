@@ -3,6 +3,7 @@ export const dict = {
   countries: 'Countries',
   searchCountry: 'Search country...',
   noCountriesFound: 'No countries found',
+  inConstant2021: 'In const 2021 $',
   macro: {
     title: 'State Budget Execution & Gross Sovereign Debt',
     revenue: 'Government Revenues',

@@ -19,6 +19,7 @@ export const SUPPORTED_UNITS = [
   'duration-month',
   'event-launch',
   'person',
+  'vehicle-car-per-1000-person',
 ] as const;
 
 /** Canonical measurement unit identifier from Unicode CLDR or domain extensions. */

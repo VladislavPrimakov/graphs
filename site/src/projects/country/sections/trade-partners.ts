@@ -110,13 +110,14 @@ export const tradePartnersSection: Section = ({ t, fmt }) => {
         },
       ] as const;
     },
-    buildView: ({ countryData }, { countryStore, partnersStore }) => {
+    buildView: ({ countryData, deflator }, { countryStore, partnersStore }) => {
       const years = countryData.years;
       const [selStartYear, selEndYear] = countryStore.years;
       const showLabels = countryStore.labels;
       const isPercent = partnersStore.mode === 'percent';
       const isDetailed = partnersStore.level === 'detailed';
       const top = partnersStore.top;
+      const useConst = Boolean(countryStore.inConstant2021);
 
       const selectedCountries = (partnersStore.countries as string[]) || [];
       const hasSelectedCountries = selectedCountries.length > 0;
@@ -142,6 +143,7 @@ export const tradePartnersSection: Section = ({ t, fmt }) => {
 
       for (let i = 0; i < countTimeline; i++) {
         const y = visibleTimeline[i];
+        const kFactor = useConst ? (deflator?.[y.year] ?? 1) : 1;
         visibleYears[i] = y.year;
 
         let baseExp = 0;
@@ -161,8 +163,8 @@ export const tradePartnersSection: Section = ({ t, fmt }) => {
           }
         }
 
-        visibleTotalExports[i] = baseExp > 0 ? round(baseExp, 2) : null;
-        visibleTotalImports[i] = baseImp > 0 ? round(baseImp, 2) : null;
+        visibleTotalExports[i] = baseExp > 0 ? round(baseExp * kFactor, 2) : null;
+        visibleTotalImports[i] = baseImp > 0 ? round(baseImp * kFactor, 2) : null;
         visibleTradeBalance[i] = (visibleTotalExports[i] ?? 0) - (visibleTotalImports[i] ?? 0);
       }
 
@@ -178,6 +180,7 @@ export const tradePartnersSection: Section = ({ t, fmt }) => {
 
         for (let i = 0; i < countTimeline; i++) {
           const yRec = visibleTimeline[i];
+          const kFactor = useConst ? (deflator?.[yRec.year] ?? 1) : 1;
           const flow = isExp ? yRec.exports : yRec.imports;
           const rawYearMap = flow.partners || {};
           const yearBaseTotal = (isExp ? visibleTotalExports[i] : visibleTotalImports[i]) || 0;
@@ -202,8 +205,10 @@ export const tradePartnersSection: Section = ({ t, fmt }) => {
               }
 
               if (val > 0) {
-                const share = percentage(val, yearBaseTotal, 1);
-                yearTop.push([pCodeUpper, val, share]);
+                const deflatedVal = val * kFactor;
+                const roundedVal = round(deflatedVal, 2);
+                const share = percentage(deflatedVal, yearBaseTotal, 1);
+                yearTop.push([pCodeUpper, roundedVal, share]);
               }
             }
           } else {
@@ -234,8 +239,10 @@ export const tradePartnersSection: Section = ({ t, fmt }) => {
             const topCount = Math.min(top, positiveEntries.length);
             for (let k = 0; k < topCount; k++) {
               const [pCodeUpper, val] = positiveEntries[k];
-              const share = percentage(val, yearBaseTotal, 1);
-              yearTop.push([pCodeUpper, val, share]);
+              const deflatedVal = val * kFactor;
+              const roundedVal = round(deflatedVal, 2);
+              const share = percentage(deflatedVal, yearBaseTotal, 1);
+              yearTop.push([pCodeUpper, roundedVal, share]);
             }
           }
 
@@ -338,7 +345,7 @@ export const tradePartnersSection: Section = ({ t, fmt }) => {
             },
             yAxis: {
               type: 'value',
-              name: isPercent ? '%' : `${fmt.scale(BILLIONS_SCALE)} ($)`,
+              name: isPercent ? '%' : `${fmt.scale(BILLIONS_SCALE)} (${useConst ? '2021 $' : '$'})`,
               max: isPercent ? effectivePercentBound : undefined,
               min: isPercent ? -effectivePercentBound : undefined,
               axisLabel: {

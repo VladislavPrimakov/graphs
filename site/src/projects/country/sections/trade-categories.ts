@@ -126,13 +126,14 @@ export const tradeCategoriesSection: Section = ({ t, fmt }) => {
         },
       ] as const;
     },
-    buildView: ({ countryData }, { countryStore, tradeCategoriesStore }) => {
+    buildView: ({ countryData, deflator }, { countryStore, tradeCategoriesStore }) => {
       const countryName = fmt.region(countryData.code);
       const isPercent = tradeCategoriesStore.mode === 'percent';
       const isDetailed = tradeCategoriesStore.level === 'detailed';
       const top = tradeCategoriesStore.top;
       const selectedCountries = (tradeCategoriesStore.countries as string[]) || [];
       const hasSelectedCountries = selectedCountries.length > 0;
+      const useConst = Boolean(countryStore.inConstant2021);
 
       const validCodesSet = new Set(isDetailed ? countryData.activeDetailed.map(([c]) => c) : countryData.activeMacro.map(([id]) => id as string));
       const rawSelectedCategories = (tradeCategoriesStore.categories as string[]) || [];
@@ -162,11 +163,12 @@ export const tradeCategoriesSection: Section = ({ t, fmt }) => {
 
       for (let i = 0; i < countTimeline; i++) {
         const y = visibleTimeline[i];
+        const kFactor = useConst ? (deflator?.[y.year] ?? 1) : 1;
         visibleYears[i] = y.year;
 
         if (!hasSelectedCountries) {
-          visibleTotalExports[i] = y.exports.total;
-          visibleTotalImports[i] = y.imports.total;
+          visibleTotalExports[i] = y.exports.total != null ? round(y.exports.total * kFactor, 2) : null;
+          visibleTotalImports[i] = y.imports.total != null ? round(y.imports.total * kFactor, 2) : null;
         } else {
           let expTot = 0;
           let impTot = 0;
@@ -177,8 +179,8 @@ export const tradeCategoriesSection: Section = ({ t, fmt }) => {
             const pImp = y.imports.partners[pCode];
             if (pImp) impTot += pImp.total;
           }
-          visibleTotalExports[i] = expTot > 0 ? round(expTot, 2) : null;
-          visibleTotalImports[i] = impTot > 0 ? round(impTot, 2) : null;
+          visibleTotalExports[i] = expTot > 0 ? round(expTot * kFactor, 2) : null;
+          visibleTotalImports[i] = impTot > 0 ? round(impTot * kFactor, 2) : null;
         }
 
         visibleTradeBalance[i] = (visibleTotalExports[i] ?? 0) - (visibleTotalImports[i] ?? 0);
@@ -201,6 +203,7 @@ export const tradeCategoriesSection: Section = ({ t, fmt }) => {
 
         for (let i = 0; i < countTimeline; i++) {
           const yRec = visibleTimeline[i];
+          const kFactor = useConst ? (deflator?.[yRec.year] ?? 1) : 1;
           const flow = isExp ? yRec.exports : yRec.imports;
           const rawYearMap: Record<string, number> = {};
 
@@ -229,8 +232,9 @@ export const tradeCategoriesSection: Section = ({ t, fmt }) => {
               const catId = selectedCategories[k];
               const val = rawYearMap[catId];
               if (val != null && val > 0) {
-                const roundedVal = round(val, 2);
-                const share = percentage(val, yearTotal, 1);
+                const deflatedVal = val * kFactor;
+                const roundedVal = round(deflatedVal, 2);
+                const share = percentage(deflatedVal, yearTotal, 1);
                 yearTop.push([catId, roundedVal, share]);
               }
             }
@@ -244,8 +248,9 @@ export const tradeCategoriesSection: Section = ({ t, fmt }) => {
             const topCount = Math.min(top, positiveEntries.length);
             for (let k = 0; k < topCount; k++) {
               const [code, val] = positiveEntries[k];
-              const roundedVal = round(val, 2);
-              const share = percentage(val, yearTotal, 1);
+              const deflatedVal = val * kFactor;
+              const roundedVal = round(deflatedVal, 2);
+              const share = percentage(deflatedVal, yearTotal, 1);
               yearTop.push([code, roundedVal, share]);
             }
           }
@@ -332,7 +337,7 @@ export const tradeCategoriesSection: Section = ({ t, fmt }) => {
             },
             yAxis: {
               type: 'value',
-              name: isPercent ? '%' : `${fmt.scale(BILLIONS_SCALE)} ($)`,
+              name: isPercent ? '%' : `${fmt.scale(BILLIONS_SCALE)} (${useConst ? '2021 $' : '$'})`,
               max: isPercent ? effectivePercentBound : undefined,
               min: isPercent ? -effectivePercentBound : undefined,
               axisLabel: {

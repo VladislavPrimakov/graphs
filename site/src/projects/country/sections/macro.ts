@@ -1,3 +1,4 @@
+import { round } from '@graphs/shared/math';
 import { createChart } from '@/components/sections/SectionChart';
 import { chartOption, createBarSeries } from '@/utils/chart-builder';
 import { BILLIONS_SCALE } from '../constants';
@@ -23,6 +24,39 @@ export const macroSection: Section = ({ t, fmt, tokens }) => {
       const years = countryData.years;
       const [selStartYear, selEndYear] = countryStore.years;
       const showLabels = countryStore.labels;
+      const useConst = Boolean(countryStore.inConstant2021);
+
+      let macroK: Record<number, number> | undefined;
+      if (useConst) {
+        const baseYear = 2021;
+        const timeline = countryData.timeline;
+        const baseIndex = timeline.findIndex((item) => item.year === baseYear);
+        const baseGdp = baseIndex !== -1 ? timeline[baseIndex].macro.gdpNominalUsd : null;
+
+        if (baseGdp != null && baseGdp > 0) {
+          const R: Record<number, number> = { [baseYear]: 1.0 };
+          for (let i = baseIndex + 1; i < timeline.length; i++) {
+            const yr = timeline[i].year;
+            const prevYr = timeline[i - 1].year;
+            const growth = timeline[i].macro.gdpRealGrowthYoy;
+            R[yr] = growth != null ? (R[prevYr] ?? 1.0) * (1 + growth / 100) : (R[prevYr] ?? 1.0);
+          }
+          for (let i = baseIndex - 1; i >= 0; i--) {
+            const yr = timeline[i].year;
+            const nextYr = timeline[i + 1].year;
+            const nextGrowth = timeline[i + 1].macro.gdpRealGrowthYoy;
+            R[yr] = nextGrowth != null ? (R[nextYr] ?? 1.0) / (1 + nextGrowth / 100) : (R[nextYr] ?? 1.0);
+          }
+
+          macroK = {};
+          for (let i = 0; i < timeline.length; i++) {
+            const item = timeline[i];
+            const nom = item.macro.gdpNominalUsd;
+            const realGdp = baseGdp * (R[item.year] ?? 1.0);
+            macroK[item.year] = nom != null && nom > 0 ? realGdp / nom : 1.0;
+          }
+        }
+      }
 
       const foundStartIdx = years.findIndex((y: number) => y >= selStartYear);
       const startIdx = foundStartIdx === -1 ? years.length : foundStartIdx;
@@ -45,15 +79,16 @@ export const macroSection: Section = ({ t, fmt, tokens }) => {
         const y = visibleTimeline[i];
         const m = y.macro;
         const yr = y.year;
-        const bal = m.govBalanceUsd;
+        const k = useConst && macroK ? (macroK[yr] ?? 1.0) : 1.0;
+        const bal = m.govBalanceUsd != null ? round(m.govBalanceUsd * k, 2) : null;
 
         visibleYears[i] = yr;
         visibleBalances[i] = bal;
         visibleBalancesPct[i] = m.govBalancePctGdp;
-        expendituresData[i] = { value: m.govExpenditureUsd, gdpPct: m.govExpenditurePctGdp };
-        revenuesData[i] = { value: m.govRevenueUsd, gdpPct: m.govRevenuePctGdp };
-        debtData[i] = { value: m.govDebtUsd, gdpPct: m.govDebtPctGdp };
-        gdpData[i] = m.gdpNominalUsd;
+        expendituresData[i] = { value: m.govExpenditureUsd != null ? round(m.govExpenditureUsd * k, 2) : null, gdpPct: m.govExpenditurePctGdp };
+        revenuesData[i] = { value: m.govRevenueUsd != null ? round(m.govRevenueUsd * k, 2) : null, gdpPct: m.govRevenuePctGdp };
+        debtData[i] = { value: m.govDebtUsd != null ? round(m.govDebtUsd * k, 2) : null, gdpPct: m.govDebtPctGdp };
+        gdpData[i] = m.gdpNominalUsd != null ? round(m.gdpNominalUsd * k, 2) : null;
 
         if (bal == null) {
           budgetXAxisData[i] = `{year|${yr}}`;
@@ -108,7 +143,7 @@ export const macroSection: Section = ({ t, fmt, tokens }) => {
             yAxis: {
               type: 'value',
               min: 0,
-              name: `${fmt.scale(BILLIONS_SCALE)} ($)`,
+              name: `${fmt.scale(BILLIONS_SCALE)} (${useConst ? '2021 $' : '$'})`,
             },
             series: [
               createBarSeries({
@@ -137,7 +172,7 @@ export const macroSection: Section = ({ t, fmt, tokens }) => {
               }),
               createBarSeries({
                 id: 'gdp',
-                name: t.proj.macro.nominalGdp,
+                name: useConst ? t.proj.macro.gdp : t.proj.macro.nominalGdp,
                 data: gdpData,
                 color: budgetColors.gdp,
                 label: { show: showLabels },

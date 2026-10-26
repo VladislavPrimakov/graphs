@@ -13,11 +13,10 @@ const FLAG_STYLE = 'w-4 h-3 rounded-xs shadow-xs border border-border-subtle/80 
 interface BrandGroupProps {
   className?: string;
   onNavigate?: () => void;
-  compact?: boolean;
 }
 
 /** Brand logo, site title, and changelog version badge link. */
-const BrandGroup: React.FC<BrandGroupProps> = ({ className, onNavigate, compact }) => {
+const BrandGroup: React.FC<BrandGroupProps> = ({ className, onNavigate }) => {
   const { getPath } = usePath();
   const { t } = useTranslation();
   const location = useLocation();
@@ -30,9 +29,7 @@ const BrandGroup: React.FC<BrandGroupProps> = ({ className, onNavigate, compact 
         <div className="w-8 h-8 rounded-lg bg-linear-to-tr from-blue-600 via-indigo-500 to-sky-400 flex items-center justify-center shadow-lg shadow-blue-500/20 group-hover:scale-105 transition-transform shrink-0">
           <LogoIcon className="w-5 h-5 text-white" />
         </div>
-        <span className={cn('font-bold text-lg leading-none text-content-primary tracking-tight group-hover:text-accent-primary transition-colors', compact && 'hidden lg:inline')}>
-          {t.common.graphs}
-        </span>
+        <span className="font-bold text-lg leading-none text-content-primary tracking-tight group-hover:text-accent-primary transition-colors">{t.common.graphs}</span>
       </Link>
 
       <Link to={changelogPath} onClick={onNavigate} className={cn('nav-pill', isChangelogActive ? 'nav-pill-active' : 'nav-pill-idle')} aria-label={`${t.common.changelog} (v${SITE_VERSION})`}>
@@ -44,11 +41,10 @@ const BrandGroup: React.FC<BrandGroupProps> = ({ className, onNavigate, compact 
 
 interface ActionControlsProps {
   className?: string;
-  showGitHubLabel?: boolean;
 }
 
 /** Action controls group: Theme cycling -> Language switcher -> GitHub repository link. */
-const ActionControls: React.FC<ActionControlsProps> = ({ className, showGitHubLabel }) => {
+const ActionControls: React.FC<ActionControlsProps> = ({ className }) => {
   const { theme, toggleTheme } = useTheme();
   const { lang, setLanguage } = useLanguage();
   const { t } = useTranslation();
@@ -99,7 +95,7 @@ const ActionControls: React.FC<ActionControlsProps> = ({ className, showGitHubLa
         aria-label={t.common.viewOnGitHub}
       >
         <GithubIcon className="w-4 h-4 shrink-0" />
-        <span className={cn(!showGitHubLabel && 'hidden sm:inline')}>GitHub</span>
+        <span>GitHub</span>
       </a>
     </div>
   );
@@ -129,12 +125,12 @@ export const SiteLayout: React.FC<{ children: React.ReactNode }> = ({ children }
               <MenuIcon className="w-5 h-5" />
             </button>
 
-            <BrandGroup className="hidden md:flex" compact />
+            <BrandGroup className="hidden lg:flex" />
           </div>
 
           <div id="header-section-nav" className="flex-1 flex items-center justify-center min-w-0 max-w-full overflow-hidden" />
 
-          <ActionControls className="hidden md:flex shrink-0" />
+          <ActionControls className="hidden lg:flex shrink-0" />
         </div>
       </header>
 
@@ -148,7 +144,7 @@ export const SiteLayout: React.FC<{ children: React.ReactNode }> = ({ children }
 
           {/* Drawer Action Controls: Left-aligned with natural spacing */}
           <div className="px-1">
-            <ActionControls showGitHubLabel={true} />
+            <ActionControls />
           </div>
 
           {/* Projects Catalog */}

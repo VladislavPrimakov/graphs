@@ -2,8 +2,8 @@ import DE from 'country-flag-icons/react/3x2/DE';
 import GB from 'country-flag-icons/react/3x2/GB';
 import RU from 'country-flag-icons/react/3x2/RU';
 import UA from 'country-flag-icons/react/3x2/UA';
-import { createContext, useContext, useEffect, useSyncExternalStore } from 'react';
-import { useLocation, useNavigate } from 'react-router';
+import { createContext, startTransition, useContext, useEffect, useSyncExternalStore } from 'react';
+import { useNavigate } from 'react-router';
 import type { CatalogProject, ProjectTag } from '@/utils/project';
 import { LocaleCommon as commonEn } from '../locales/common-en';
 import { getThemeColors, type ResolvedTheme, type ThemeColors, type ThemeSetting } from '../styles/tokens';
@@ -17,7 +17,7 @@ import { type CldrLocaleUnits, createFormat, type LocalizedFormatters } from './
 const THEME_CHANGE_EVENT = 'graphs-theme-change';
 
 /** Custom DOM event name dispatched when active language setting changes in the active tab. */
-const LANG_CHANGE_EVENT = 'graphs-lang-change';
+export const LANG_CHANGE_EVENT = 'graphs-lang-change';
 
 import { DEFAULT_LANGUAGE, type Language, NON_DEFAULT_LANGUAGES, SUPPORTED_LANGUAGE_CODES } from './language';
 
@@ -169,11 +169,12 @@ export function getLocalizedPath(rawPath: string, targetLang: Language): string 
 }
 
 /** Resolves the full browser pathname including query string search and hash anchor. */
-export function getFullCurrentPath(pathname: string): string {
-  if (typeof window === 'undefined') return pathname;
+export function getFullCurrentPath(pathname?: string): string {
+  if (typeof window === 'undefined') return pathname || '/';
+  const currentPath = window.location.pathname || pathname || '/';
   const search = window.location.search || '';
   const hash = window.location.hash || '';
-  return `${pathname}${search}${hash}`;
+  return `${currentPath}${search}${hash}`;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -187,7 +188,6 @@ const AppContext = createContext<AppContextValue | null>(null);
  * theme management (system/dark/light), first-visit auto-detection, and storage persistence.
  */
 export const AppProvider: React.FC<AppProviderProps> = ({ lang, common, cldr, projects, children }) => {
-  const location = useLocation();
   const navigate = useNavigate();
 
   // Theme state synchronized with localStorage and OS preference via useSyncExternalStore
@@ -229,38 +229,46 @@ export const AppProvider: React.FC<AppProviderProps> = ({ lang, common, cldr, pr
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    let stored = localStorage.getItem('lang') as Language | null;
+    const stored = localStorage.getItem('lang') as Language | null;
     if (!stored || !(stored in LANGUAGE_MAP)) {
-      stored = resolveBrowserLanguage();
-      localStorage.setItem('lang', stored);
+      // First visit: detect browser language preference
+      const browserLang = resolveBrowserLanguage();
+      // Only auto-redirect if landed on default un-prefixed locale and browser prefers a supported non-default locale
+      if (lang === DEFAULT_LANGUAGE && browserLang !== DEFAULT_LANGUAGE) {
+        localStorage.setItem('lang', browserLang);
+        navigate(getLocalizedPath(getFullCurrentPath(), browserLang), { replace: true, preventScrollReset: true });
+        return;
+      }
+      localStorage.setItem('lang', lang);
+    } else if (stored !== lang) {
+      // Keep localStorage in sync with explicitly visited URL locale
+      localStorage.setItem('lang', lang);
     }
 
-    if (stored !== lang) {
-      navigate(getLocalizedPath(getFullCurrentPath(location.pathname), stored), { replace: true });
-    }
-
-    const handleSync = () => {
-      const updated = localStorage.getItem('lang') as Language | null;
-      if (updated && updated in LANGUAGE_MAP && updated !== lang) {
-        navigate(getLocalizedPath(getFullCurrentPath(location.pathname), updated));
+    const handleSync = (e: StorageEvent) => {
+      // Cross-tab synchronization: only react if another tab updated the language key
+      if (e.key === 'lang' && e.newValue && e.newValue in LANGUAGE_MAP && e.newValue !== lang) {
+        startTransition(() => {
+          navigate(getLocalizedPath(getFullCurrentPath(), e.newValue as Language), { preventScrollReset: true });
+        });
       }
     };
 
     window.addEventListener('storage', handleSync);
-    window.addEventListener(LANG_CHANGE_EVENT, handleSync);
     return () => {
       window.removeEventListener('storage', handleSync);
-      window.removeEventListener(LANG_CHANGE_EVENT, handleSync);
     };
-  }, [lang, location.pathname, navigate]);
+  }, [lang, navigate]);
 
   const setLanguage = (targetLang: Language) => {
     if (typeof window !== 'undefined') {
       localStorage.setItem('lang', targetLang);
-      window.dispatchEvent(new Event(LANG_CHANGE_EVENT));
+      window.dispatchEvent(new CustomEvent(LANG_CHANGE_EVENT, { detail: targetLang }));
     }
     if (targetLang === lang) return;
-    navigate(getLocalizedPath(getFullCurrentPath(location.pathname), targetLang));
+    startTransition(() => {
+      navigate(getLocalizedPath(getFullCurrentPath(), targetLang), { preventScrollReset: true });
+    });
   };
 
   const getPath = (path: string) => getLocalizedPath(path, lang);

@@ -3,6 +3,7 @@ export const dict = {
   countries: 'Країни',
   searchCountry: 'Пошук країни...',
   noCountriesFound: 'Країни не знайдено',
+  inConstant2021: 'У пост. 2021 $',
   macro: {
     title: 'Виконання держбюджету та державний борг',
     revenue: 'Доходи держбюджету',

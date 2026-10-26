@@ -29,6 +29,7 @@ export function resolveRegionCode(nameOrCode?: string): string {
   if (upper.includes('SINGAPORE')) return 'SG';
   if (upper.includes('ISLE OF MAN')) return 'IM';
   if (upper.includes('GIBRALTAR')) return 'GI';
+  if (upper === 'XKX' || upper.includes('KOSOVO')) return 'XK';
 
   // 3. ISO 3166-1 Alpha-3 conversion (e.g. 'USA' -> 'US', 'CHN' -> 'CN', 'DEU' -> 'DE', 'KAZ' -> 'KZ')
   if (trimmed.length === 3) {

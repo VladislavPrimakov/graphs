@@ -1,4 +1,4 @@
-import type { WorldDataset, WorldFilterState } from '@graphs/shared/types/world';
+import type { WorldFilterState, WorldToolbarMeta } from '@graphs/shared/types/world';
 import { createElement } from 'react';
 import { CONTROL_DELAYS } from '@/projects/constants';
 import { defineProject, loadDataset, type ProjectSection } from '@/utils/project';
@@ -6,7 +6,7 @@ import type { dict } from './locales/dict-en';
 import { meta } from './meta';
 
 const data = {
-  worldData: () => loadDataset<WorldDataset>('world', 'data.json'),
+  toolbarMeta: () => loadDataset<WorldToolbarMeta>('world', 'toolbar-meta.json'),
 };
 
 export type Section = ProjectSection<typeof data, typeof dict, { worldStore: WorldFilterState }>;
@@ -16,26 +16,36 @@ export const project = defineProject<typeof dict, typeof data>({
   meta,
   data,
   sections: import.meta.glob('./sections/*.ts', { eager: true }),
-  toolbars: ({ worldData }, { t, fmt }) => [
+  toolbars: ({ toolbarMeta }, { t, fmt }) => [
     {
       id: 'worldStore',
       scope: 'all',
       controls: [
         {
+          id: 'mode',
+          type: 'toggle',
+          defaultValue: 'volume',
+          label: t.common.metric,
+          options: [
+            { value: 'volume', label: t.common.volume },
+            { value: 'growth', label: `${t.common.growth} (%)` },
+          ],
+        },
+        {
           id: 'years',
           type: 'range-slider',
-          min: worldData.minYear,
-          max: worldData.maxYear,
-          defaultValue: [worldData.minYear, worldData.maxYear],
+          min: toolbarMeta.minYear,
+          max: toolbarMeta.maxYear,
+          defaultValue: [toolbarMeta.minYear, toolbarMeta.maxYear],
           label: t.common.period,
           debounceMs: CONTROL_DELAYS.slider,
         },
         {
           id: 'top',
           type: 'slider',
-          min: worldData.minTop,
-          max: worldData.maxTop,
-          defaultValue: worldData.defaultTop,
+          min: toolbarMeta.minTop,
+          max: toolbarMeta.maxTop,
+          defaultValue: toolbarMeta.defaultTop,
           label: t.common.top,
           disabled: (state) => ((state.countries as string[])?.length ?? 0) > 0,
           debounceMs: CONTROL_DELAYS.slider,
@@ -45,9 +55,10 @@ export const project = defineProject<typeof dict, typeof data>({
           type: 'multi-search-select',
           placeholder: t.proj.countries,
           emptyLabel: t.proj.noCountriesFound,
-          items: worldData.entities.map((code) => ({
+          items: toolbarMeta.entities.map((code) => ({
             value: code,
             label: fmt.region(code),
+            count: toolbarMeta.gdp?.[code],
             icon: createElement('span', { className: 'font-mono text-3xs opacity-75' }, code),
           })),
         },

@@ -1,6 +1,17 @@
 import { describe, expect, test } from 'bun:test';
 import { COUNTRIES, COUNTRY_BY_CODE, COUNTRY_BY_ID, COUNTRY_BY_ISO3, SUPPORTED_COUNTRIES } from './countries';
-import { BATCH_SIZE_SERVICES_COUNTRIES, buildProductionProfile, CHUNK_SIZE, chunkArray, chunkYears, detectMissingStreams, isCountryComplete, type RawCountryProfile, type RawYearData } from './index';
+import {
+  BATCH_SIZE_SERVICES_COUNTRIES,
+  buildProductionProfile,
+  buildUsdDeflator2021,
+  CHUNK_SIZE,
+  chunkArray,
+  chunkYears,
+  detectMissingStreams,
+  isCountryComplete,
+  type RawCountryProfile,
+  type RawYearData,
+} from './index';
 
 const TEST_YEARS = [2020, 2021, 2022, 2023, 2024];
 
@@ -503,5 +514,36 @@ describe('Production Profile Generator & Symmetrical Imports (buildProductionPro
     expect(y0.macro.govRevenuePctGdp).toBe(42.0);
     expect(y0.macro.govDebtPctGdp).toBe(65.0);
     expect(y0.macro.growth).toBeDefined();
+  });
+});
+
+describe('USD Deflator 2021 Calculator (buildUsdDeflator2021)', () => {
+  test('correctly chains US CPI YoY inflation around base year 2021', () => {
+    const mockUsProfile: RawCountryProfile = {
+      code: 'us',
+      years: {
+        '2020': { pcpipch: 1.3 },
+        '2021': { pcpipch: 4.7 },
+        '2022': { pcpipch: 8.0 },
+        '2023': { pcpipch: 4.1 },
+      },
+    };
+
+    const deflator = buildUsdDeflator2021(mockUsProfile, 2020, 2023, 2021);
+
+    expect(deflator[2021]).toBe(1.0);
+    // 2020: 1.0 * (1 + 4.7 / 100) = 1.047
+    expect(deflator[2020]).toBe(1.047);
+    // 2022: 1.0 / (1 + 8.0 / 100) = 0.925925... -> 0.9259
+    expect(deflator[2022]).toBe(0.9259);
+    // 2023: 0.925925... / (1 + 4.1 / 100) = 0.889458... -> 0.8895
+    expect(deflator[2023]).toBe(0.8895);
+  });
+
+  test('handles missing or undefined profile gracefully with 1.0 fallback', () => {
+    const deflator = buildUsdDeflator2021(undefined, 2020, 2022, 2021);
+    expect(deflator[2020]).toBe(1.0);
+    expect(deflator[2021]).toBe(1.0);
+    expect(deflator[2022]).toBe(1.0);
   });
 });

@@ -4,14 +4,15 @@ import type {
   ElectricityPerCapitaSectionData,
   GdpPerCapitaPppSectionData,
   GdpPppSectionData,
-  MachineryTurnoverSectionData,
-  WorldDataset,
+  PassengerCarsSectionData,
+  WorldToolbarMeta,
 } from '@graphs/shared/types/world';
-import { exportDataset, getPipelineDataPath } from '@/utils/dataset';
+import { exportProjectMeta, getPipelineDataPath } from '@/utils/dataset';
 import { fileExists, readJson, writeJsonAsync } from '@/utils/fs';
 import { fetchHeadMeta, fetchWithRetry, isRemoteMetaEqual, type RemoteFileMeta } from '@/utils/http';
 import { getPipelineLogger, isUpdate, isVerbose, runWithLogger } from '@/utils/logger';
 import { range, round } from '@/utils/math';
+import { updateMetadata } from '@/utils/metadata';
 import { loadEnv } from '@/utils/paths';
 import { resolveRegionCode } from '@/utils/region';
 
@@ -21,9 +22,11 @@ const DATA_FILE = getPipelineDataPath('world');
 
 const OWID_ENERGY_URL = 'https://raw.githubusercontent.com/owid/energy-data/master/owid-energy-data.csv';
 const WDI_SOURCE_URL = 'https://api.worldbank.org/v2/sources/2?format=json';
+const ITF_TRANSPORT_URL = 'https://sdmx.oecd.org/public/rest/data/OECD.ITF,DSD_INDICATORS@DF_TRANSPORTINDICATORS/.A.VEHICLES...CARS..';
+const UNECE_TRANSPORT_URL = 'https://w3.unece.org/PXWeb2015/api/v1/en/STAT/40-TRTRANS/03-TRRoadFleet/01_en_TRRoadTypVehR_r.px';
 
-const START_YEAR = 1990;
-const CURRENT_YEAR = new Date().getFullYear();
+export const START_YEAR = 1990;
+export const CURRENT_YEAR = new Date().getFullYear() - 1;
 const DEFAULT_TOP = 7;
 const MIN_TOP = 3;
 const MAX_TOP = 15;
@@ -63,36 +66,36 @@ export const EXCLUDED_ENTITIES = new Set([
 interface MacroData {
   gdp_ppp_kd: Record<string, Record<number, number>>;
   gdp_pcap_ppp_kd: Record<string, Record<number, number>>;
-  cpi: Record<string, Record<number, number>>;
   aggregates: string[];
 }
 
 interface PhysicalData {
-  chapter84_nominal: Record<string, Record<number | string, number>>;
   electricity_twh: Record<string, Record<number | string, number>>;
   solar_wind_twh: Record<string, Record<number | string, number>>;
   elec_per_capita_kwh: Record<string, Record<number | string, number>>;
 }
 
-interface WorldPipelineCache {
+export interface WorldPipelineCache {
   meta?: {
     wdiLastUpdated?: string | null;
     owid?: RemoteFileMeta | null;
+    itf?: RemoteFileMeta | null;
+    uneceLastUpdated?: string | null;
   };
   macro: MacroData;
   physical: PhysicalData;
-  reporters: Record<number, string>;
+  motorization?: Record<string, Record<number, number>>;
   sections: {
     'gdp-ppp': GdpPppSectionData;
     'gdp-per-capita-ppp': GdpPerCapitaPppSectionData;
-    'machinery-turnover': MachineryTurnoverSectionData;
     'electricity-generation': ElectricityGenerationSectionData;
     'electricity-per-capita': ElectricityPerCapitaSectionData;
     'clean-power': CleanPowerSectionData;
+    'passenger-cars': PassengerCarsSectionData;
   };
 }
 
-/** Exports unified dataset for world along with project-level metadata. */
+/** Exports flat datasets for world sections along with project-level toolbar metadata. */
 async function exportWorld(sections: WorldPipelineCache['sections']): Promise<void> {
   const allEntities = new Set<string>();
   let minYear = Number.POSITIVE_INFINITY;
@@ -110,19 +113,43 @@ async function exportWorld(sections: WorldPipelineCache['sections']): Promise<vo
     }
   }
 
-  const sortedEntities = Array.from(allEntities).sort();
-  const dataset: WorldDataset = {
-    ...sections,
+  const gdpSection = sections['gdp-ppp'];
+  const gdpMap: Record<string, number> = {};
+  if (gdpSection?.series) {
+    const numYears = gdpSection.years.length;
+    for (const [entity, series] of Object.entries(gdpSection.series)) {
+      for (let i = numYears - 1; i >= 0; i--) {
+        const val = series[i];
+        if (val != null && !Number.isNaN(val) && val > 0) {
+          gdpMap[entity] = round(val * 1000, 1);
+          break;
+        }
+      }
+    }
+  }
+
+  const sortedEntities = Array.from(allEntities).sort((a, b) => {
+    const diff = (gdpMap[b] ?? 0) - (gdpMap[a] ?? 0);
+    if (diff !== 0) return diff;
+    return a.localeCompare(b);
+  });
+
+  const toolbarMeta: WorldToolbarMeta = {
     minYear: Number.isFinite(minYear) ? minYear : 1990,
     maxYear: Number.isFinite(maxYear) ? maxYear : CURRENT_YEAR,
     totalEntities: sortedEntities.length,
     entities: sortedEntities,
+    gdp: gdpMap,
     defaultTop: DEFAULT_TOP,
     minTop: MIN_TOP,
     maxTop: MAX_TOP,
   };
 
-  await exportDataset('world', dataset);
+  await exportProjectMeta('world', toolbarMeta, 'toolbar-meta.json');
+  for (const [id, secData] of Object.entries(sections)) {
+    await exportProjectMeta('world', secData, `${id}.json`);
+  }
+  await updateMetadata('world');
 }
 
 /** Fetches latest WDI database release date from World Bank sources API. */
@@ -132,6 +159,18 @@ async function fetchWdiLastUpdated(): Promise<string | null> {
     if (!res.ok) return null;
     const json = (await res.json()) as [unknown, Array<{ id?: string; lastupdated?: string }>];
     return json?.[1]?.[0]?.lastupdated || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Fetches latest update timestamp for UNECE passenger road vehicle fleet table. */
+async function fetchUneceLastUpdated(): Promise<string | null> {
+  try {
+    const res = await fetchWithRetry(UNECE_TRANSPORT_URL, { retries: 2, timeoutMs: 15000 });
+    if (!res.ok) return null;
+    const json = (await res.json()) as { updated?: string };
+    return json.updated || null;
   } catch {
     return null;
   }
@@ -152,8 +191,7 @@ async function loadWorldCache(): Promise<WorldPipelineCache | null> {
 /** Fetches global macroeconomic series from World Bank API & IMF WEO. */
 async function fetchMacroDataWorldBank(existingMacro?: MacroData, forceUpdate = false): Promise<MacroData> {
   const logger = getPipelineLogger('world');
-  const hasMacroRange = Boolean(existingMacro?.gdp_ppp_kd?.USA?.[START_YEAR] && (existingMacro?.gdp_ppp_kd?.USA?.[CURRENT_YEAR] || existingMacro?.gdp_ppp_kd?.USA?.[CURRENT_YEAR - 1]));
-  if (!forceUpdate && hasMacroRange && existingMacro?.gdp_ppp_kd && Object.keys(existingMacro.gdp_ppp_kd).length > 0) {
+  if (!forceUpdate && existingMacro) {
     logger.debug('Using cached World Bank & IMF macroeconomic data');
     return existingMacro;
   }
@@ -162,7 +200,6 @@ async function fetchMacroDataWorldBank(existingMacro?: MacroData, forceUpdate = 
   const data: MacroData = {
     gdp_ppp_kd: {},
     gdp_pcap_ppp_kd: {},
-    cpi: {},
     aggregates: [],
   };
 
@@ -181,10 +218,9 @@ async function fetchMacroDataWorldBank(existingMacro?: MacroData, forceUpdate = 
     }
 
     // 2. Fetch World Bank indicators across all countries
-    const indicators: Array<{ code: string; key: 'gdp_ppp_kd' | 'gdp_pcap_ppp_kd' | 'cpi' }> = [
+    const indicators: Array<{ code: string; key: 'gdp_ppp_kd' | 'gdp_pcap_ppp_kd' }> = [
       { code: 'NY.GDP.MKTP.PP.KD', key: 'gdp_ppp_kd' },
       { code: 'NY.GDP.PCAP.PP.KD', key: 'gdp_pcap_ppp_kd' },
-      { code: 'FP.CPI.TOTL', key: 'cpi' },
     ];
 
     for (const ind of indicators) {
@@ -243,7 +279,6 @@ async function fetchMacroDataWorldBank(existingMacro?: MacroData, forceUpdate = 
 
         data.gdp_ppp_kd.TWN = {};
         data.gdp_pcap_ppp_kd.TWN = {};
-        data.cpi.TWN = {};
 
         for (let y = START_YEAR; y <= CURRENT_YEAR; y++) {
           const perCapita = twnMap.NGDPRPPPPC?.[y];
@@ -253,10 +288,6 @@ async function fetchMacroDataWorldBank(existingMacro?: MacroData, forceUpdate = 
             if (lp != null) {
               data.gdp_ppp_kd.TWN[y] = perCapita * lp * 1e6;
             }
-          }
-          const cpiVal = twnMap.PCPI?.[y];
-          if (cpiVal != null) {
-            data.cpi.TWN[y] = cpiVal;
           }
         }
       }
@@ -320,8 +351,17 @@ function parseOwidCsvGlobal(csvText: string): {
       electricity_twh[entityCode][year] = round(eleVal, 1);
     }
 
-    const solVal = parseFloat(cols[solIdx]?.trim()) || 0;
-    const winVal = parseFloat(cols[winIdx]?.trim()) || 0;
+    const solRaw = cols[solIdx]?.trim();
+    const winRaw = cols[winIdx]?.trim();
+    const solVal = solRaw ? parseFloat(solRaw) || 0 : 0;
+    let winVal = winRaw ? parseFloat(winRaw) || 0 : 0;
+
+    // OWID omitted EU27 wind data for 2000-2003; interpolate smoothly between 1999 (13.34 TWh) and 2004 (57.54 TWh)
+    if (entityCode === 'EUU' && !winRaw) {
+      const euWindMap: Record<number, number> = { 2000: 22.2, 2001: 31.0, 2002: 39.9, 2003: 48.7 };
+      if (euWindMap[year]) winVal = euWindMap[year];
+    }
+
     if (solVal > 0 || winVal > 0) {
       if (!solar_wind_twh[entityCode]) solar_wind_twh[entityCode] = {};
       solar_wind_twh[entityCode][year] = round(solVal + winVal, 1);
@@ -337,65 +377,16 @@ function parseOwidCsvGlobal(csvText: string): {
   return { electricity_twh, solar_wind_twh, elec_per_capita_kwh };
 }
 
-/** Fetches UN Comtrade reporter area mappings from static reference API. */
-async function fetchComtradeReporters(existingReporters?: Record<number, string>): Promise<Record<number, string>> {
-  if (existingReporters && Object.keys(existingReporters).length > 20) {
-    return existingReporters;
-  }
-
-  const logger = getPipelineLogger('world');
-  const map: Record<number, string> = {
-    97: 'EUU', // European Union
-    156: 'CHN',
-    842: 'USA',
-    392: 'JPN',
-    410: 'KOR',
-    490: 'TWN',
-    699: 'IND',
-    643: 'RUS',
-    276: 'DEU',
-  };
-
-  try {
-    const res = await fetchWithRetry('https://comtradeapi.un.org/files/v1/app/reference/Reporters.json', { retries: 2, timeoutMs: 20000 });
-    if (res.ok) {
-      const json = (await res.json()) as { results?: Array<{ id?: number; reporterCodeIsoAlpha3?: string }> };
-      for (const item of json.results || []) {
-        if (item.id === 97) {
-          map[97] = 'EUU';
-        } else if (item.id && item.reporterCodeIsoAlpha3 && item.reporterCodeIsoAlpha3.length === 3) {
-          map[item.id] = item.reporterCodeIsoAlpha3;
-        }
-      }
-    }
-  } catch (err) {
-    logger.warn(`Failed to fetch Comtrade reporters reference (${err}). Using built-in mappings.`);
-  }
-
-  return map;
-}
-
-/** Fetches physical industrial scale, electricity, and machinery trade turnover. */
-async function fetchPhysicalAndMachineryData(existingPhysical?: PhysicalData, comtradeReporters?: Record<number, string>, owidChanged = true, forceUpdate = false): Promise<PhysicalData> {
+/** Fetches physical industrial scale and electricity generation from OWID Energy. */
+async function fetchPhysicalEnergyData(existingPhysical?: PhysicalData, owidChanged = true, forceUpdate = false): Promise<PhysicalData> {
   const logger = getPipelineLogger('world');
   const data: PhysicalData = {
-    chapter84_nominal: existingPhysical?.chapter84_nominal || {},
     electricity_twh: existingPhysical?.electricity_twh || {},
     solar_wind_twh: existingPhysical?.solar_wind_twh || {},
     elec_per_capita_kwh: existingPhysical?.elec_per_capita_kwh || {},
   };
 
-  if (data.chapter84_nominal.EUR && !data.chapter84_nominal.EUU) {
-    data.chapter84_nominal.EUU = data.chapter84_nominal.EUR;
-    delete data.chapter84_nominal.EUR;
-  }
-  delete data.electricity_twh.EUR;
-  delete data.solar_wind_twh.EUR;
-  delete data.elec_per_capita_kwh.EUR;
-
-  // 1. OWID Energy Data
-  const hasEnergyRange = Boolean(existingPhysical?.electricity_twh?.USA?.[START_YEAR]);
-  if (owidChanged || forceUpdate || !hasEnergyRange || !existingPhysical?.electricity_twh || Object.keys(existingPhysical.electricity_twh).length < 20) {
+  if (owidChanged || forceUpdate || !existingPhysical?.electricity_twh) {
     logger.debug('Fetching OWID Energy (Electricity, Solar/Wind, Per-Capita)...');
     try {
       const res = await fetchWithRetry(OWID_ENERGY_URL, { retries: 2, timeoutMs: 30000 });
@@ -411,45 +402,263 @@ async function fetchPhysicalAndMachineryData(existingPhysical?: PhysicalData, co
     }
   }
 
-  // 2. UN Comtrade Chapter 84 Machinery Trade
-  const reporters = comtradeReporters || (await fetchComtradeReporters());
-  const comtradeKey = process.env.COMTRADE_API_KEY || '';
-  const comtradeHeaders: Record<string, string> = comtradeKey ? { 'Ocp-Apim-Subscription-Key': comtradeKey } : {};
-  const comtradeDelay = comtradeKey ? 1200 : 3500;
+  return data;
+}
 
-  for (let y = START_YEAR; y <= CURRENT_YEAR; y++) {
-    // Check if this year already has diverse reporters in cache (> 10 countries)
-    const hasYearData = Object.values(data.chapter84_nominal).filter((cDict) => (cDict[y] ?? cDict[String(y)]) != null).length >= 10;
-    if (!forceUpdate && y < CURRENT_YEAR && hasYearData) {
-      continue;
-    }
+const UNECE_NUMERIC_TO_ALPHA3: Record<string, string> = {
+  '840': 'USA',
+  '124': 'CAN',
+  '643': 'RUS',
+  '804': 'UKR',
+  '826': 'GBR',
+  '276': 'DEU',
+  '250': 'FRA',
+  '380': 'ITA',
+  '724': 'ESP',
+  '616': 'POL',
+  '528': 'NLD',
+  '056': 'BEL',
+  '756': 'CHE',
+  '040': 'AUT',
+  '752': 'SWE',
+  '578': 'NOR',
+  '208': 'DNK',
+  '246': 'FIN',
+  '300': 'GRC',
+  '620': 'PRT',
+  '372': 'IRL',
+  '203': 'CZE',
+  '348': 'HUN',
+  '642': 'ROU',
+  '100': 'BGR',
+  '703': 'SVK',
+  '191': 'HRV',
+  '705': 'SVN',
+  '440': 'LTU',
+  '428': 'LVA',
+  '233': 'EST',
+  '196': 'CYP',
+  '470': 'MLT',
+  '442': 'LUX',
+  '352': 'ISL',
+  '792': 'TUR',
+  '376': 'ISR',
+  '112': 'BLR',
+  '398': 'KAZ',
+  '860': 'UZB',
+  '031': 'AZE',
+  '268': 'GEO',
+  '051': 'ARM',
+  '417': 'KGZ',
+  '762': 'TJK',
+  '795': 'TKM',
+  '498': 'MDA',
+  '688': 'SRB',
+  '070': 'BIH',
+  '499': 'MNE',
+  '807': 'MKD',
+  '008': 'ALB',
+};
 
-    try {
-      logger.debug(`Fetching UN Comtrade Chapter 84 (${y})...`);
-      const comtradeUrl = `https://comtradeapi.un.org/public/v1/preview/C/A/HS?period=${y}&cmdCode=84&flowCode=M,X&partnerCode=0&partner2Code=0&customsCode=C00&motCode=0`;
-      const res = await fetchWithRetry(comtradeUrl, { retries: 3, backoffMs: 4000, timeoutMs: 45000, headers: comtradeHeaders });
-      if (res.ok) {
-        const json = (await res.json()) as { data?: Array<{ reporterCode: number; primaryValue: number }> };
-        const sums: Record<string, number> = {};
-        for (const row of json.data || []) {
-          const iso3 = reporters[row.reporterCode];
-          if (iso3 && row.primaryValue > 0 && !EXCLUDED_ENTITIES.has(iso3)) {
-            sums[iso3] = (sums[iso3] || 0) + row.primaryValue;
-          }
-        }
-        for (const [c, val] of Object.entries(sums)) {
-          if (!data.chapter84_nominal[c]) data.chapter84_nominal[c] = {};
-          data.chapter84_nominal[c][y] = round(val / 1e9, 2);
-        }
-        logger.debug(`UN Comtrade Chapter 84 (${y}): fetched ${Object.keys(sums).length} reporters`);
-      }
-    } catch (e) {
-      logger.warn(`UN Comtrade Chapter 84 (${y}) warning: ${e}`);
+/**
+ * Official US Bureau of Transportation Statistics (BTS Table 1-11) Light Duty Vehicles
+ * (Passenger cars + SUVs + personal light trucks) per 1,000 inhabitants.
+ * Replaces the 2006-2018 UNECE reporting artifact where FHWA temporarily excluded personal light trucks/SUVs.
+ */
+const US_BTS_HARMONIZED: Record<number, number> = {
+  2006: 786,
+  2007: 788,
+  2008: 784,
+  2009: 766,
+  2010: 745,
+  2011: 737,
+  2012: 744,
+  2013: 752,
+  2014: 762,
+  2015: 778,
+  2016: 791,
+  2017: 802,
+  2018: 812,
+};
+
+/**
+ * Official Statistics Canada (CANSIM / Table 23-10-0067) Light-Duty Vehicles (under 4.5 tonnes)
+ * per 1,000 inhabitants. Harmonizes pre-2009 reporting (when only sedans were reported)
+ * and post-2018 OECD ITF fallback to maintain a consistent North American passenger vehicle standard.
+ */
+const CAN_HARMONIZED: Record<number, number> = {
+  1993: 495,
+  1994: 502,
+  1995: 510,
+  1996: 515,
+  1997: 522,
+  1998: 530,
+  1999: 538,
+  2000: 545,
+  2001: 552,
+  2002: 558,
+  2003: 565,
+  2004: 570,
+  2005: 576,
+  2006: 580,
+  2007: 584,
+  2008: 588,
+  2009: 592,
+  2010: 597,
+  2011: 596.5,
+  2012: 596,
+  2013: 607,
+  2014: 614,
+  2015: 619,
+  2016: 622,
+  2017: 621,
+  2018: 625,
+  2019: 625,
+  2020: 625,
+  2021: 630,
+  2022: 621,
+  2023: 589,
+  2024: 595,
+};
+
+/** Harmonizes statistical artifacts for US BTS Light Duty Vehicles and Statistics Canada Light-Duty Vehicles. */
+function applyMotorizationHarmonization(combined: Record<string, Record<number, number>>): Record<string, Record<number, number>> {
+  if (combined.USA) {
+    for (const [yStr, val] of Object.entries(US_BTS_HARMONIZED)) {
+      combined.USA[parseInt(yStr, 10)] = val;
     }
-    await new Promise((resolve) => setTimeout(resolve, comtradeDelay));
+  }
+  if (combined.CAN) {
+    for (const [yStr, val] of Object.entries(CAN_HARMONIZED)) {
+      combined.CAN[parseInt(yStr, 10)] = val;
+    }
+  }
+  return combined;
+}
+
+/** Fetches global motorization rates (passenger cars per 1,000 inhabitants) from OECD ITF & UNECE. */
+async function fetchMotorizationData(existingMotorization?: Record<string, Record<number, number>>, forceUpdate = false): Promise<Record<string, Record<number, number>>> {
+  const logger = getPipelineLogger('world');
+  if (!forceUpdate && existingMotorization) {
+    logger.debug('Using cached OECD ITF & UNECE motorization data');
+    return applyMotorizationHarmonization(existingMotorization);
   }
 
-  return data;
+  logger.debug('Fetching motorization indicators from OECD ITF & UNECE...');
+  const combined: Record<string, Record<number, number>> = {};
+
+  // 1. Fetch OECD International Transport Forum (ITF) SDMX
+  try {
+    const itfRes = await fetchWithRetry(ITF_TRANSPORT_URL, {
+      retries: 2,
+      timeoutMs: 30000,
+      headers: { Accept: 'application/vnd.sdmx.data+json' },
+    });
+    if (itfRes.ok) {
+      const itfJson = (await itfRes.json()) as {
+        data: {
+          structures?: Array<{
+            dimensions: {
+              series: Array<{ id: string; values: Array<{ id: string }> }>;
+              observation: Array<{ id: string; values: Array<{ id: string }> }>;
+            };
+          }>;
+          structure?: {
+            dimensions: {
+              series: Array<{ id: string; values: Array<{ id: string }> }>;
+              observation: Array<{ id: string; values: Array<{ id: string }> }>;
+            };
+          };
+          dataSets: Array<{ series?: Record<string, { observations?: Record<string, [number]> }> }>;
+        };
+      };
+
+      const struct = itfJson.data.structures ? itfJson.data.structures[0] : itfJson.data.structure;
+      if (struct) {
+        const itfAreas = struct.dimensions.series.find((d) => d.id === 'REF_AREA')?.values || [];
+        const itfUnits = struct.dimensions.series.find((d) => d.id === 'UNIT_MEASURE')?.values || [];
+        const itfTimeObs = struct.dimensions.observation.find((d) => d.id === 'TIME_PERIOD')?.values || [];
+        const itfSeries = itfJson.data.dataSets?.[0]?.series || {};
+        const unitHabIdx = itfUnits.findIndex((u) => u.id === '10P3HB');
+
+        for (const [k, v] of Object.entries(itfSeries)) {
+          const parts = k.split(':');
+          const areaIdx = parseInt(parts[0], 10);
+          const unitIdx = parseInt(parts[3], 10);
+          if (unitIdx !== unitHabIdx) continue;
+          const code = itfAreas[areaIdx]?.id;
+          if (!code || EXCLUDED_ENTITIES.has(code)) continue;
+
+          combined[code] = combined[code] || {};
+          const obs = v.observations || {};
+          for (const [tIdx, valArr] of Object.entries(obs)) {
+            const yearStr = itfTimeObs[parseInt(tIdx, 10)]?.id;
+            const year = parseInt(yearStr || '', 10);
+            const val = valArr?.[0];
+            if (year >= START_YEAR && year <= CURRENT_YEAR && val != null && !Number.isNaN(val) && val > 0) {
+              combined[code][year] = round(val, 1);
+            }
+          }
+        }
+        logger.debug(`OECD ITF motorization parsed (${Object.keys(combined).length} countries)`);
+      }
+    }
+  } catch (err) {
+    logger.warn('Failed to fetch OECD ITF motorization data:', err);
+  }
+
+  // 2. Fetch UNECE Sustainable Transport Division PXWeb JSON-stat
+  try {
+    const uneceBody = {
+      query: [
+        { code: 'Measurement', selection: { filter: 'item', values: ['TR.123'] } },
+        { code: 'Vehicle category', selection: { filter: 'item', values: ['TR.396'] } },
+      ],
+      response: { format: 'json-stat2' },
+    };
+    const uneceRes = await fetchWithRetry(UNECE_TRANSPORT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(uneceBody),
+      retries: 2,
+      timeoutMs: 30000,
+    });
+    if (uneceRes.ok) {
+      const uneceJson = (await uneceRes.json()) as {
+        dimension: {
+          Country: { category: { index: Record<string, number> } };
+          Year: { category: { label: Record<string, string> } };
+        };
+        value: Array<number | null>;
+      };
+
+      const uneceCountries = uneceJson.dimension.Country.category.index;
+      const uneceYears = uneceJson.dimension.Year.category.label;
+      const numYears = Object.keys(uneceYears).length;
+      const uneceValues = uneceJson.value;
+
+      for (const [cNum, cIdx] of Object.entries(uneceCountries)) {
+        const alpha3 = UNECE_NUMERIC_TO_ALPHA3[cNum];
+        if (!alpha3 || EXCLUDED_ENTITIES.has(alpha3)) continue;
+        combined[alpha3] = combined[alpha3] || {};
+        const baseOffset = cIdx * numYears;
+        for (let yI = 0; yI < numYears; yI++) {
+          const year = parseInt(uneceYears[String(yI)], 10);
+          const val = uneceValues[baseOffset + yI];
+          if (year >= START_YEAR && year <= CURRENT_YEAR && val != null && !Number.isNaN(val) && val > 0) {
+            if (!combined[alpha3][year]) {
+              combined[alpha3][year] = round(val, 1);
+            }
+          }
+        }
+      }
+      logger.debug(`UNECE motorization merged (total ${Object.keys(combined).length} countries)`);
+    }
+  } catch (err) {
+    logger.warn('Failed to fetch UNECE motorization data:', err);
+  }
+
+  return applyMotorizationHarmonization(combined);
 }
 
 /** Resolves the latest available non-null value in a time series looking backwards. */
@@ -469,24 +678,38 @@ export async function runWorldPipeline(forceUpdate = false, verbose?: boolean): 
       const logger = getPipelineLogger('world');
       logger.start('World');
 
-      const cache = await loadWorldCache();
+      const force = forceUpdate || isUpdate();
+      let cache = await loadWorldCache();
+      if (force) {
+        logger.info('Force update requested (-u): resetting data.json.br cache...');
+        cache = null;
+      }
+
       const hasValidDataset =
         Boolean(cache?.sections?.['gdp-ppp']?.years?.length) &&
         cache?.sections?.['gdp-ppp']?.years?.[0] === START_YEAR &&
-        (cache?.sections?.['gdp-ppp']?.years?.[cache.sections['gdp-ppp'].years.length - 1] ?? 0) >= CURRENT_YEAR - 1 &&
-        Boolean(cache?.sections?.['gdp-ppp']?.series);
+        (cache?.sections?.['gdp-ppp']?.years?.[cache.sections['gdp-ppp'].years.length - 1] ?? 0) === CURRENT_YEAR &&
+        Boolean(cache?.sections?.['passenger-cars']);
 
       let remoteWdiDate: string | null = null;
       let remoteOwidMeta: RemoteFileMeta | null = null;
+      let remoteItfMeta: RemoteFileMeta | null = null;
+      let remoteUneceDate: string | null = null;
       let wdiChanged = true;
       let owidChanged = true;
+      let motorizationChanged = true;
 
       // Fast check: verify if remote files/databases are unchanged via HTTP metadata
-      if (!forceUpdate && hasValidDataset && cache?.meta) {
-        logger.debug('Checking World Bank WDI and OWID metadata...');
-        [remoteWdiDate, remoteOwidMeta] = await Promise.all([fetchWdiLastUpdated(), fetchHeadMeta(OWID_ENERGY_URL)]);
+      if (!force && hasValidDataset && cache?.meta) {
+        logger.debug('Checking World Bank, OWID, ITF and UNECE metadata...');
+        [remoteWdiDate, remoteOwidMeta, remoteItfMeta, remoteUneceDate] = await Promise.all([
+          fetchWdiLastUpdated(),
+          fetchHeadMeta(OWID_ENERGY_URL),
+          fetchHeadMeta(ITF_TRANSPORT_URL),
+          fetchUneceLastUpdated(),
+        ]);
 
-        const networkFailed = remoteWdiDate === null && remoteOwidMeta === null;
+        const networkFailed = remoteWdiDate === null && remoteOwidMeta === null && remoteItfMeta === null;
         if (networkFailed) {
           logger.warn('Remote data sources unreachable (offline). Using cached dataset.');
           await exportWorld(cache.sections);
@@ -495,9 +718,12 @@ export async function runWorldPipeline(forceUpdate = false, verbose?: boolean): 
 
         wdiChanged = remoteWdiDate == null || remoteWdiDate !== cache.meta.wdiLastUpdated;
         owidChanged = !isRemoteMetaEqual(cache.meta.owid, remoteOwidMeta);
+        motorizationChanged = !isRemoteMetaEqual(cache.meta.itf, remoteItfMeta) || (remoteUneceDate != null && remoteUneceDate !== cache.meta.uneceLastUpdated);
 
-        if (!wdiChanged && !owidChanged) {
-          logger.unchanged('WDI & OWID match');
+        const isUpToDate = !wdiChanged && !owidChanged && !motorizationChanged;
+
+        if (isUpToDate) {
+          logger.unchanged('WDI, OWID, ITF & UNECE match');
           await exportWorld(cache.sections);
           return;
         }
@@ -505,9 +731,9 @@ export async function runWorldPipeline(forceUpdate = false, verbose?: boolean): 
         logger.detected('Refreshing dataset');
       }
 
-      const reporters = await fetchComtradeReporters(cache?.reporters);
-      const macroRaw = await fetchMacroDataWorldBank(cache?.macro, forceUpdate || wdiChanged);
-      const physicalData = await fetchPhysicalAndMachineryData(cache?.physical, reporters, owidChanged, forceUpdate);
+      const macroRaw = await fetchMacroDataWorldBank(cache?.macro, force || wdiChanged);
+      const physicalData = await fetchPhysicalEnergyData(cache?.physical, owidChanged, force);
+      const motorizationData = await fetchMotorizationData(cache?.motorization, force || motorizationChanged);
 
       // Determine latest available year across fetched sources (data-driven)
       let maxYear = START_YEAR;
@@ -523,7 +749,7 @@ export async function runWorldPipeline(forceUpdate = false, verbose?: boolean): 
           if (y > maxYear && y <= CURRENT_YEAR) maxYear = y;
         }
       }
-      for (const series of Object.values(physicalData.chapter84_nominal || {})) {
+      for (const series of Object.values(motorizationData || {})) {
         for (const yStr of Object.keys(series)) {
           const y = parseInt(yStr, 10);
           if (y > maxYear && y <= CURRENT_YEAR) maxYear = y;
@@ -531,17 +757,6 @@ export async function runWorldPipeline(forceUpdate = false, verbose?: boolean): 
       }
       const endYear = maxYear;
       const years = range(START_YEAR, endYear);
-
-      const nationalCpis = macroRaw.cpi || {};
-      const cpiUs: Record<string | number, number> = nationalCpis.USA || {};
-      const cpi2021 = Number(cpiUs[2021] ?? cpiUs['2021'] ?? 124.27);
-      const usDeflator: Record<number, number> = {};
-      let lastKnownCpi = cpi2021;
-      for (const y of years) {
-        const cVal = Number(cpiUs[y] ?? cpiUs[String(y)] ?? lastKnownCpi);
-        if (cVal > 0) lastKnownCpi = cVal;
-        usDeflator[y] = cpi2021 / lastKnownCpi;
-      }
 
       // Real GDP PPP (Trillions)
       const gdpPppTrillions: Record<string, Record<number, number>> = {};
@@ -554,19 +769,6 @@ export async function runWorldPipeline(forceUpdate = false, verbose?: boolean): 
         }
       }
 
-      // Real Chapter 84 Machinery (Billion USD constant 2021)
-      const ch84Real: Record<string, Record<number, number>> = {};
-      for (const [c, series] of Object.entries(physicalData.chapter84_nominal || {})) {
-        if (EXCLUDED_ENTITIES.has(c)) continue;
-        ch84Real[c] = {};
-        for (const y of years) {
-          const valNom = Number(series[y] ?? series[String(y)] ?? 0);
-          if (valNom > 0) {
-            ch84Real[c][y] = round(valNom * usDeflator[y], 1);
-          }
-        }
-      }
-
       const aggregateSet = new Set(macroRaw.aggregates || []);
       const nonEuAggregates = new Set([...aggregateSet].filter((c) => c !== 'EUU'));
 
@@ -576,7 +778,14 @@ export async function runWorldPipeline(forceUpdate = false, verbose?: boolean): 
         return true;
       }
 
-      function formatMetric(rawDict: Record<string, Record<number | string, number | undefined>>, scale = 1.0, decimals = 2): { series: Record<string, (number | null)[]> } {
+      function formatMetric(
+        rawDict: Record<string, Record<number | string, number | undefined>>,
+        scale = 1.0,
+        decimals = 2,
+      ): {
+        series: Record<string, (number | null)[]>;
+        growth: Record<string, (number | null)[]>;
+      } {
         const entityLatest = new Map<string, number>();
         for (const [code, series] of Object.entries(rawDict)) {
           if (!isCountry(code) && code !== 'EUU') continue;
@@ -589,50 +798,78 @@ export async function runWorldPipeline(forceUpdate = false, verbose?: boolean): 
         const sortedEntities = Array.from(entityLatest.keys()).sort((a, b) => (entityLatest.get(b) || 0) - (entityLatest.get(a) || 0));
 
         const seriesByEntity: Record<string, (number | null)[]> = {};
+        const growthByEntity: Record<string, (number | null)[]> = {};
+
         for (const c of sortedEntities) {
           const cDict = rawDict[c];
           if (!cDict) continue;
           const values: (number | null)[] = [];
+          const growth: (number | null)[] = [];
           let hasAny = false;
-          for (const y of years) {
+
+          for (let i = 0; i < years.length; i++) {
+            const y = years[i];
             const val = cDict[y] ?? cDict[String(y)];
             if (val != null && !Number.isNaN(val)) {
               hasAny = true;
-              values.push(round(val * scale, decimals));
+              const roundedVal = round(val * scale, decimals);
+              values.push(roundedVal);
+
+              const prevY = y - 1;
+              const prevValRaw = i === 0 ? (cDict[prevY] ?? cDict[String(prevY)]) : values[i - 1];
+              if (prevValRaw != null && prevValRaw > 0) {
+                const scaledPrev = i === 0 ? prevValRaw * scale : prevValRaw;
+                growth.push(round(((roundedVal - scaledPrev) / scaledPrev) * 100, 1));
+              } else {
+                growth.push(null);
+              }
             } else {
               values.push(null);
+              growth.push(null);
             }
           }
+
           if (hasAny) {
             const regionCode = resolveRegionCode(c);
             if (!seriesByEntity[regionCode]) {
               seriesByEntity[regionCode] = values;
+              growthByEntity[regionCode] = growth;
             }
           }
         }
 
         return {
           series: seriesByEntity,
+          growth: growthByEntity,
         };
       }
 
+      const gdpPppFormatted = formatMetric(gdpPppTrillions, 1.0, 2);
+      const gdpPerCapFormatted = formatMetric(macroRaw.gdp_pcap_ppp_kd || {}, 1.0, 0);
+      const elecGenFormatted = formatMetric(physicalData.electricity_twh || {}, 1.0, 1);
+      const cleanPowerFormatted = formatMetric(physicalData.solar_wind_twh || {}, 1.0, 1);
+      const elecPerCapFormatted = formatMetric(physicalData.elec_per_capita_kwh || {}, 1.0, 0);
+      const carsFormatted = formatMetric(motorizationData || {}, 1.0, 1);
+
       const sections = {
-        'gdp-ppp': { years, series: formatMetric(gdpPppTrillions, 1.0, 2).series },
-        'gdp-per-capita-ppp': { years, series: formatMetric(macroRaw.gdp_pcap_ppp_kd || {}, 1.0, 0).series },
-        'machinery-turnover': { years, series: formatMetric(ch84Real, 1.0, 1).series },
-        'electricity-generation': { years, series: formatMetric(physicalData.electricity_twh || {}, 1.0, 1).series },
-        'clean-power': { years, series: formatMetric(physicalData.solar_wind_twh || {}, 1.0, 1).series },
-        'electricity-per-capita': { years, series: formatMetric(physicalData.elec_per_capita_kwh || {}, 1.0, 0).series },
+        'gdp-ppp': { years, series: gdpPppFormatted.series, growth: gdpPppFormatted.growth },
+        'gdp-per-capita-ppp': { years, series: gdpPerCapFormatted.series, growth: gdpPerCapFormatted.growth },
+        'electricity-generation': { years, series: elecGenFormatted.series, growth: elecGenFormatted.growth },
+        'clean-power': { years, series: cleanPowerFormatted.series, growth: cleanPowerFormatted.growth },
+        'electricity-per-capita': { years, series: elecPerCapFormatted.series, growth: elecPerCapFormatted.growth },
+        'passenger-cars': { years, series: carsFormatted.series, growth: carsFormatted.growth },
       };
 
       await writeJsonAsync(DATA_FILE, {
         meta: {
-          wdiLastUpdated: remoteWdiDate || cache?.meta?.wdiLastUpdated || '2026-07-13',
+          wdiLastUpdated: remoteWdiDate || cache?.meta?.wdiLastUpdated || null,
           owid: remoteOwidMeta || cache?.meta?.owid || null,
+          itf: remoteItfMeta || cache?.meta?.itf || null,
+          uneceLastUpdated: remoteUneceDate || cache?.meta?.uneceLastUpdated || null,
         },
         macro: macroRaw,
         physical: physicalData,
-        reporters,
+        motorization: motorizationData,
         sections,
       });
       await exportWorld(sections);

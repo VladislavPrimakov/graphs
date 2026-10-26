@@ -27,6 +27,11 @@ export const CUSTOM_UNITS: Record<Language, Record<UnitDisplayStyle, Partial<Rec
         'unitPattern-count-one': '{0} person',
         'unitPattern-count-other': '{0} people',
       },
+      'vehicle-car-per-1000-person': {
+        displayName: 'cars / 1,000 people',
+        'unitPattern-count-one': '{0} car / 1,000 people',
+        'unitPattern-count-other': '{0} cars / 1,000 people',
+      },
     },
     long: {
       'event-launch': {
@@ -51,6 +56,11 @@ export const CUSTOM_UNITS: Record<Language, Record<UnitDisplayStyle, Partial<Rec
         'unitPattern-count-one': '{0} person',
         'unitPattern-count-other': '{0} people',
       },
+      'vehicle-car-per-1000-person': {
+        displayName: 'passenger cars per 1,000 people',
+        'unitPattern-count-one': '{0} passenger car per 1,000 people',
+        'unitPattern-count-other': '{0} passenger cars per 1,000 people',
+      },
     },
     narrow: {
       'event-launch': {
@@ -74,6 +84,11 @@ export const CUSTOM_UNITS: Record<Language, Record<UnitDisplayStyle, Partial<Rec
         perUnitPattern: '{0}/person',
         'unitPattern-count-one': '{0}p',
         'unitPattern-count-other': '{0}p',
+      },
+      'vehicle-car-per-1000-person': {
+        displayName: 'cars/1kp',
+        'unitPattern-count-one': '{0}c/1kp',
+        'unitPattern-count-other': '{0}c/1kp',
       },
     },
   },
@@ -109,6 +124,13 @@ export const CUSTOM_UNITS: Record<Language, Record<UnitDisplayStyle, Partial<Rec
         'unitPattern-count-many': '{0} человек',
         'unitPattern-count-other': '{0} человека',
       },
+      'vehicle-car-per-1000-person': {
+        displayName: 'авто / 1000 чел.',
+        'unitPattern-count-one': '{0} авто / 1000 чел.',
+        'unitPattern-count-few': '{0} авто / 1000 чел.',
+        'unitPattern-count-many': '{0} авто / 1000 чел.',
+        'unitPattern-count-other': '{0} авто / 1000 чел.',
+      },
     },
     long: {
       'event-launch': {
@@ -141,6 +163,13 @@ export const CUSTOM_UNITS: Record<Language, Record<UnitDisplayStyle, Partial<Rec
         'unitPattern-count-many': '{0} человек',
         'unitPattern-count-other': '{0} человека',
       },
+      'vehicle-car-per-1000-person': {
+        displayName: 'легковых автомобилей на 1000 человек',
+        'unitPattern-count-one': '{0} легковой автомобиль на 1000 человек',
+        'unitPattern-count-few': '{0} легковых автомобиля на 1000 человек',
+        'unitPattern-count-many': '{0} легковых автомобилей на 1000 человек',
+        'unitPattern-count-other': '{0} легковых автомобиля на 1000 человек',
+      },
     },
     narrow: {
       'event-launch': {
@@ -172,6 +201,13 @@ export const CUSTOM_UNITS: Record<Language, Record<UnitDisplayStyle, Partial<Rec
         'unitPattern-count-few': '{0} чел.',
         'unitPattern-count-many': '{0} чел.',
         'unitPattern-count-other': '{0} чел.',
+      },
+      'vehicle-car-per-1000-person': {
+        displayName: 'авто/1т.чел.',
+        'unitPattern-count-one': '{0} авто/1т.чел.',
+        'unitPattern-count-few': '{0} авто/1т.чел.',
+        'unitPattern-count-many': '{0} авто/1т.чел.',
+        'unitPattern-count-other': '{0} авто/1т.чел.',
       },
     },
   },
@@ -207,6 +243,13 @@ export const CUSTOM_UNITS: Record<Language, Record<UnitDisplayStyle, Partial<Rec
         'unitPattern-count-many': '{0} осіб',
         'unitPattern-count-other': '{0} особи',
       },
+      'vehicle-car-per-1000-person': {
+        displayName: 'авто / 1000 осіб',
+        'unitPattern-count-one': '{0} авто / 1000 осіб',
+        'unitPattern-count-few': '{0} авто / 1000 осіб',
+        'unitPattern-count-many': '{0} авто / 1000 осіб',
+        'unitPattern-count-other': '{0} авто / 1000 осіб',
+      },
     },
     long: {
       'event-launch': {
@@ -238,6 +281,13 @@ export const CUSTOM_UNITS: Record<Language, Record<UnitDisplayStyle, Partial<Rec
         'unitPattern-count-few': '{0} особи',
         'unitPattern-count-many': '{0} осіб',
         'unitPattern-count-other': '{0} особи',
+      },
+      'vehicle-car-per-1000-person': {
+        displayName: 'легкових автомобілів на 1000 осіб',
+        'unitPattern-count-one': '{0} легковий автомобіль на 1000 осіб',
+        'unitPattern-count-few': '{0} легкові автомобілі на 1000 осіб',
+        'unitPattern-count-many': '{0} легкових автомобілів на 1000 осіб',
+        'unitPattern-count-other': '{0} легкові автомобілі на 1000 осіб',
       },
     },
     narrow: {
@@ -271,6 +321,13 @@ export const CUSTOM_UNITS: Record<Language, Record<UnitDisplayStyle, Partial<Rec
         'unitPattern-count-many': '{0} ос.',
         'unitPattern-count-other': '{0} ос.',
       },
+      'vehicle-car-per-1000-person': {
+        displayName: 'авто/1т.осіб',
+        'unitPattern-count-one': '{0} авто/1т.осіб',
+        'unitPattern-count-few': '{0} авто/1т.осіб',
+        'unitPattern-count-many': '{0} авто/1т.осіб',
+        'unitPattern-count-other': '{0} авто/1т.осіб',
+      },
     },
   },
   de: {
@@ -297,6 +354,11 @@ export const CUSTOM_UNITS: Record<Language, Record<UnitDisplayStyle, Partial<Rec
         'unitPattern-count-one': '{0} Person',
         'unitPattern-count-other': '{0} Personen',
       },
+      'vehicle-car-per-1000-person': {
+        displayName: 'Pkw / 1.000 Einw.',
+        'unitPattern-count-one': '{0} Pkw / 1.000 Einw.',
+        'unitPattern-count-other': '{0} Pkw / 1.000 Einw.',
+      },
     },
     long: {
       'event-launch': {
@@ -321,6 +383,11 @@ export const CUSTOM_UNITS: Record<Language, Record<UnitDisplayStyle, Partial<Rec
         'unitPattern-count-one': '{0} Person',
         'unitPattern-count-other': '{0} Personen',
       },
+      'vehicle-car-per-1000-person': {
+        displayName: 'Personenkraftwagen pro 1.000 Einwohner',
+        'unitPattern-count-one': '{0} Personenkraftwagen pro 1.000 Einwohner',
+        'unitPattern-count-other': '{0} Personenkraftwagen pro 1.000 Einwohner',
+      },
     },
     narrow: {
       'event-launch': {
@@ -344,6 +411,11 @@ export const CUSTOM_UNITS: Record<Language, Record<UnitDisplayStyle, Partial<Rec
         perUnitPattern: '{0}/Person',
         'unitPattern-count-one': '{0} P.',
         'unitPattern-count-other': '{0} P.',
+      },
+      'vehicle-car-per-1000-person': {
+        displayName: 'Pkw/1k Einw.',
+        'unitPattern-count-one': '{0} Pkw/1k Einw.',
+        'unitPattern-count-other': '{0} Pkw/1k Einw.',
       },
     },
   },

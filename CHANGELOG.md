@@ -5,6 +5,49 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.5] - 2026-10-26
+
+### Tooling & Shared (@graphs/shared)
+
+#### Added
+- Added `CountryDeflatorData` in `@graphs/shared/types/country` to support chained annual US CPI deflator factors for constant 2021 USD conversions.
+- Added `growth` map to `WorldMetricSectionData` and `mode` toggle (`'volume' | 'growth'`) to `WorldFilterState` for coordinated YoY percentage growth analysis across world indicators.
+
+#### Changed
+- Replaced `MachineryTurnoverSectionData` with `PassengerCarsSectionData` in `@graphs/shared/types/world`.
+
+---
+
+### Pipelines (@graphs/pipelines)
+
+#### Added
+- Added `passenger-cars` pipeline in `world` aggregating passenger car motorization rates per 1,000 inhabitants from ITF/OECD, UNECE, and national statistics with harmonization for statistical reporting breaks.
+- Added `buildUsdDeflator2021` in `country` chaining US CPI YoY inflation to export annual deflator multipliers (`deflator.json`) for constant USD trade conversions.
+
+#### Changed
+- Pre-calculated annual YoY percentage growth arrays across all world indicator sections (`gdp-ppp`, `gdp-per-capita-ppp`, `electricity-generation`, `clean-power`, `electricity-per-capita`, `passenger-cars`).
+
+#### Removed
+- Removed Comtrade Chapter 84 machinery trade scraping and `machinery-turnover` section from the World pipeline in favor of country dashboard bilateral trade breakdowns.
+
+---
+
+### Site (@graphs/site)
+
+#### Added
+- Added `ScrollRestoration` in `root.tsx` to restore viewport coordinates on browser history navigation and reset to `(0, 0)` on page transitions, coupled with `preventScrollReset` in `AppProvider` to preserve scroll during language switching.
+- Added `passenger-cars` dashboard section in `world` with motorization rate timelines and YoY growth visualizations across countries and macro-regions.
+
+#### Changed
+- Changed all world indicator sections to support coordinated metric mode switching between raw physical/economic volumes and YoY percentage growth rates (`mode: 'volume' | 'growth'`).
+- Changed `AppProvider` language transitions to execute via React 19 `startTransition` and read `window.location.pathname`, eliminating concurrent Suspense unmounting, URL truncation, and scroll resets during asynchronous chunk loading.
+- Symmetrized `SiteLayout` header by hiding `ActionControls` on screens below `lg` (`hidden lg:flex shrink-0`) matching `BrandGroup`, removing obsolete `compact` and `showGitHubLabel` props and expanding section navigation pill space on mobile/tablet viewports.
+
+#### Removed
+- Removed `machinery-turnover` section from the World project.
+
+---
+
 ## [1.3.4] - 2026-10-24
 
 ### Pipelines (@graphs/pipelines)

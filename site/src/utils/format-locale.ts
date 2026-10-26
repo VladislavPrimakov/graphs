@@ -23,6 +23,8 @@ export const HISTORICAL_AND_REGIONAL_NAMES: Record<Language, Record<string, stri
     PUS: 'US Pacific Islands',
     PCI: 'Pacific Islands Trust',
     ATB: 'British Antarctic Territory',
+    XK: 'Kosovo',
+    XKX: 'Kosovo',
   },
   ru: {
     // Statistical & regional aggregates
@@ -42,6 +44,8 @@ export const HISTORICAL_AND_REGIONAL_NAMES: Record<Language, Record<string, stri
     PUS: 'Тихоокеанские о-ва США',
     PCI: 'Подопечная территория Тихоокеанские о-ва',
     ATB: 'Британская антарктическая территория',
+    XK: 'Косово',
+    XKX: 'Косово',
   },
   uk: {
     // Statistical & regional aggregates
@@ -61,6 +65,8 @@ export const HISTORICAL_AND_REGIONAL_NAMES: Record<Language, Record<string, stri
     PUS: 'Тихоокеанські о-ви США',
     PCI: 'Підопічна територія Тихоокеанські о-ви',
     ATB: 'Британська антарктична територія',
+    XK: 'Косово',
+    XKX: 'Косово',
   },
   de: {
     // Statistical & regional aggregates
@@ -80,6 +86,8 @@ export const HISTORICAL_AND_REGIONAL_NAMES: Record<Language, Record<string, stri
     PUS: 'US-Pazifikinseln',
     PCI: 'Treuhandgebiet Pazifische Inseln',
     ATB: 'Britisches Antarktis-Territorium',
+    XK: 'Kosovo',
+    XKX: 'Kosovo',
   },
 };
 

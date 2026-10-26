@@ -10,6 +10,7 @@
     "test:space-launches": "bun test src/space-launches/launches.test.ts",
     "test:war-rf-ua": "bun test src/war-rf-ua/parse-attacks-ua.test.ts",
     "test:country": "bun test src/country/cache.test.ts src/country/regions.test.ts",
+    "test:world": "bun test src/world/regions.test.ts",
     "generate:countries": "bun src/country/generate-countries.ts",
     "run:ai-tokens": "bun src/ai-tokens/index.ts",
     "run:space-launches": "bun src/space-launches/index.ts",
