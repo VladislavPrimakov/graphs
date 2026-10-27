@@ -1,6 +1,6 @@
 import type { LineSeriesOption } from 'echarts';
 import { createChart } from '@/components/sections/SectionChart';
-import { chartOption, resolveEffectiveMax } from '@/utils/chart-builder';
+import { chartOption, resolveEffectiveMax, resolveVisiblePeriod } from '@/utils/chart-builder';
 import { BILLIONS_SCALE, GROWTH_HEADROOM, GROWTH_RATIO, GROWTH_ROUND_STEP, MARK_LINE_WIDTH, REAL_GDP_LINE_WIDTH } from '../constants';
 import type { Section } from '../project';
 import { budgetColors } from '../tokens';
@@ -19,13 +19,15 @@ export const macroGrowthSection: Section = ({ t, fmt, tokens }) => {
     buildView: ({ countryData }, { countryStore }) => {
       const countryName = fmt.region(countryData.code);
       const title = `${countryName} — ${t.proj.macroGrowth.title}`;
-      const years = countryData.years;
-      const [selStartYear, selEndYear] = countryStore.years;
-
-      const foundStartIdx = years.findIndex((y: number) => y >= selStartYear);
-      const startIdx = foundStartIdx === -1 ? years.length : foundStartIdx;
-      const foundEndIdx = years.findLastIndex((y: number) => y <= selEndYear);
-      const endIdx = foundEndIdx === -1 ? 0 : foundEndIdx + 1;
+      const { startIdx, endIdx } = resolveVisiblePeriod(countryData.years, countryStore.years, {
+        seriesData: [
+          countryData.timeline.map((y) => y.macro.growth.gdpYoy),
+          countryData.timeline.map((y) => y.macro.gdpRealGrowthYoy),
+          countryData.timeline.map((y) => y.macro.growth.revenueYoy),
+          countryData.timeline.map((y) => y.macro.growth.expenditureYoy),
+          countryData.timeline.map((y) => y.macro.growth.debtYoy),
+        ],
+      });
 
       const visibleTimeline = startIdx < endIdx ? countryData.timeline.slice(startIdx, endIdx) : [];
       const count = visibleTimeline.length;

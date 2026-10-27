@@ -4,6 +4,7 @@ import type { SemanticColor } from '@/utils/color';
 import type { LocalizedFormatters } from '@/utils/format';
 import type { Language, LocaleCommonDict } from '@/utils/provider';
 import type { State } from '@/utils/store';
+import { SITE_VERSION } from '@/utils/version';
 
 /* -------------------------------------------------------------------------- */
 /* 1. Project Categorization Tags                                             */
@@ -522,7 +523,7 @@ async function fetchDatasetJson<T>(...segments: string[]): Promise<T> {
     const filePath = resolve(process.cwd(), publicDir, ...segments);
     return JSON.parse(await readFile(filePath, 'utf-8')) as T;
   }
-  const url = `/data/${subPath}`;
+  const url = `/data/${subPath}?v=${SITE_VERSION}`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`HTTP ${res.status} fetching ${subPath}`);
   return (await res.json()) as T;

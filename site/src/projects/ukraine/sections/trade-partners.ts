@@ -1,7 +1,7 @@
 import { createElement } from 'react';
 import { createChart } from '@/components/sections/SectionChart';
 import { CONTROL_DELAYS } from '@/projects/constants';
-import { chartOption, createRankedBarSeries, createStaticLegend, createStaticLegendSeries } from '@/utils/chart-builder';
+import { chartOption, createRankedBarSeries, createStaticLegend, createStaticLegendSeries, resolveVisiblePeriod } from '@/utils/chart-builder';
 import type { Section } from '../project';
 import { tradeColors } from '../tokens';
 
@@ -82,19 +82,19 @@ export const tradePartnersSection: Section = ({ t, fmt }) => {
     },
     buildView: ({ ukraineData }, { ukraineStore, partnersStore }) => {
       const data = ukraineData['trade-partners'];
-      const [selStartYear, selEndYear] = ukraineStore.years;
       const showLabels = ukraineStore.labels;
       const isPercent = partnersStore.mode === 'percent';
       const top = partnersStore.top;
       const selectedCountries = partnersStore.countries as string[];
       const hasSelectedCountries = selectedCountries.length > 0;
 
-      const foundStartIdx = data.years.findIndex((y) => y >= selStartYear);
-      const startIdx = foundStartIdx === -1 ? 0 : foundStartIdx;
-      const foundEndIdx = data.years.findLastIndex((y) => y <= selEndYear);
-      const endIdx = foundEndIdx === -1 ? data.years.length : foundEndIdx + 1;
+      const partnerSeriesData: (number | null | undefined)[][] = hasSelectedCountries
+        ? selectedCountries.flatMap((c) => [data.exports.map((tuples) => tuples.find(([code]) => code === c)?.[1]), data.imports.map((tuples) => tuples.find(([code]) => code === c)?.[1])])
+        : [data.totalExports, data.totalImports];
 
-      const visibleYears = data.years.slice(startIdx, endIdx);
+      const { startIdx, endIdx, visibleYears } = resolveVisiblePeriod(data.years, ukraineStore.years, {
+        seriesData: partnerSeriesData,
+      });
       const visibleExports = data.exports.slice(startIdx, endIdx);
       const visibleImports = data.imports.slice(startIdx, endIdx);
       const visibleTotalExports = data.totalExports.slice(startIdx, endIdx);

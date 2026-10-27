@@ -10,6 +10,9 @@ export const dict: typeof enDict = {
   gdpPerCapita: {
     title: 'BIP pro Kopf nach KKP (konstante Preise 2021 $)',
   },
+  manufacturingPerCapita: {
+    title: 'Fertigungsleistung pro Kopf (konstante Preise 2021 $)',
+  },
   electricityGeneration: {
     title: 'Bruttostromerzeugung',
   },

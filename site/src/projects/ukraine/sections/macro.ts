@@ -1,5 +1,5 @@
 import { createChart } from '@/components/sections/SectionChart';
-import { chartOption, createBarSeries, createStackTotalSeries, zipRecords } from '@/utils/chart-builder';
+import { chartOption, createBarSeries, createStackTotalSeries, resolveVisiblePeriod, zipRecords } from '@/utils/chart-builder';
 import type { Section } from '../project';
 import { budgetColors } from '../tokens';
 
@@ -36,12 +36,10 @@ export const macroSection: Section = ({ t, fmt, tokens }) => {
         return `{year|${label}}\n{rate|(${t.proj.macro.fxRate}: ${fmt.number(rate, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})}\n{${balTag}|${t.common.balance}: ${balSign}}`;
       });
 
-      const [selStartYear, selEndYear] = ukraineStore.years;
       const showLabels = ukraineStore.labels;
-      const foundStartIdx = data.years.findIndex((y) => y >= selStartYear);
-      const startIdx = foundStartIdx === -1 ? 0 : foundStartIdx;
-      const foundEndIdx = data.years.findLastIndex((y) => y <= selEndYear);
-      const endIdx = foundEndIdx === -1 ? data.years.length : foundEndIdx + 1;
+      const { startIdx, endIdx } = resolveVisiblePeriod(data.years, ukraineStore.years, {
+        seriesData: [data.defense, data.otherExp, data.totalExp, data.domesticRev, data.grants, data.loans, data.balances],
+      });
 
       const visibleYearLabels = data.yearLabels.slice(startIdx, endIdx);
       const visibleBalances = data.balances.slice(startIdx, endIdx);

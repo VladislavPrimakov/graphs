@@ -1456,6 +1456,111 @@ export function resolveEffectiveMax(seriesOrValues: readonly (number | null | un
   return Math.max(fallbackMin, Math.ceil((maxEffectiveCeiling * headroom) / step) * step);
 }
 
+/** Result of resolving a requested period range against a timeline dataset. */
+export interface VisiblePeriodRange {
+  /** Start index for slicing arrays (inclusive). */
+  startIdx: number;
+  /** End index for slicing arrays (exclusive). */
+  endIdx: number;
+  /** Visible period values formatted as strings for X-axis categories. */
+  visibleYears: string[];
+  /** Target index of the latest visible point (endIdx - 1), or -1 if empty. */
+  targetIdx: number;
+  /** Whether the requested period overlaps with available data. */
+  hasOverlap: boolean;
+}
+
+export interface ResolvePeriodOptions {
+  /**
+   * Optional active series data arrays (e.g. active lines on the chart).
+   * When provided, leading and trailing periods where all active series have
+   * null, undefined, or NaN values are trimmed dynamically.
+   */
+  seriesData?: readonly (readonly (number | null | undefined)[])[];
+}
+
+function comparePeriods(a: number | string, b: number | string): number {
+  const numA = typeof a === 'number' ? a : Number(a);
+  const numB = typeof b === 'number' ? b : Number(b);
+  if (!Number.isNaN(numA) && !Number.isNaN(numB)) {
+    return numA - numB;
+  }
+  return String(a).localeCompare(String(b));
+}
+
+/**
+ * Resolves the visible index range and categories for a time-series chart,
+ * clamping requested bounds to the dataset and dynamically trimming leading/trailing
+ * periods where all active series have empty data.
+ */
+export function resolveVisiblePeriod(years: readonly (number | string)[], requestedRange: readonly [number | string, number | string], options?: ResolvePeriodOptions): VisiblePeriodRange {
+  if (years.length === 0) {
+    return { startIdx: 0, endIdx: 0, visibleYears: [], targetIdx: -1, hasOverlap: false };
+  }
+
+  const [reqStart, reqEnd] = requestedRange;
+  const firstYear = years[0];
+  const lastYear = years[years.length - 1];
+
+  // Check if requested period overlaps with available years
+  if (comparePeriods(reqStart, lastYear) > 0 || comparePeriods(reqEnd, firstYear) < 0) {
+    return { startIdx: 0, endIdx: 0, visibleYears: [], targetIdx: -1, hasOverlap: false };
+  }
+
+  const foundStartIdx = years.findIndex((y) => comparePeriods(y, reqStart) >= 0);
+  let startIdx = foundStartIdx === -1 ? 0 : foundStartIdx;
+
+  const foundEndIdx = years.findLastIndex((y) => comparePeriods(y, reqEnd) <= 0);
+  let endIdx = foundEndIdx === -1 ? years.length : foundEndIdx + 1;
+
+  if (startIdx >= endIdx) {
+    return { startIdx: 0, endIdx: 0, visibleYears: [], targetIdx: -1, hasOverlap: false };
+  }
+
+  // If active series data is supplied, dynamically trim leading/trailing all-null years
+  if (options?.seriesData && options.seriesData.length > 0) {
+    let firstDataIdx = -1;
+    let lastDataIdx = -1;
+
+    for (let i = 0; i < years.length; i++) {
+      const hasValue = options.seriesData.some((series) => {
+        const val = series?.[i];
+        return val != null && !Number.isNaN(val);
+      });
+      if (hasValue) {
+        if (firstDataIdx === -1) firstDataIdx = i;
+        lastDataIdx = i;
+      }
+    }
+
+    if (firstDataIdx === -1 || lastDataIdx === -1) {
+      // All active series are completely empty
+      return { startIdx: 0, endIdx: 0, visibleYears: [], targetIdx: -1, hasOverlap: false };
+    }
+
+    const effStart = Math.max(startIdx, firstDataIdx);
+    const effEnd = Math.min(endIdx - 1, lastDataIdx);
+
+    if (effStart > effEnd) {
+      return { startIdx: 0, endIdx: 0, visibleYears: [], targetIdx: -1, hasOverlap: false };
+    }
+
+    startIdx = effStart;
+    endIdx = effEnd + 1;
+  }
+
+  const visibleYears = years.slice(startIdx, endIdx).map(String);
+  const targetIdx = endIdx > startIdx ? endIdx - 1 : -1;
+
+  return {
+    startIdx,
+    endIdx,
+    visibleYears,
+    targetIdx,
+    hasOverlap: visibleYears.length > 0,
+  };
+}
+
 /**
  * Transposes an object of parallel columnar arrays into an array of row objects.
  * Attaches structured point metadata directly to ECharts series data.

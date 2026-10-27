@@ -20,7 +20,7 @@ interface SliderFieldProps {
   className?: string;
 }
 
-/** Dedicated debounced numerical slider field avoiding unnecessary passive effect scheduling. */
+/** Dedicated throttled numerical slider field avoiding unnecessary passive effect scheduling. */
 function SliderField({ spec, value, state, onChange, disabled, className }: SliderFieldProps) {
   const fmt = useFormat();
   const min = typeof spec.min === 'function' ? spec.min(state || {}) : spec.min;
@@ -28,14 +28,9 @@ function SliderField({ spec, value, state, onChange, disabled, className }: Slid
   const effectiveMax = Math.max(min, max);
   const debounceMs = spec.debounceMs ?? 0;
 
-  const [prevValue, setPrevValue] = useState(value);
-  const [localVal, setLocalVal] = useState(value);
+  const [dragVal, setDragVal] = useState<number | null>(null);
+  const pendingValRef = useRef<number | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  if (value !== prevValue) {
-    setPrevValue(value);
-    setLocalVal(value);
-  }
 
   useEffect(() => {
     return () => {
@@ -44,19 +39,35 @@ function SliderField({ spec, value, state, onChange, disabled, className }: Slid
   }, []);
 
   const handleSliderChange = (next: number) => {
-    setLocalVal(next);
     if (!debounceMs) {
       onChange(next);
       return;
     }
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => {
-      timerRef.current = null;
-      onChange(next);
-    }, debounceMs);
+    setDragVal(next);
+    pendingValRef.current = next;
+
+    if (!timerRef.current) {
+      timerRef.current = setTimeout(() => {
+        timerRef.current = null;
+        if (pendingValRef.current !== null) {
+          onChange(pendingValRef.current);
+        }
+      }, debounceMs);
+    }
   };
 
-  const rawVal = Number(localVal ?? spec.defaultValue);
+  const handleCommit = (next: number) => {
+    if (!debounceMs) return;
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    pendingValRef.current = null;
+    setDragVal(null);
+    onChange(next);
+  };
+
+  const rawVal = dragVal ?? Number(value ?? spec.defaultValue);
   const val = Math.min(Math.max(rawVal, min), effectiveMax);
   const minLen = fmt.number(min).length;
   const maxLen = fmt.number(effectiveMax).length;
@@ -73,7 +84,17 @@ function SliderField({ spec, value, state, onChange, disabled, className }: Slid
         </span>
       )}
       <div className="w-28 flex items-center">
-        <Slider min={min} max={effectiveMax} step={spec.step} value={[val]} onValueChange={([v]) => handleSliderChange(v)} disabled={disabled} />
+        <Slider
+          min={min}
+          max={effectiveMax}
+          step={spec.step}
+          value={[val]}
+          onValueChange={([v]) => handleSliderChange(v)}
+          onValueCommit={([v]) => {
+            if (v !== undefined) handleCommit(v);
+          }}
+          disabled={disabled}
+        />
       </div>
     </div>
   );
@@ -88,21 +109,16 @@ interface RangeSliderFieldProps {
   className?: string;
 }
 
-/** Dedicated debounced numerical dual-handle range slider field. */
+/** Dedicated throttled numerical dual-handle range slider field. */
 function RangeSliderField({ spec, value, state, onChange, disabled, className }: RangeSliderFieldProps) {
   const min = typeof spec.min === 'function' ? spec.min(state || {}) : spec.min;
   const max = typeof spec.max === 'function' ? spec.max(state || {}) : spec.max;
   const effectiveMax = Math.max(min, max);
   const debounceMs = spec.debounceMs ?? 0;
 
-  const [prevValue, setPrevValue] = useState(value);
-  const [localVal, setLocalVal] = useState(value);
+  const [dragRange, setDragRange] = useState<[number, number] | null>(null);
+  const pendingRangeRef = useRef<[number, number] | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  if (value !== prevValue) {
-    setPrevValue(value);
-    setLocalVal(value);
-  }
 
   useEffect(() => {
     return () => {
@@ -111,19 +127,35 @@ function RangeSliderField({ spec, value, state, onChange, disabled, className }:
   }, []);
 
   const handleRangeChange = (next: [number, number]) => {
-    setLocalVal(next);
     if (!debounceMs) {
       onChange(next);
       return;
     }
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => {
-      timerRef.current = null;
-      onChange(next);
-    }, debounceMs);
+    setDragRange(next);
+    pendingRangeRef.current = next;
+
+    if (!timerRef.current) {
+      timerRef.current = setTimeout(() => {
+        timerRef.current = null;
+        if (pendingRangeRef.current !== null) {
+          onChange(pendingRangeRef.current);
+        }
+      }, debounceMs);
+    }
   };
 
-  const rawRange = (Array.isArray(localVal) && localVal.length === 2 ? localVal : (spec.defaultValue ?? [min, effectiveMax])) as [number, number];
+  const handleCommit = (next: [number, number]) => {
+    if (!debounceMs) return;
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    pendingRangeRef.current = null;
+    setDragRange(null);
+    onChange(next);
+  };
+
+  const rawRange = dragRange ?? ((Array.isArray(value) && value.length === 2 ? value : (spec.defaultValue ?? [min, effectiveMax])) as [number, number]);
   const range: [number, number] = [Math.max(min, Math.min(effectiveMax, rawRange[0])), Math.max(min, Math.min(effectiveMax, rawRange[1]))];
   const minLen = String(min).length;
   const maxLen = String(effectiveMax).length;
@@ -147,6 +179,11 @@ function RangeSliderField({ spec, value, state, onChange, disabled, className }:
           minStepsBetweenThumbs={spec.minStepsBetweenThumbs ?? 0}
           value={range}
           onValueChange={(val) => handleRangeChange(val as [number, number])}
+          onValueCommit={(val) => {
+            if (Array.isArray(val) && val.length === 2) {
+              handleCommit(val as [number, number]);
+            }
+          }}
           disabled={disabled}
         />
       </div>

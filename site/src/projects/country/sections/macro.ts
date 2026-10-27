@@ -1,6 +1,6 @@
 import { round } from '@graphs/shared/math';
 import { createChart } from '@/components/sections/SectionChart';
-import { chartOption, createBarSeries } from '@/utils/chart-builder';
+import { chartOption, createBarSeries, resolveVisiblePeriod } from '@/utils/chart-builder';
 import { BILLIONS_SCALE } from '../constants';
 import type { Section } from '../project';
 import { budgetColors } from '../tokens';
@@ -21,8 +21,6 @@ export const macroSection: Section = ({ t, fmt, tokens }) => {
     buildView: ({ countryData }, { countryStore }) => {
       const countryName = fmt.region(countryData.code);
       const title = `${countryName} — ${t.proj.macro.title}`;
-      const years = countryData.years;
-      const [selStartYear, selEndYear] = countryStore.years;
       const showLabels = countryStore.labels;
       const useConst = Boolean(countryStore.inConstant2021);
 
@@ -58,10 +56,15 @@ export const macroSection: Section = ({ t, fmt, tokens }) => {
         }
       }
 
-      const foundStartIdx = years.findIndex((y: number) => y >= selStartYear);
-      const startIdx = foundStartIdx === -1 ? years.length : foundStartIdx;
-      const foundEndIdx = years.findLastIndex((y: number) => y <= selEndYear);
-      const endIdx = foundEndIdx === -1 ? 0 : foundEndIdx + 1;
+      const { startIdx, endIdx } = resolveVisiblePeriod(countryData.years, countryStore.years, {
+        seriesData: [
+          countryData.timeline.map((y) => y.macro.gdpNominalUsd),
+          countryData.timeline.map((y) => y.macro.govExpenditureUsd),
+          countryData.timeline.map((y) => y.macro.govRevenueUsd),
+          countryData.timeline.map((y) => y.macro.govDebtUsd),
+          countryData.timeline.map((y) => y.macro.govBalanceUsd),
+        ],
+      });
 
       const visibleTimeline = startIdx < endIdx ? countryData.timeline.slice(startIdx, endIdx) : [];
       const count = visibleTimeline.length;

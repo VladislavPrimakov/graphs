@@ -4,9 +4,11 @@ import type {
   ElectricityPerCapitaSectionData,
   GdpPerCapitaPppSectionData,
   GdpPppSectionData,
+  ManufacturingPerCapitaSectionData,
   PassengerCarsSectionData,
   WorldToolbarMeta,
 } from '@graphs/shared/types/world';
+import countries from 'i18n-iso-countries';
 import { exportProjectMeta, getPipelineDataPath } from '@/utils/dataset';
 import { fileExists, readJson, writeJsonAsync } from '@/utils/fs';
 import { fetchHeadMeta, fetchWithRetry, isRemoteMetaEqual, type RemoteFileMeta } from '@/utils/http';
@@ -83,11 +85,13 @@ export interface WorldPipelineCache {
     uneceLastUpdated?: string | null;
   };
   macro: MacroData;
+  manufacturing?: Record<string, Record<number, number>>;
   physical: PhysicalData;
   motorization?: Record<string, Record<number, number>>;
   sections: {
     'gdp-ppp': GdpPppSectionData;
     'gdp-per-capita-ppp': GdpPerCapitaPppSectionData;
+    'manufacturing-per-capita': ManufacturingPerCapitaSectionData;
     'electricity-generation': ElectricityGenerationSectionData;
     'electricity-per-capita': ElectricityPerCapitaSectionData;
     'clean-power': CleanPowerSectionData;
@@ -191,7 +195,7 @@ async function loadWorldCache(): Promise<WorldPipelineCache | null> {
 /** Fetches global macroeconomic series from World Bank API & IMF WEO. */
 async function fetchMacroDataWorldBank(existingMacro?: MacroData, forceUpdate = false): Promise<MacroData> {
   const logger = getPipelineLogger('world');
-  if (!forceUpdate && existingMacro) {
+  if (!forceUpdate && existingMacro?.gdp_ppp_kd && existingMacro?.gdp_pcap_ppp_kd) {
     logger.debug('Using cached World Bank & IMF macroeconomic data');
     return existingMacro;
   }
@@ -301,6 +305,88 @@ async function fetchMacroDataWorldBank(existingMacro?: MacroData, forceUpdate = 
     if (existingMacro?.gdp_ppp_kd && Object.keys(existingMacro.gdp_ppp_kd).length > 0) {
       return existingMacro;
     }
+    throw err;
+  }
+}
+
+/**
+ * Fetches global manufacturing value added per capita from UN SDG 9.2.1 (UNIDO) API
+ * and harmonizes European Union (EUU) from World Bank.
+ * Rebased dynamically from constant 2020 USD to constant 2021 USD via World Bank US GDP deflator.
+ */
+async function fetchManufacturingData(existingMfg?: Record<string, Record<number, number>>, forceUpdate = false): Promise<Record<string, Record<number, number>>> {
+  const logger = getPipelineLogger('world');
+  if (!forceUpdate && existingMfg && Object.keys(existingMfg).length > 0) {
+    logger.debug('Using cached UNIDO manufacturing per capita data');
+    return existingMfg;
+  }
+
+  logger.debug('Fetching manufacturing per capita from UN SDG (UNIDO) & World Bank...');
+  const mfgMap: Record<string, Record<number, number>> = {};
+
+  try {
+    const [unRes, deflRes, wbEuMfgRes, wbEuPopRes] = await Promise.all([
+      fetchWithRetry('https://unstats.un.org/SDGAPI/v1/sdg/Series/Data?seriesCode=NV_IND_MANFPC&pageSize=10000', { retries: 2, timeoutMs: 45000 }),
+      fetchWithRetry('https://api.worldbank.org/v2/country/USA/indicator/NY.GDP.DEFL.ZS?date=2015:2021&format=json', { retries: 2, timeoutMs: 30000 }),
+      fetchWithRetry('https://api.worldbank.org/v2/country/EUU/indicator/NV.IND.MANF.KD?date=2000:2025&format=json', { retries: 2, timeoutMs: 30000 }),
+      fetchWithRetry('https://api.worldbank.org/v2/country/EUU/indicator/SP.POP.TOTL?date=2000:2025&format=json', { retries: 2, timeoutMs: 30000 }),
+    ]);
+
+    // Parse US GDP deflator
+    let deflator2020To2021 = 1.0456297;
+    let deflator2015To2021 = 1.132248;
+    if (deflRes.ok) {
+      const [, deflRows] = (await deflRes.json()) as [unknown, Array<{ date?: string; value?: number | null }>];
+      const defl: Record<number, number> = {};
+      for (const row of deflRows || []) {
+        const y = parseInt(row.date || '', 10);
+        if (row.value != null && !Number.isNaN(row.value)) defl[y] = row.value;
+      }
+      if (defl[2020] && defl[2021]) deflator2020To2021 = defl[2021] / defl[2020];
+      if (defl[2015] && defl[2021]) deflator2015To2021 = defl[2021] / defl[2015];
+    }
+
+    // Ingest UN SDG 9.2.1 across 210+ sovereign entities
+    if (unRes.ok) {
+      const unJson = (await unRes.json()) as { data?: Array<{ geoAreaCode?: string; timePeriodStart?: number; value?: string | null }> };
+      for (const row of unJson.data || []) {
+        const m49 = String(row.geoAreaCode || '');
+        const alpha3 = countries.numericToAlpha3(m49) || (m49 === '158' ? 'TWN' : null);
+        if (!alpha3 || EXCLUDED_ENTITIES.has(alpha3)) continue;
+        const year = row.timePeriodStart;
+        const val = row.value != null ? parseFloat(row.value) : null;
+        if (year != null && year >= START_YEAR && year <= CURRENT_YEAR && val != null && !Number.isNaN(val)) {
+          if (!mfgMap[alpha3]) mfgMap[alpha3] = {};
+          mfgMap[alpha3][year] = round(val * deflator2020To2021, 0);
+        }
+      }
+      logger.debug('UN SDG 9.2.1 series parsed');
+    }
+
+    // Ingest European Union (EUU) from World Bank
+    if (wbEuMfgRes.ok && wbEuPopRes.ok) {
+      const [, euMfgRows] = (await wbEuMfgRes.json()) as [unknown, Array<{ date?: string; value?: number | null }>];
+      const [, euPopRows] = (await wbEuPopRes.json()) as [unknown, Array<{ date?: string; value?: number | null }>];
+      const euPop: Record<number, number> = {};
+      for (const r of euPopRows || []) {
+        const y = parseInt(r.date || '', 10);
+        if (r.value != null && !Number.isNaN(r.value)) euPop[y] = r.value;
+      }
+      mfgMap.EUU = {};
+      for (const r of euMfgRows || []) {
+        const y = parseInt(r.date || '', 10);
+        const pop = euPop[y];
+        if (pop && r.value != null && !Number.isNaN(r.value)) {
+          mfgMap.EUU[y] = round((r.value / pop) * deflator2015To2021, 0);
+        }
+      }
+      logger.debug('World Bank EUU manufacturing per capita parsed');
+    }
+
+    return mfgMap;
+  } catch (err) {
+    logger.warn(`Manufacturing data fetch error (${err}). Falling back to cached data.`);
+    if (existingMfg && Object.keys(existingMfg).length > 0) return existingMfg;
     throw err;
   }
 }
@@ -689,6 +775,8 @@ export async function runWorldPipeline(forceUpdate = false, verbose?: boolean): 
         Boolean(cache?.sections?.['gdp-ppp']?.years?.length) &&
         cache?.sections?.['gdp-ppp']?.years?.[0] === START_YEAR &&
         (cache?.sections?.['gdp-ppp']?.years?.[cache.sections['gdp-ppp'].years.length - 1] ?? 0) === CURRENT_YEAR &&
+        Boolean(cache?.sections?.['manufacturing-per-capita']) &&
+        Boolean(cache?.manufacturing) &&
         Boolean(cache?.sections?.['passenger-cars']);
 
       let remoteWdiDate: string | null = null;
@@ -732,6 +820,7 @@ export async function runWorldPipeline(forceUpdate = false, verbose?: boolean): 
       }
 
       const macroRaw = await fetchMacroDataWorldBank(cache?.macro, force || wdiChanged);
+      const mfgData = await fetchManufacturingData(cache?.manufacturing, force || wdiChanged);
       const physicalData = await fetchPhysicalEnergyData(cache?.physical, owidChanged, force);
       const motorizationData = await fetchMotorizationData(cache?.motorization, force || motorizationChanged);
 
@@ -846,6 +935,7 @@ export async function runWorldPipeline(forceUpdate = false, verbose?: boolean): 
 
       const gdpPppFormatted = formatMetric(gdpPppTrillions, 1.0, 2);
       const gdpPerCapFormatted = formatMetric(macroRaw.gdp_pcap_ppp_kd || {}, 1.0, 0);
+      const mfgPerCapFormatted = formatMetric(mfgData || {}, 1.0, 0);
       const elecGenFormatted = formatMetric(physicalData.electricity_twh || {}, 1.0, 1);
       const cleanPowerFormatted = formatMetric(physicalData.solar_wind_twh || {}, 1.0, 1);
       const elecPerCapFormatted = formatMetric(physicalData.elec_per_capita_kwh || {}, 1.0, 0);
@@ -854,6 +944,7 @@ export async function runWorldPipeline(forceUpdate = false, verbose?: boolean): 
       const sections = {
         'gdp-ppp': { years, series: gdpPppFormatted.series, growth: gdpPppFormatted.growth },
         'gdp-per-capita-ppp': { years, series: gdpPerCapFormatted.series, growth: gdpPerCapFormatted.growth },
+        'manufacturing-per-capita': { years, series: mfgPerCapFormatted.series, growth: mfgPerCapFormatted.growth },
         'electricity-generation': { years, series: elecGenFormatted.series, growth: elecGenFormatted.growth },
         'clean-power': { years, series: cleanPowerFormatted.series, growth: cleanPowerFormatted.growth },
         'electricity-per-capita': { years, series: elecPerCapFormatted.series, growth: elecPerCapFormatted.growth },
@@ -868,6 +959,7 @@ export async function runWorldPipeline(forceUpdate = false, verbose?: boolean): 
           uneceLastUpdated: remoteUneceDate || cache?.meta?.uneceLastUpdated || null,
         },
         macro: macroRaw,
+        manufacturing: mfgData,
         physical: physicalData,
         motorization: motorizationData,
         sections,

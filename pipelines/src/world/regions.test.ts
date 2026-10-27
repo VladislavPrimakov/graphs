@@ -65,6 +65,8 @@ describe('World Dashboard Region and Dataset Validation via Site Format', () => 
   test('world cache contains all required sections', () => {
     expect(cache.sections).toBeDefined();
     expect(cache.sections['gdp-ppp']).toBeDefined();
+    expect(cache.sections['gdp-per-capita-ppp']).toBeDefined();
+    expect(cache.sections['manufacturing-per-capita']).toBeDefined();
     expect(cache.sections['passenger-cars']).toBeDefined();
     expect(cache.sections['clean-power']).toBeDefined();
     expect(cache.sections['electricity-generation']).toBeDefined();
@@ -100,6 +102,26 @@ describe('World Dashboard Region and Dataset Validation via Site Format', () => 
         const res = formats[loc].region(code);
         if (!isRegionResolved(loc, code, res)) {
           failures.push({ locale: loc, code, resolved: res });
+        }
+      }
+    }
+
+    expect(failures).toEqual([]);
+  });
+
+  test('all countries and entities across all L1 cache sections resolve via fmt.region across all 4 locales', () => {
+    const failures: Array<{ section: string; locale: string; code: string; resolved: string }> = [];
+
+    for (const [secId, sec] of Object.entries(cache.sections || {})) {
+      const entityCodes = Object.keys(sec.series || {});
+      expect(entityCodes.length).toBeGreaterThan(0);
+
+      for (const code of entityCodes) {
+        for (const loc of LOCALES) {
+          const res = formats[loc].region(code);
+          if (!isRegionResolved(loc, code, res)) {
+            failures.push({ section: secId, locale: loc, code, resolved: res });
+          }
         }
       }
     }

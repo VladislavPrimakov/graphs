@@ -8,6 +8,9 @@ export const dict = {
   gdpPerCapita: {
     title: 'GDP per Capita at PPP (Constant 2021 $)',
   },
+  manufacturingPerCapita: {
+    title: 'Manufacturing Output per Capita (Constant 2021 $)',
+  },
   electricityGeneration: {
     title: 'Gross Electricity Generation',
   },

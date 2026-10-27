@@ -1,6 +1,6 @@
 import type { LineSeriesOption } from 'echarts';
 import { createChart } from '@/components/sections/SectionChart';
-import { chartOption, resolveEffectiveMax, zipRecords } from '@/utils/chart-builder';
+import { chartOption, resolveEffectiveMax, resolveVisiblePeriod, zipRecords } from '@/utils/chart-builder';
 import type { Section } from '../project';
 import { budgetColors } from '../tokens';
 
@@ -25,13 +25,9 @@ export const macroGrowthSection: Section = ({ t, fmt, tokens }) => {
     ],
     buildView: ({ ukraineData }, { ukraineStore }) => {
       const data = ukraineData['macro-growth'];
-      const [selStartYear, selEndYear] = ukraineStore.years;
-      const foundStartIdx = data.years.findIndex((y) => y >= selStartYear);
-      const startIdx = foundStartIdx === -1 ? 0 : foundStartIdx;
-      const foundEndIdx = data.years.findLastIndex((y) => y <= selEndYear);
-      const endIdx = foundEndIdx === -1 ? data.years.length : foundEndIdx + 1;
-
-      const visibleYears = data.years.slice(startIdx, endIdx);
+      const { startIdx, endIdx, visibleYears } = resolveVisiblePeriod(data.years, ukraineStore.years, {
+        seriesData: [data.gdpYoy, data.realGdpYoy, data.domesticRevYoy, data.totalExpYoy, data.govDebtYoy],
+      });
 
       const visibleSeries = [
         data.gdpYoy.slice(startIdx, endIdx),

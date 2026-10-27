@@ -1,6 +1,6 @@
 import type { DefaultLabelFormatterCallbackParams as CallbackDataParams } from 'echarts';
 import { createChart } from '@/components/sections/SectionChart';
-import { chartOption, createBarSeries } from '@/utils/chart-builder';
+import { chartOption, createBarSeries, resolveVisiblePeriod } from '@/utils/chart-builder';
 import type { Section } from '../project';
 import { tradeColors } from '../tokens';
 
@@ -15,13 +15,10 @@ export const tradeStructureSection: Section = ({ t, fmt }) => {
     ],
     buildView: ({ ukraineData }, { ukraineStore }) => {
       const data = ukraineData['trade-structure'];
+      const { startIdx, endIdx } = resolveVisiblePeriod(data.years, ukraineStore.years, {
+        seriesData: [data.totalExports, data.totalImports, data.tradeBalance],
+      });
       const tradeYearsStr = data.yearLabels;
-      const [selStartYear, selEndYear] = ukraineStore.years;
-
-      const foundStartIdx = data.years.findIndex((y) => y >= selStartYear);
-      const startIdx = foundStartIdx === -1 ? 0 : foundStartIdx;
-      const foundEndIdx = data.years.findLastIndex((y) => y <= selEndYear);
-      const endIdx = foundEndIdx === -1 ? data.years.length : foundEndIdx + 1;
 
       return {
         content: createChart(

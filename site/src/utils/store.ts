@@ -129,10 +129,11 @@ function createControlStore(controls?: readonly Control[] | Control[], options?:
           break;
         }
         case 'toggle': {
-          const strVal = String(rawVal);
+          const strVal = String(rawVal).trim();
           const options = typeof ctrl.options === 'function' ? ctrl.options({ ...defaultState, ...partial }) : ctrl.options;
-          if (options.some((opt) => opt.value === strVal)) {
-            partial[ctrl.id] = strVal;
+          const matched = options.find((opt) => opt.value.toLowerCase() === strVal.toLowerCase());
+          if (matched) {
+            partial[ctrl.id] = matched.value;
           }
           break;
         }
@@ -148,18 +149,36 @@ function createControlStore(controls?: readonly Control[] | Control[], options?:
         }
         case 'single-search-select': {
           const items = typeof ctrl.items === 'function' ? ctrl.items({ ...defaultState, ...partial }) : ctrl.items;
-          const validSet = new Set(items.map((it) => String(it.value)));
-          const strVal = String(rawVal);
-          if (validSet.size === 0 || validSet.has(strVal)) {
+          const strVal = String(rawVal).trim();
+          if (items.length === 0) {
             partial[ctrl.id] = strVal;
+          } else {
+            const matched = items.find((it) => String(it.value).toLowerCase() === strVal.toLowerCase());
+            if (matched) {
+              partial[ctrl.id] = matched.value;
+            }
           }
           break;
         }
         case 'multi-search-select': {
           const arr = Array.isArray(rawVal) ? rawVal : typeof rawVal === 'string' ? rawVal.split(',') : [rawVal];
           const items = typeof ctrl.items === 'function' ? ctrl.items({ ...defaultState, ...partial }) : ctrl.items;
-          const validSet = new Set(items.map((it) => String(it.value)));
-          partial[ctrl.id] = arr.map(String).filter((x) => validSet.size === 0 || validSet.has(x));
+          if (items.length === 0) {
+            partial[ctrl.id] = arr.map(String);
+          } else {
+            const itemMap = new Map<string, string | number>();
+            for (const it of items) {
+              itemMap.set(String(it.value).toLowerCase(), it.value);
+            }
+            const matchedValues: (string | number)[] = [];
+            for (const x of arr) {
+              const canonical = itemMap.get(String(x).trim().toLowerCase());
+              if (canonical !== undefined) {
+                matchedValues.push(canonical);
+              }
+            }
+            partial[ctrl.id] = matchedValues;
+          }
           break;
         }
         case 'timeline-scrubber': {
@@ -195,14 +214,23 @@ function createControlStore(controls?: readonly Control[] | Control[], options?:
     }
   }
 
-  const initialValues = { ...cloneDeep(defaultState), ...readFromUrl() };
   let state: State = {
-    ...initialValues,
-    hasActiveFilters: checkHasActive(initialValues),
+    ...cloneDeep(defaultState),
+    hasActiveFilters: false,
   };
 
   const listeners = new Set<() => void>();
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  let hasHydratedUrl = false;
+
+  function syncFromUrl(): void {
+    if (hasHydratedUrl || typeof window === 'undefined' || list.length === 0) return;
+    hasHydratedUrl = true;
+    const urlValues = readFromUrl();
+    if (Object.keys(urlValues).length > 0) {
+      setState(urlValues);
+    }
+  }
 
   function notify(): void {
     for (const listener of listeners) {
@@ -284,6 +312,13 @@ function createControlStore(controls?: readonly Control[] | Control[], options?:
 
   function subscribe(listener: () => void): () => void {
     listeners.add(listener);
+
+    if (!hasHydratedUrl && typeof window !== 'undefined') {
+      queueMicrotask(() => {
+        syncFromUrl();
+      });
+    }
+
     return () => {
       listeners.delete(listener);
     };

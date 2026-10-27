@@ -17,6 +17,7 @@ export type ElectricityGenerationSectionData = WorldMetricSectionData;
 export type ElectricityPerCapitaSectionData = WorldMetricSectionData;
 export type GdpPerCapitaPppSectionData = WorldMetricSectionData;
 export type GdpPppSectionData = WorldMetricSectionData;
+export type ManufacturingPerCapitaSectionData = WorldMetricSectionData;
 export type PassengerCarsSectionData = WorldMetricSectionData;
 
 /** Project-level toolbar metadata and entity catalogue for the World dashboard. */
@@ -43,6 +44,7 @@ export type WorldFilterState = {
 export interface WorldDataset extends WorldToolbarMeta {
   'gdp-ppp': WorldMetricSectionData;
   'gdp-per-capita-ppp': WorldMetricSectionData;
+  'manufacturing-per-capita': WorldMetricSectionData;
   'electricity-generation': WorldMetricSectionData;
   'electricity-per-capita': WorldMetricSectionData;
   'clean-power': WorldMetricSectionData;

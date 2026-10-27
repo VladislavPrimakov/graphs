@@ -1,6 +1,6 @@
 import { TRADE_CATEGORY_IDS, type TradeCategoryId } from '@graphs/shared/types/ukraine';
 import { createChart } from '@/components/sections/SectionChart';
-import { chartOption, createRankedBarSeries, createStaticLegend, createStaticLegendSeries } from '@/utils/chart-builder';
+import { chartOption, createRankedBarSeries, createStaticLegend, createStaticLegendSeries, resolveVisiblePeriod } from '@/utils/chart-builder';
 import type { Section } from '../project';
 import { tradeCategoryColors, tradeColors } from '../tokens';
 
@@ -31,15 +31,10 @@ export const tradeCategoriesSection: Section = ({ t, fmt }) => {
     buildView: ({ ukraineData }, { ukraineStore, tradeCategoriesStore }) => {
       const data = ukraineData['trade-categories'];
       const isPercent = tradeCategoriesStore.mode === 'percent';
-      const [selStartYear, selEndYear] = ukraineStore.years;
       const showLabels = ukraineStore.labels;
-
-      const foundStartIdx = data.years.findIndex((y) => y >= selStartYear);
-      const startIdx = foundStartIdx === -1 ? 0 : foundStartIdx;
-      const foundEndIdx = data.years.findLastIndex((y) => y <= selEndYear);
-      const endIdx = foundEndIdx === -1 ? data.years.length : foundEndIdx + 1;
-
-      const visibleYears = data.years.slice(startIdx, endIdx);
+      const { startIdx, endIdx, visibleYears } = resolveVisiblePeriod(data.years, ukraineStore.years, {
+        seriesData: [data.totalExports, data.totalImports],
+      });
       const visibleCategoryExports = data.categoryExports.slice(startIdx, endIdx);
       const visibleCategoryImports = data.categoryImports.slice(startIdx, endIdx);
       const visibleTotalExports = data.totalExports.slice(startIdx, endIdx);

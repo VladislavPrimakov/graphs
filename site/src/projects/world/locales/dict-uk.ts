@@ -10,6 +10,9 @@ export const dict: typeof enDict = {
   gdpPerCapita: {
     title: 'ВВП на душу населення за ПКС (у цінах 2021 р.)',
   },
+  manufacturingPerCapita: {
+    title: 'Випуск обробної промисловості на душу (у цінах 2021 р.)',
+  },
   electricityGeneration: {
     title: 'Валова генерація електроенергії',
   },

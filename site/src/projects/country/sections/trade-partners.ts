@@ -2,7 +2,7 @@ import { percentage, round } from '@graphs/shared/math';
 import { createElement } from 'react';
 import { createChart } from '@/components/sections/SectionChart';
 import { CONTROL_DELAYS } from '@/projects/constants';
-import { chartOption, createRankedBarSeries, createStaticLegend, createStaticLegendSeries } from '@/utils/chart-builder';
+import { chartOption, createRankedBarSeries, createStaticLegend, createStaticLegendSeries, resolveVisiblePeriod } from '@/utils/chart-builder';
 import type { ControlSearchItem } from '@/utils/project';
 import { BILLIONS_SCALE, DEFAULT_TOP_COUNT, MAX_PERCENT_AXIS_BOUND, MAX_TOP_COUNT, MIN_PERCENT_AXIS_BOUND, MIN_TOP_COUNT, PERCENT_HEADROOM_RATIO, PERCENT_ROUND_STEP } from '../constants';
 import type { Section } from '../project';
@@ -111,8 +111,6 @@ export const tradePartnersSection: Section = ({ t, fmt }) => {
       ] as const;
     },
     buildView: ({ countryData, deflator }, { countryStore, partnersStore }) => {
-      const years = countryData.years;
-      const [selStartYear, selEndYear] = countryStore.years;
       const showLabels = countryStore.labels;
       const isPercent = partnersStore.mode === 'percent';
       const isDetailed = partnersStore.level === 'detailed';
@@ -127,10 +125,16 @@ export const tradePartnersSection: Section = ({ t, fmt }) => {
       const selectedCategories = rawSelectedCategories.filter((c) => validCodesSet.has(c));
       const hasSelectedCategories = selectedCategories.length > 0;
 
-      const foundStartIdx = years.findIndex((y: number) => y >= selStartYear);
-      const startIdx = foundStartIdx === -1 ? years.length : foundStartIdx;
-      const foundEndIdx = years.findLastIndex((y: number) => y <= selEndYear);
-      const endIdx = foundEndIdx === -1 ? 0 : foundEndIdx + 1;
+      const partnerSeriesData: (number | null | undefined)[][] = hasSelectedCountries
+        ? selectedCountries.flatMap((c) => {
+            const u = c.toUpperCase();
+            return [countryData.timeline.map((y) => y.exports.partners?.[u]?.total), countryData.timeline.map((y) => y.imports.partners?.[u]?.total)];
+          })
+        : [countryData.timeline.map((y) => y.exports.total), countryData.timeline.map((y) => y.imports.total)];
+
+      const { startIdx, endIdx } = resolveVisiblePeriod(countryData.years, countryStore.years, {
+        seriesData: partnerSeriesData,
+      });
 
       const visibleTimeline = startIdx < endIdx ? countryData.timeline.slice(startIdx, endIdx) : [];
       const countTimeline = visibleTimeline.length;

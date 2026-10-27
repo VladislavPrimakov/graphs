@@ -1,7 +1,7 @@
 import type { GdpPerCapitaPppSectionData, WorldFilterState } from '@graphs/shared/types/world';
 import type { LineSeriesOption } from 'echarts';
 import { createChart } from '@/components/sections/SectionChart';
-import { chartOption, resolveEffectiveMax } from '@/utils/chart-builder';
+import { chartOption, resolveEffectiveMax, resolveVisiblePeriod } from '@/utils/chart-builder';
 import { defineSection, loadDataset, type ProjectContext } from '@/utils/project';
 import type { dict } from '../locales/dict-en';
 
@@ -22,18 +22,10 @@ export const gdpPerCapitaPppSection = defineSection(({ t, fmt }: ProjectContext<
     buildView: ({ sectionData }, { worldStore }: { worldStore: WorldFilterState }) => {
       const isGrowth = worldStore.mode === 'growth';
       const { years, series: chartSeries, growth: growthSeries } = sectionData;
-      const [startYear, endYear] = worldStore.years;
-
-      const foundStartIdx = years.findIndex((y) => y >= startYear);
-      const startIdx = foundStartIdx === -1 ? 0 : foundStartIdx;
-      const foundEndIdx = years.findLastIndex((y) => y <= endYear);
-      const endIdx = foundEndIdx === -1 ? years.length : foundEndIdx + 1;
-      const targetIdx = endIdx - 1;
-
-      const visibleYears = years.slice(startIdx, endIdx).map(String);
+      const { startIdx: rankStartIdx, targetIdx: rankTargetIdx } = resolveVisiblePeriod(years, worldStore.years);
 
       const getRankingValue = (seriesValues: (number | null)[]): number => {
-        for (let i = targetIdx; i >= startIdx; i--) {
+        for (let i = rankTargetIdx; i >= rankStartIdx; i--) {
           const val = seriesValues[i];
           if (val != null && !Number.isNaN(val)) return val;
         }
@@ -49,6 +41,9 @@ export const gdpPerCapitaPppSection = defineSection(({ t, fmt }: ProjectContext<
       const formatGrowth = (val: number) => `${val > 0 ? '+' : ''}${fmt.percent(val)}`;
 
       const activeSeriesMap = isGrowth ? (growthSeries ?? {}) : chartSeries;
+      const { startIdx, endIdx, visibleYears } = resolveVisiblePeriod(years, worldStore.years, {
+        seriesData: activeCodes.map((code) => activeSeriesMap[code]),
+      });
 
       const series: LineSeriesOption[] = activeCodes
         .filter((entityCode) => activeSeriesMap[entityCode] != null)

@@ -1,7 +1,7 @@
 import { round } from '@graphs/shared/math';
 import type { DefaultLabelFormatterCallbackParams as CallbackDataParams } from 'echarts';
 import { createChart } from '@/components/sections/SectionChart';
-import { chartOption, createBarSeries } from '@/utils/chart-builder';
+import { chartOption, createBarSeries, resolveVisiblePeriod } from '@/utils/chart-builder';
 import { BALANCE_LINE_WIDTH, BALANCE_SYMBOL_SIZE, BILLIONS_SCALE } from '../constants';
 import type { Section } from '../project';
 import { tradeColors } from '../tokens';
@@ -20,14 +20,10 @@ export const tradeStructureSection: Section = ({ t, fmt }) => {
     buildView: ({ countryData, deflator }, { countryStore }) => {
       const countryName = fmt.region(countryData.code);
       const title = `${countryName} — ${t.proj.tradeStructure.title}`;
-      const years = countryData.years;
-      const [selStartYear, selEndYear] = countryStore.years;
       const useConst = Boolean(countryStore.inConstant2021);
-
-      const foundStartIdx = years.findIndex((y: number) => y >= selStartYear);
-      const startIdx = foundStartIdx === -1 ? years.length : foundStartIdx;
-      const foundEndIdx = years.findLastIndex((y: number) => y <= selEndYear);
-      const endIdx = foundEndIdx === -1 ? 0 : foundEndIdx + 1;
+      const { startIdx, endIdx } = resolveVisiblePeriod(countryData.years, countryStore.years, {
+        seriesData: [countryData.timeline.map((y) => y.exports.total), countryData.timeline.map((y) => y.imports.total)],
+      });
 
       const visibleTimeline = startIdx < endIdx ? countryData.timeline.slice(startIdx, endIdx) : [];
       const count = visibleTimeline.length;

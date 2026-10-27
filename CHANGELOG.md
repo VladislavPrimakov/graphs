@@ -5,9 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.6] - 2026-10-27
+
+### Tooling
+
+#### Added
+- Added `ManufacturingPerCapitaSectionData` schema in `@graphs/shared/types/world` supporting country-level manufacturing output and YoY percentage growth timelines.
+
+---
+
+### Pipelines (@graphs/pipelines)
+
+#### Added
+- Added `manufacturing-per-capita` ETL stage in `world` aggregating UNIDO SDG 9.2.1 Manufacturing Value Added per Capita (constant 2021 USD) across 170+ sovereign economies.
+
+---
+
+### Site (@graphs/site)
+
+#### Added
+- Added `#manufacturing-per-capita` dashboard section in `world` comparing manufacturing output per capita and annual industrial growth across global economies.
+- Added `resolveVisiblePeriod` in `@/utils/chart-builder` unifying timeline index resolution, out-of-bounds period clamping, and dynamic void trimming across all 17 time-series sections.
+
+#### Changed
+- Connected `resolveVisiblePeriod` with dynamic `seriesData` inspection across all timeline charts in `world`, `country`, and `ukraine`, automatically trimming leading and trailing empty years based on selected active entities.
+
+#### Fixed
+- Fixed that interactive control bars failed to apply URL query filters on initial load and hydration by synchronizing store state via microtask subscription and case-insensitively normalizing search and toggle codes.
+- Fixed slider and range slider scrubbing performance by throttling continuous drag dispatches and instantly committing on pointer release.
+
+---
+
 ## [1.3.5] - 2026-10-26
 
-### Tooling & Shared (@graphs/shared)
+### Tooling
 
 #### Added
 - Added `CountryDeflatorData` in `@graphs/shared/types/country` to support chained annual US CPI deflator factors for constant 2021 USD conversions.
@@ -98,25 +129,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Added
 - Added `useSectionResize` and `subscribeWindowResize` consolidating per-component `ResizeObserver` instances into a single global listener with viewport-aware deferred execution (`deferUntilInView`), pausing canvas and layout recalculations while sections are scrolled off-screen.
-- Added `SectionHeader.tsx` unifying responsive 3-column title centering, anchor buttons, and automatic row transfer with centered anchor button when section titles exceed available single-row card width.
 
 #### Changed
 - Streamlined site header on mobile viewports by hiding the brand group in favor of dedicated burger navigation and full-width section outline pills, simplifying `BrandGroup` component props down to `compact` and `className`.
 
 #### Fixed
-- Fixed that wrapping toolbar controls shifted secondary rows to the left by switching compact control layout to line-scoped float clearance, allowing row 1 to reserve Reset button space while subsequent rows expand across 100% card width.
-- Fixed that multi-row chart legends overlapped grid series on dynamic filter updates by applying horizontal clearance padding before calculating vertical multi-row wrapping height.
-- Fixed that multi-row chart legends and toolbox export icons drifted out of horizontal alignment with the Y-axis title label by computing container-width fluid typography in pass 1 to scale legend markers and toolbox buttons, anchoring row 1 or the bottom row along the exact axis baseline in pass 2.
-- Fixed that bar series inside labels rendered with an unstyled 10px fallback font on iOS Safari (WebKit) when overflowing narrow bars by replacing `fontSize: 0` with off-screen positioning `{ x: -9999, y: -9999 }`.
-- Fixed that interactive control stores retained non-default filter state in memory across page navigations without reflecting it in the URL by clearing `storeRegistry` and active debounce timers upon `ProjectDashboard` unmount.
-- Fixed that map and section loading overlays overlapped sticky dashboard toolbars during scroll flight by raising `DashboardToolbars` and `SearchSelect` dropdowns to `z-40` while bounding in-card loaders to `z-20`.
-- Fixed that `TimelineScrubber` date pickers overflowed the screen on narrow viewports by grouping them into a unified wrapping flexbox, naturally stacking them with aligned widths when constrained while maintaining vertical centering of the Reset button.
+- Fixed multi-row chart legend grid collisions, container-width baseline alignment drift, and iOS Safari WebKit label rendering artifacts.
+- Fixed toolbar layout jitter, narrow viewport date picker overflow, and z-index layering conflicts during sticky scroll flight.
+- Fixed that interactive control stores retained non-default filter state across page navigations by clearing store registries on dashboard unmount.
 
 ---
 
 ## [1.3.1] - 2026-10-22
 
-### Tooling & Shared (@graphs/shared)
+### Tooling
 
 #### Added
 - Added `@graphs/shared` workspace package consolidating cross-package data schemas (`@graphs/shared/types/*`) and mathematical utilities (`@graphs/shared/math`), migrating all imports from `@graphs/types/*`.
@@ -153,19 +179,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added bilateral commodity and trading partner cross-filtering with multi-search selection, hierarchy toggling (`macro` / `detailed`), and dynamic client-side trade share percentage computation in Country foreign trade charts.
 - Added `CHART_CONFIG` architecture with fluid typography scaling, frame-budgeted canvas updates (`queueChartRender`), and off-screen render suppression coordinated with real-time viewport intersection tracking.
 - Added debounced control scrubbing (`CONTROL_DELAYS`), functional control evaluation, `onChange` atomic state mutations, and namespaced URL query parameter synchronization (`urlPrefix`) across dashboard toolbars.
-- Added standardized micro-typography (`--text-2xs`, `--text-3xs`) and viewport scales (`--height-chart: 60dvh`) to `@theme` in `site/src/styles/global.css`, and aligned Changelog outline dates via CSS Subgrid.
 
 #### Fixed
 - Fixed that Country trade partner percentage shares normalized against selected partners rather than total market basket volume, causing single-partner selections to collapse to 100%.
-- Fixed dynamic Y-axis percentage headroom calculations and timeline boundary clamping in Country foreign trade sections.
-- Fixed dark-mode WCAG AA contrast compliance across interactive controls (`Checkbox`, `TimelineScrubber`, text selection).
+- Fixed dynamic Y-axis percentage headroom calculations, contrast compliance, and boundary clamping in Country foreign trade sections.
 - Fixed that `useTranslation` and `useFormat` in `site/src/utils/provider.tsx` threw unhandled runtime exceptions when rendered outside `AppProvider`, providing resilient default fallbacks for SSR and error boundaries.
 
 ---
 
 ## [1.3.0] - 2026-10-21
 
-### Tooling & Types
+### Tooling
 
 #### Added
 - Added `@graphs/types/country` schema definitions exporting `CountryProfileData`, `CountryToolbarMeta`, `CountryCategoryTuple`, and trade classification constants.
@@ -218,7 +242,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.2.4] - 2026-10-13
 
-### Tooling & Types
+### Tooling
 
 #### Added
 - Added `yearLabels` and debt breakdown fields (`govDebt`, `privateDebt`) to Ukraine schemas.
@@ -257,7 +281,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.2.3] - 2026-10-09
 
-### Tooling & Types
+### Tooling
 
 #### Changed
 - Relocated dataset metadata to `site/src/data/metadata.json`.
@@ -287,7 +311,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.2.2] - 2026-10-08
 
-### Tooling & Types
+### Tooling
 
 #### Added
 - Added `types/war-rf-ua/` schemas covering frontline map, territorial dynamics, equipment losses, and air attack sections with subpath exports (`./*`).
@@ -337,7 +361,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.2.1] - 2026-10-05
 
-### Tooling & Types
+### Tooling
 
 #### Added
 - Added commodity trade schemas and `SectionBuilder` / `StaticProjectMeta` contract definitions to `@graphs/types`.
@@ -385,7 +409,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.2.0] - 2026-10-04
 
-### Tooling & Types
+### Tooling
 
 #### Added
 - Extracted shared domain schemas and project slug definitions into dedicated `@graphs/types` workspace package (`types/package.json`).
@@ -456,7 +480,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.1.0] - 2026-09-24
 
-### Tooling & Types
+### Tooling
 
 #### Added
 - Converted repository to a Bun workspaces monorepo managing `@graphs/site` and `@graphs/pipelines` with native `bun.lock`.
@@ -491,9 +515,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Removed all Python ETL scripts (`pipelines/run_all.py`, `pipelines/**/*.py`).
 - Removed `requirements.txt` and Python virtual environment files.
 
-#### Fixed
-- Fixed upstream API failures and rate limiting by adding exponential backoff retry handling to external HTTP requests.
-
 ---
 
 ### Site (@graphs/site)
@@ -527,7 +548,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.0.0] - 2026-09-23
 
-### Tooling & Types
+### Tooling
 
 #### Added
 - Added initial GitHub Actions workflow (`.github/workflows/deploy.yml`) for weekly automated pipeline execution and static deployment to GitHub Pages.
