@@ -36,57 +36,57 @@ export interface HsChapterItem {
   macroId: GoodsCategoryId;
 }
 
-/** Bilateral trading partner record containing total volume and category breakdowns in billion USD. */
+/** Bilateral trading partner record containing total volume and category breakdowns in USD. */
 export interface CountryPartnerTradeRecord {
-  /** Total bilateral trade volume with partner in billion USD. */
+  /** Total bilateral trade volume with partner in USD. */
   total: number;
-  /** Trade breakdown by 10 physical goods macro categories in billion USD: { [macroId]: valueBillion }. */
+  /** Trade breakdown by 10 physical goods macro categories in USD: { [macroId]: valueUsd }. */
   macro: Record<string, number>;
-  /** Detailed trade breakdown by 2-digit HS chapters in billion USD: { [chapterCode]: valueBillion }. */
+  /** Detailed trade breakdown by 2-digit HS chapters in USD: { [chapterCode]: valueUsd }. */
   detailed: Record<string, number>;
 }
 
-/** Complete trade flow breakdown (Exports or Imports) for a single calendar year. */
+/** Complete trade flow breakdown (Exports or Imports) for a single calendar year in USD. */
 export interface CountryTradeFlow {
-  /** Total volume with the world in billion USD. */
+  /** Total volume with the world in USD. */
   total: number;
-  /** Total merchandise physical goods in billion USD. */
+  /** Total merchandise physical goods in USD. */
   goods: number | null;
-  /** Total commercial services in billion USD. */
+  /** Total commercial services in USD. */
   services: number | null;
-  /** 17 aggregated macro categories breakdown in billion USD: { [catId]: valueBillion }. */
+  /** 17 aggregated macro categories breakdown in USD: { [catId]: valueUsd }. */
   macro: Record<string, number>;
-  /** Detailed breakdown in billion USD: 97 HS-2 chapters + 11 EBOPS service codes: { [code]: valueBillion }. */
+  /** Detailed breakdown in USD: 97 HS-2 chapters + 11 EBOPS service codes: { [code]: valueUsd }. */
   detailed: Record<string, number>;
   /** Bilateral trading partners keyed by uppercase ISO-2 / ISO-3 code. */
   partners: Record<string, CountryPartnerTradeRecord>;
 }
 
-/** Annual macroeconomic indicators from IMF World Economic Outlook (WEO). */
+/** Annual macroeconomic indicators from IMF World Economic Outlook (WEO) in USD. */
 export interface CountryMacroYear {
-  /** Nominal GDP in billion USD. */
+  /** Nominal GDP in USD. */
   gdpNominalUsd: number | null;
   /** Real GDP physical volume YoY percentage growth rate. */
   gdpRealGrowthYoy: number | null;
   /** Nominal GDP per capita in USD. */
   gdpPerCapitaUsd: number | null;
-  /** GDP at purchasing power parity in billion current international dollars. */
+  /** GDP at purchasing power parity in current international dollars. */
   gdpPppUsd: number | null;
 
-  /** General government total expenditure in billion USD. */
+  /** General government total expenditure in USD. */
   govExpenditureUsd: number | null;
   /** General government total expenditure as a percentage of nominal GDP. */
   govExpenditurePctGdp: number | null;
-  /** General government total revenue in billion USD. */
+  /** General government total revenue in USD. */
   govRevenueUsd: number | null;
   /** General government total revenue as a percentage of nominal GDP. */
   govRevenuePctGdp: number | null;
-  /** General government net lending/borrowing balance in billion USD. */
+  /** General government net lending/borrowing balance in USD. */
   govBalanceUsd: number | null;
   /** General government net lending/borrowing balance as a percentage of nominal GDP. */
   govBalancePctGdp: number | null;
 
-  /** General government gross debt in billion USD. */
+  /** General government gross debt in USD. */
   govDebtUsd: number | null;
   /** General government gross debt as a percentage of nominal GDP. */
   govDebtPctGdp: number | null;
@@ -95,7 +95,7 @@ export interface CountryMacroYear {
   inflationPct: number | null;
   /** Unemployment rate as percentage of total labor force. */
   unemploymentPct: number | null;
-  /** Current account balance in billion USD. */
+  /** Current account balance in USD. */
   currentAccountUsd: number | null;
   /** Current account balance as a percentage of nominal GDP. */
   currentAccountPctGdp: number | null;
@@ -117,11 +117,11 @@ export interface CountryMacroYear {
 export interface CountryYearRecord {
   /** Calendar year (e.g. 2023). */
   year: number;
-  /** Outgoing trade (Exports) with world total, categories, and bilateral partners. */
+  /** Outgoing trade (Exports) with world total, categories, and bilateral partners in USD. */
   exports: CountryTradeFlow;
-  /** Incoming trade (Imports) with world total, categories, and bilateral partners. */
+  /** Incoming trade (Imports) with world total, categories, and bilateral partners in USD. */
   imports: CountryTradeFlow;
-  /** Combined net trade balance (exports.total - imports.total) in billion USD. */
+  /** Combined net trade balance (exports.total - imports.total) in USD. */
   netBalanceUsd: number | null;
   /** Comprehensive macroeconomic indicators from IMF WEO. */
   macro: CountryMacroYear;

@@ -1,6 +1,8 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
 import type { CountryToolbarMeta } from '@graphs/shared/types/country';
 import { type CountryMacroYear, type CountryPartnerTradeRecord, type CountryProfileData, type CountryYearRecord, TRADE_CATEGORY_IDS, type TradeCategoryId } from '@graphs/shared/types/country';
-import { exportProjectMeta, getPipelineDataPath } from '@/utils/dataset';
+import { exportProjectMeta } from '@/utils/dataset';
 import { fileExists, flushPendingJsonSaves, readJson, writeJsonAsync } from '@/utils/fs';
 import { fetchWithRetry, HttpError } from '@/utils/http';
 import { getPipelineLogger, isUpdate, isVerbose, runWithLogger } from '@/utils/logger';
@@ -13,7 +15,17 @@ import { COUNTRIES, COUNTRY_BY_CODE, COUNTRY_BY_ID, COUNTRY_BY_ISO3, type Countr
 
 loadEnv();
 
-const DATA_FILE = getPipelineDataPath('country');
+const DATA_DIR = path.resolve(import.meta.dir, 'data');
+
+/** Returns the absolute path to a Tier 1 raw country snapshot. */
+export function getCountryDataPath(code: string): string {
+  return path.join(DATA_DIR, `${code.toLowerCase()}.json.br`);
+}
+
+/** Saves an individual country profile asynchronously to Tier 1 snapshot storage. */
+export function saveCountryProfile(profile: RawCountryProfile): Promise<void> {
+  return writeJsonAsync(getCountryDataPath(profile.code), profile);
+}
 
 export { COUNTRIES, SUPPORTED_COUNTRIES };
 
@@ -28,16 +40,40 @@ const comtradeKey = process.env.COMTRADE_API_KEY || '';
 const comtradeHeaders: Record<string, string> = comtradeKey ? { 'Ocp-Apim-Subscription-Key': comtradeKey } : {};
 
 /** UN Comtrade statistical, accounting, and unspecified non-country area aggregates mapped to Others. */
-export const STATISTICAL_PARTNER_CODES = new Set(['_X', 'XX', 'X1', 'X2', 'E19', 'F19', 'O19', 'A79', 'A59', 'F97', 'E29', 'A49', 'F49', 'R91', 'NTZ', '_AC', '_CI', '_SM', '_TK', '_WI', '_ZP']);
+export const STATISTICAL_PARTNER_CODES = new Set([
+  '_X',
+  'XX',
+  'X1',
+  'X2',
+  'E19',
+  'F19',
+  'O19',
+  'A79',
+  'A59',
+  'F97',
+  'E29',
+  'A49',
+  'F49',
+  'R91',
+  'R20',
+  'S19',
+  'NTZ',
+  '_AC',
+  '_CI',
+  '_SM',
+  '_TK',
+  '_WI',
+  '_ZP',
+]);
 
 export interface RawYearData {
-  /** Raw merchandise goods exports by 2-digit HS chapter in billion USD: { "01": 1.25, ... } or null if no trade reported */
+  /** Raw merchandise goods exports by 2-digit HS chapter in USD: { "01": 1250000, ... } or null if no trade reported */
   goodsExports?: Record<string, number> | null;
-  /** Raw commercial services exports by 3-digit EBOPS code in billion USD: { "205": 91.0, ... } or null if no trade reported */
+  /** Raw commercial services exports by 3-digit EBOPS code in USD: { "205": 91000000, ... } or null if no trade reported */
   servicesExports?: Record<string, number> | null;
-  /** Raw commercial services imports by 3-digit EBOPS code in billion USD: { "205": 45.2, ... } or null if no trade reported */
+  /** Raw commercial services imports by 3-digit EBOPS code in USD: { "205": 45200000, ... } or null if no trade reported */
   servicesImports?: Record<string, number> | null;
-  /** Bilateral merchandise goods exports by active partner code and 2-digit HS chapter: { "cn": { "84": 13.9, ... }, ... } or null if no trade reported */
+  /** Bilateral merchandise goods exports by active partner code and 2-digit HS chapter in USD: { "cn": { "84": 13900000, ... }, ... } or null if no trade reported */
   partnerGoodsExports?: Record<string, Record<string, number>> | null;
   /** Upstream UN Comtrade HS goods dataset checksum for this reporter and year */
   goodsChecksum?: number | null;
@@ -71,16 +107,12 @@ export interface RawYearData {
 
 export interface RawCountryProfile {
   code: string;
+  imfLastModified?: string;
+  lastUpdated?: string;
   years: Record<string, RawYearData>;
 }
 
-export interface CountryPipelineCacheMeta {
-  imfLastModified?: string;
-  lastUpdated?: string;
-}
-
 export interface CountryPipelineCache {
-  meta?: CountryPipelineCacheMeta;
   countries: Record<string, RawCountryProfile>;
 }
 
@@ -359,8 +391,8 @@ export function ingestUnifiedAg2Rows(rows: UnifiedAg2Row[], targetReporterId: nu
     if (r.reporterCode !== targetReporterId) continue;
     if (r.flowCode !== 'X') continue;
 
-    const valB = round(r.primaryValue / 1e9, 3);
-    if (valB <= 0) continue;
+    const val = r.primaryValue;
+    if (!val || val <= 0) continue;
 
     const period = r.period;
     if (!result[period]) {
@@ -373,7 +405,7 @@ export function ingestUnifiedAg2Rows(rows: UnifiedAg2Row[], targetReporterId: nu
     const chStr = r.cmdCode.padStart(2, '0');
 
     if (r.partnerCode === 0) {
-      result[period].goodsExports[chStr] = round((result[period].goodsExports[chStr] || 0) + valB, 3);
+      result[period].goodsExports[chStr] = (result[period].goodsExports[chStr] || 0) + val;
     } else {
       const rawCode = COUNTRY_BY_ID.get(r.partnerCode)?.code || (partnerCodeResolver ? partnerCodeResolver(r.partnerCode) : undefined);
       if (!rawCode) continue;
@@ -387,7 +419,7 @@ export function ingestUnifiedAg2Rows(rows: UnifiedAg2Row[], targetReporterId: nu
       if (!result[period].partnerGoodsExports[pCode]) {
         result[period].partnerGoodsExports[pCode] = {};
       }
-      result[period].partnerGoodsExports[pCode][chStr] = round((result[period].partnerGoodsExports[pCode][chStr] || 0) + valB, 3);
+      result[period].partnerGoodsExports[pCode][chStr] = (result[period].partnerGoodsExports[pCode][chStr] || 0) + val;
     }
   }
 
@@ -403,10 +435,10 @@ type ServiceRow = { reporterCode: number; period: string; flowCode: string; cmdC
  */
 export async function syncMacroStage(cache: CountryPipelineCache, catalog: AvailabilityCatalog, countriesToSync: CountryEntry[]): Promise<boolean> {
   const stage = getPipelineLogger('country').stage(1, 'Macro');
-  const imfChanged = Boolean(catalog?.imfLastModified && cache.meta?.imfLastModified !== catalog.imfLastModified);
 
   const countriesNeedingMacro = countriesToSync.filter((c) => {
     const existing = cache.countries[c.code];
+    const imfChanged = Boolean(catalog?.imfLastModified && existing?.imfLastModified !== catalog.imfLastModified);
     return !existing || !Object.values(existing.years || {}).some((y) => y.ngdpd != null) || imfChanged;
   });
 
@@ -427,6 +459,8 @@ export async function syncMacroStage(cache: CountryPipelineCache, catalog: Avail
       cache.countries[country.code] = { code: country.code, years: {} };
     }
     const profile = cache.countries[country.code];
+    profile.imfLastModified = catalog.imfLastModified;
+    profile.lastUpdated = new Date().toISOString();
 
     const allYears = new Set<string>();
     for (const rec of Object.values(indicators)) {
@@ -450,9 +484,9 @@ export async function syncMacroStage(cache: CountryPipelineCache, catalog: Avail
     }
 
     hasChanges = true;
+    saveCountryProfile(profile);
     if ((i + 1) % 10 === 0 || i === countriesNeedingMacro.length - 1) {
       stage.progress(i + 1, countriesNeedingMacro.length, 'countries synced');
-      writeJsonAsync(DATA_FILE, cache);
     }
   }
 
@@ -548,8 +582,9 @@ export async function syncGoodsStage(cache: CountryPipelineCache, catalog: Avail
     }
 
     if (countryChanged) {
+      profile.lastUpdated = new Date().toISOString();
       cache.countries[country.code] = profile;
-      writeJsonAsync(DATA_FILE, cache);
+      saveCountryProfile(profile);
     }
   }
 
@@ -659,8 +694,8 @@ export async function syncServicesStage(cache: CountryPipelineCache, catalog: Av
           const normCmd = EBOPS_NORMALIZATION_MAP[r.cmdCode];
           if (!normCmd) continue;
 
-          const valB = round(r.primaryValue / 1e9, 3);
-          if (valB <= 0) continue;
+          const val = r.primaryValue;
+          if (!val || val <= 0) continue;
 
           const profile = cache.countries[country.code];
           if (!profile) continue;
@@ -670,10 +705,10 @@ export async function syncServicesStage(cache: CountryPipelineCache, catalog: Av
 
           if (r.flowCode === 'M') {
             if (!profile.years[yStr].servicesImports) profile.years[yStr].servicesImports = {};
-            profile.years[yStr].servicesImports[normCmd] = round((profile.years[yStr].servicesImports[normCmd] || 0) + valB, 3);
+            profile.years[yStr].servicesImports[normCmd] = (profile.years[yStr].servicesImports[normCmd] || 0) + val;
           } else if (r.flowCode === 'X') {
             if (!profile.years[yStr].servicesExports) profile.years[yStr].servicesExports = {};
-            profile.years[yStr].servicesExports[normCmd] = round((profile.years[yStr].servicesExports[normCmd] || 0) + valB, 3);
+            profile.years[yStr].servicesExports[normCmd] = (profile.years[yStr].servicesExports[normCmd] || 0) + val;
           }
         }
 
@@ -693,11 +728,12 @@ export async function syncServicesStage(cache: CountryPipelineCache, catalog: Av
             }
           }
 
+          profile.lastUpdated = new Date().toISOString();
           cache.countries[country.code] = profile;
+          saveCountryProfile(profile);
         }
 
         hasChanges = true;
-        writeJsonAsync(DATA_FILE, cache);
       } else {
         stage.warn(`HTTP ${sRes.status} (${periodParam}): ${await sRes.text()}`);
       }
@@ -733,20 +769,31 @@ export async function fetchRawCountryProfile(
   return fakeCache.countries[meta.code] || null;
 }
 
-/** Loads existing Tier 1 raw country cache snapshot from data.json.br. */
-async function loadCountryCache(): Promise<CountryPipelineCache> {
-  if (await fileExists(DATA_FILE)) {
-    try {
-      const raw = await readJson<CountryPipelineCache | Record<string, RawCountryProfile>>(DATA_FILE);
-      if ('countries' in raw && typeof raw.countries === 'object') {
-        return raw as CountryPipelineCache;
-      }
-      return { countries: raw as Record<string, RawCountryProfile> };
-    } catch {
-      return { countries: {} };
-    }
+/** Loads existing Tier 1 raw country snapshots from pipelines/src/country/data/{code}.json.br. */
+export async function loadCountryCache(): Promise<CountryPipelineCache> {
+  const cache: CountryPipelineCache = { countries: {} };
+  if (!(await fileExists(DATA_DIR))) {
+    return cache;
   }
-  return { countries: {} };
+  try {
+    const entries = await fs.readdir(DATA_DIR);
+    const brFiles = entries.filter((f) => f.endsWith('.json.br'));
+    await Promise.all(
+      brFiles.map(async (f) => {
+        try {
+          const profile = await readJson<RawCountryProfile>(path.join(DATA_DIR, f));
+          if (profile?.code) {
+            cache.countries[profile.code.toLowerCase()] = profile;
+          }
+        } catch (err) {
+          getPipelineLogger('country').warn(`Failed to read country snapshot ${f}: ${err}`);
+        }
+      }),
+    );
+  } catch (err) {
+    getPipelineLogger('country').warn(`Failed to read country data directory: ${err}`);
+  }
+  return cache;
 }
 
 /**
@@ -760,14 +807,16 @@ function buildPartnerCategoryBreakdown(chMap: Record<string, number>): {
   const detList: [string, number][] = [];
   const macroMap: Record<string, number> = {};
 
-  for (const [chStr, valB] of Object.entries(chMap)) {
-    if (typeof valB === 'number' && valB > 0) {
+  for (const [chStr, valUsd] of Object.entries(chMap)) {
+    if (typeof valUsd === 'number' && valUsd > 0) {
       const code = chStr.padStart(2, '0');
-      const val = round(valB, 2);
-      detList.push([code, val]);
+      const roundedUsd = Math.round(valUsd);
+      if (roundedUsd > 0) {
+        detList.push([code, roundedUsd]);
+      }
 
       const macroId = HS_TO_MACRO_MAP[code] || 'misc_instruments';
-      macroMap[macroId] = (macroMap[macroId] || 0) + valB;
+      macroMap[macroId] = (macroMap[macroId] || 0) + valUsd;
     }
   }
 
@@ -778,7 +827,8 @@ function buildPartnerCategoryBreakdown(chMap: Record<string, number>): {
   }
 
   const macroList = Object.entries(macroMap)
-    .map(([mId, mVal]) => [mId, round(mVal, 2)] as const)
+    .map(([mId, mValUsd]) => [mId, Math.round(mValUsd)] as const)
+    .filter(([, val]) => val > 0)
     .sort((a, b) => b[1] - a[1]);
   const macro: Record<string, number> = {};
   for (const [mId, val] of macroList) {
@@ -864,21 +914,21 @@ export function buildProductionProfile(raw: RawCountryProfile, allCountries?: Re
 
         const pGoods = pYear.partnerGoodsExports?.[cCode];
         if (pGoods) {
-          let pTot = 0;
-          for (const [chStr, valB] of Object.entries(pGoods)) {
-            if (typeof valB === 'number' && valB > 0) {
+          let pTotUsd = 0;
+          for (const [chStr, valUsd] of Object.entries(pGoods)) {
+            if (typeof valUsd === 'number' && valUsd > 0) {
               const key = chStr.padStart(2, '0');
-              symmetricalCategoryImports[key] = round((symmetricalCategoryImports[key] || 0) + valB, 3);
-              pTot = round(pTot + valB, 3);
+              symmetricalCategoryImports[key] = (symmetricalCategoryImports[key] || 0) + valUsd;
+              pTotUsd += valUsd;
             }
           }
-          if (pTot > 0) {
-            const pIsoUpper = pCode.toUpperCase();
-            symmetricalPartnerImports[pIsoUpper] = pTot;
+          if (pTotUsd > 0) {
+            const pIsoLower = pCode.toLowerCase();
+            symmetricalPartnerImports[pIsoLower] = pTotUsd;
 
             const { macro, detailed } = buildPartnerCategoryBreakdown(pGoods);
-            yearMacroImports[pIsoUpper] = macro;
-            yearDetImports[pIsoUpper] = detailed;
+            yearMacroImports[pIsoLower] = macro;
+            yearDetImports[pIsoLower] = detailed;
           }
         }
       }
@@ -899,17 +949,17 @@ export function buildProductionProfile(raw: RawCountryProfile, allCountries?: Re
 
     for (const ch of HS2_CHAPTERS) {
       const code = ch.code;
-      const xVal = rawGoodsX?.[code] ?? null;
-      const mVal = rawGoodsM?.[code] ?? null;
+      const xValUsd = rawGoodsX?.[code] ?? null;
+      const mValUsd = rawGoodsM?.[code] ?? null;
 
       const macroId = HS_TO_MACRO_MAP[code] || 'misc_instruments';
-      if (xVal != null && xVal > 0) {
-        yearGoodsX += xVal;
-        yearMacroX[macroId] = (yearMacroX[macroId] || 0) + xVal;
+      if (xValUsd != null && xValUsd > 0) {
+        yearGoodsX += xValUsd;
+        yearMacroX[macroId] = (yearMacroX[macroId] || 0) + xValUsd;
       }
-      if (mVal != null && mVal > 0) {
-        yearGoodsM += mVal;
-        yearMacroM[macroId] = (yearMacroM[macroId] || 0) + mVal;
+      if (mValUsd != null && mValUsd > 0) {
+        yearGoodsM += mValUsd;
+        yearMacroM[macroId] = (yearMacroM[macroId] || 0) + mValUsd;
       }
     }
 
@@ -917,13 +967,13 @@ export function buildProductionProfile(raw: RawCountryProfile, allCountries?: Re
     let yearServX = 0;
     let hasServX = false;
 
-    for (const [ebCode, val] of Object.entries(yData.servicesExports || {})) {
-      if (val != null && val > 0) {
+    for (const [ebCode, valUsd] of Object.entries(yData.servicesExports || {})) {
+      if (valUsd != null && valUsd > 0) {
         const sCatId = EBOPS_TO_SERVICES_MAP[ebCode];
         if (sCatId) {
           hasServX = true;
-          yearMacroX[sCatId] = (yearMacroX[sCatId] || 0) + val;
-          yearServX += val;
+          yearMacroX[sCatId] = (yearMacroX[sCatId] || 0) + valUsd;
+          yearServX += valUsd;
         }
       }
     }
@@ -931,31 +981,32 @@ export function buildProductionProfile(raw: RawCountryProfile, allCountries?: Re
     let yearServM = 0;
     let hasServM = false;
 
-    for (const [ebCode, val] of Object.entries(yData.servicesImports || {})) {
-      if (val != null && val > 0) {
+    for (const [ebCode, valUsd] of Object.entries(yData.servicesImports || {})) {
+      if (valUsd != null && valUsd > 0) {
         const sCatId = EBOPS_TO_SERVICES_MAP[ebCode];
         if (sCatId) {
           hasServM = true;
-          yearMacroM[sCatId] = (yearMacroM[sCatId] || 0) + val;
-          yearServM += val;
+          yearMacroM[sCatId] = (yearMacroM[sCatId] || 0) + valUsd;
+          yearServM += valUsd;
         }
       }
     }
 
-    const gX = yearGoodsX > 0 ? round(yearGoodsX, 3) : null;
-    const gM = yearGoodsM > 0 ? round(yearGoodsM, 3) : null;
-    const sX = hasServX ? round(yearServX, 3) : null;
-    const sM = hasServM ? round(yearServM, 3) : null;
+    const gX = yearGoodsX > 0 ? Math.round(yearGoodsX) : null;
+    const gM = yearGoodsM > 0 ? Math.round(yearGoodsM) : null;
+    const sX = hasServX ? Math.round(yearServX) : null;
+    const sM = hasServM ? Math.round(yearServM) : null;
 
-    // Combined Totals (Goods + Services)
-    const totX = round((gX || 0) + (sX || 0), 3);
-    const totM = round((gM || 0) + (sM || 0), 3);
-    const netBalanceUsd = totX > 0 && totM > 0 ? round(totX - totM, 3) : null;
+    // Combined Totals (Goods + Services) in USD
+    const totX = (gX || 0) + (sX || 0);
+    const totM = (gM || 0) + (sM || 0);
+    const netBalanceUsd = totX > 0 && totM > 0 ? totX - totM : null;
 
-    // Macro categories: sorted descending by volume
+    // Macro categories in USD: sorted descending by volume
     const catMacroXMap: Record<string, number> = {};
     const catMacroXList = TRADE_CATEGORY_IDS.filter((id) => yearMacroX[id] > 0)
-      .map((id) => [id, round(yearMacroX[id], 2)] as const)
+      .map((id) => [id, Math.round(yearMacroX[id])] as const)
+      .filter(([, val]) => val > 0)
       .sort((a, b) => b[1] - a[1]);
     for (const [id, val] of catMacroXList) {
       catMacroXMap[id] = val;
@@ -963,25 +1014,28 @@ export function buildProductionProfile(raw: RawCountryProfile, allCountries?: Re
 
     const catMacroMMap: Record<string, number> = {};
     const catMacroMList = TRADE_CATEGORY_IDS.filter((id) => yearMacroM[id] > 0)
-      .map((id) => [id, round(yearMacroM[id], 2)] as const)
+      .map((id) => [id, Math.round(yearMacroM[id])] as const)
+      .filter(([, val]) => val > 0)
       .sort((a, b) => b[1] - a[1]);
     for (const [id, val] of catMacroMList) {
       catMacroMMap[id] = val;
     }
 
-    // Detailed categories: sorted descending by volume
+    // Detailed categories in USD: sorted descending by volume
     const catDetXMap: Record<string, number> = {};
     const catDetXList: [string, number][] = [];
     for (const ch of HS2_CHAPTERS) {
-      const val = rawGoodsX?.[ch.code];
-      if (val != null && val > 0) {
-        catDetXList.push([ch.code, round(val, 2)]);
+      const valUsd = rawGoodsX?.[ch.code];
+      if (valUsd != null && valUsd > 0) {
+        const roundedUsd = Math.round(valUsd);
+        if (roundedUsd > 0) catDetXList.push([ch.code, roundedUsd]);
       }
     }
     if (yData.servicesExports) {
-      for (const [eb, val] of Object.entries(yData.servicesExports)) {
-        if (val != null && val > 0 && EBOPS_TO_SERVICES_MAP[eb]) {
-          catDetXList.push([eb, round(val, 2)]);
+      for (const [eb, valUsd] of Object.entries(yData.servicesExports)) {
+        if (valUsd != null && valUsd > 0 && EBOPS_TO_SERVICES_MAP[eb]) {
+          const roundedUsd = Math.round(valUsd);
+          if (roundedUsd > 0) catDetXList.push([eb, roundedUsd]);
         }
       }
     }
@@ -993,15 +1047,17 @@ export function buildProductionProfile(raw: RawCountryProfile, allCountries?: Re
     const catDetMMap: Record<string, number> = {};
     const catDetMList: [string, number][] = [];
     for (const ch of HS2_CHAPTERS) {
-      const val = rawGoodsM?.[ch.code] ?? null;
-      if (val != null && val > 0) {
-        catDetMList.push([ch.code, round(val, 2)]);
+      const valUsd = rawGoodsM?.[ch.code] ?? null;
+      if (valUsd != null && valUsd > 0) {
+        const roundedUsd = Math.round(valUsd);
+        if (roundedUsd > 0) catDetMList.push([ch.code, roundedUsd]);
       }
     }
     if (yData.servicesImports) {
-      for (const [eb, val] of Object.entries(yData.servicesImports)) {
-        if (val != null && val > 0 && EBOPS_TO_SERVICES_MAP[eb]) {
-          catDetMList.push([eb, round(val, 2)]);
+      for (const [eb, valUsd] of Object.entries(yData.servicesImports)) {
+        if (valUsd != null && valUsd > 0 && EBOPS_TO_SERVICES_MAP[eb]) {
+          const roundedUsd = Math.round(valUsd);
+          if (roundedUsd > 0) catDetMList.push([eb, roundedUsd]);
         }
       }
     }
@@ -1010,73 +1066,77 @@ export function buildProductionProfile(raw: RawCountryProfile, allCountries?: Re
       catDetMMap[code] = val;
     }
 
-    // 3. Export ALL partner countries on the fly from partnerGoodsExports
+    // 3. Export ALL partner countries in USD on the fly from partnerGoodsExports
     const pX: [string, number][] = [];
     const pXMap: Record<string, CountryPartnerTradeRecord> = {};
 
     if (yData.partnerGoodsExports) {
       for (const [pIso, chMap] of Object.entries(yData.partnerGoodsExports)) {
         if (!chMap) continue;
-        let sumVal = 0;
-        for (const val of Object.values(chMap)) {
-          if (typeof val === 'number' && val > 0) sumVal += val;
+        let sumValUsd = 0;
+        for (const valUsd of Object.values(chMap)) {
+          if (typeof valUsd === 'number' && valUsd > 0) sumValUsd += valUsd;
         }
-        if (sumVal > 0) {
-          const pIsoUpper = pIso.toUpperCase();
-          const roundedVal = round(sumVal, 2);
-          pX.push([pIsoUpper, roundedVal]);
+        if (sumValUsd > 0) {
+          const pIsoLower = pIso.toLowerCase();
+          const roundedVal = Math.round(sumValUsd);
+          if (roundedVal > 0) {
+            pX.push([pIsoLower, roundedVal]);
 
-          const { macro, detailed } = buildPartnerCategoryBreakdown(chMap);
-          pXMap[pIsoUpper] = {
-            total: roundedVal,
-            macro,
-            detailed,
-          };
+            const { macro, detailed } = buildPartnerCategoryBreakdown(chMap);
+            pXMap[pIsoLower] = {
+              total: roundedVal,
+              macro,
+              detailed,
+            };
+          }
         }
       }
     }
 
     const sortedPXMap: Record<string, CountryPartnerTradeRecord> = {};
-    for (const [pIsoUpper] of pX.sort((a, b) => b[1] - a[1])) {
-      sortedPXMap[pIsoUpper] = pXMap[pIsoUpper];
+    for (const [pIsoLower] of pX.sort((a, b) => b[1] - a[1])) {
+      sortedPXMap[pIsoLower] = pXMap[pIsoLower];
     }
 
     const sortedPMMap: Record<string, CountryPartnerTradeRecord> = {};
-    const pMList = Object.entries(symmetricalPartnerImports || {}).filter(([, val]) => val > 0);
-    const sortedPMList = pMList.sort((a, b) => b[1] - a[1]);
+    const pMList = Object.entries(symmetricalPartnerImports || {}).filter(([, valUsd]) => valUsd > 0);
+    const sortedPMList = pMList
+      .map(([pIsoLower, pTotUsd]) => [pIsoLower, Math.round(pTotUsd)] as const)
+      .filter(([, roundedVal]) => roundedVal > 0)
+      .sort((a, b) => b[1] - a[1]);
 
-    for (const [pIsoUpper, pTot] of sortedPMList) {
-      const roundedVal = round(pTot, 2);
-      sortedPMMap[pIsoUpper] = {
+    for (const [pIsoLower, roundedVal] of sortedPMList) {
+      sortedPMMap[pIsoLower] = {
         total: roundedVal,
-        macro: yearMacroImports[pIsoUpper] || {},
-        detailed: yearDetImports[pIsoUpper] || {},
+        macro: yearMacroImports[pIsoLower] || {},
+        detailed: yearDetImports[pIsoLower] || {},
       };
     }
 
-    // 4. Macroeconomic indicators from IMF WEO
-    const gdpNominal = yData.ngdpd != null ? round(yData.ngdpd, 2) : null;
+    // 4. Macroeconomic indicators from IMF WEO in USD
+    const gdpNominal = yData.ngdpd != null ? Math.round(yData.ngdpd * 1e9) : null;
     const gx = yData.gx != null ? round(yData.gx, 2) : null;
     const ggr = yData.ggr != null ? round(yData.ggr, 2) : null;
     const ggxcnl = yData.ggxcnl != null ? round(yData.ggxcnl, 2) : null;
     const ggxwdg = yData.ggxwdg != null ? round(yData.ggxwdg, 1) : null;
     const bca = yData.bca != null ? round(yData.bca, 2) : null;
 
-    const govExpUsd = gdpNominal != null && gx != null ? round((gdpNominal * gx) / 100, 2) : null;
-    const govRevUsd = gdpNominal != null && ggr != null ? round((gdpNominal * ggr) / 100, 2) : null;
-    const govBalUsd = gdpNominal != null && ggxcnl != null ? round((gdpNominal * ggxcnl) / 100, 2) : null;
-    const govDebtUsd = gdpNominal != null && ggxwdg != null ? round((gdpNominal * ggxwdg) / 100, 2) : null;
-    const currAccUsd = gdpNominal != null && bca != null ? round((gdpNominal * bca) / 100, 2) : null;
+    const govExpUsd = gdpNominal != null && gx != null ? Math.round((gdpNominal * gx) / 100) : null;
+    const govRevUsd = gdpNominal != null && ggr != null ? Math.round((gdpNominal * ggr) / 100) : null;
+    const govBalUsd = gdpNominal != null && ggxcnl != null ? Math.round((gdpNominal * ggxcnl) / 100) : null;
+    const govDebtUsd = gdpNominal != null && ggxwdg != null ? Math.round((gdpNominal * ggxwdg) / 100) : null;
+    const currAccUsd = gdpNominal != null && bca != null ? Math.round((gdpNominal * bca) / 100) : null;
 
     const prevMacro = timeline[i - 1]?.macro;
     const calcYoy = (c: number | null, p: number | null) => (c == null || p == null || p === 0 ? null : round(((c - p) / Math.abs(p)) * 100, 1));
-    const calcDiff = (c: number | null, p: number | null) => (c == null || p == null ? null : round(c - p, 2));
+    const calcDiff = (c: number | null, p: number | null) => (c == null || p == null ? null : c - p);
 
     const macroYear: CountryMacroYear = {
       gdpNominalUsd: gdpNominal,
       gdpRealGrowthYoy: yData.rpch != null ? round(yData.rpch, 2) : null,
-      gdpPerCapitaUsd: yData.dpc != null ? round(yData.dpc, 1) : null,
-      gdpPppUsd: yData.pppgdp != null ? round(yData.pppgdp, 2) : null,
+      gdpPerCapitaUsd: yData.dpc != null ? Math.round(yData.dpc) : null,
+      gdpPppUsd: yData.pppgdp != null ? Math.round(yData.pppgdp * 1e9) : null,
       govExpenditureUsd: govExpUsd,
       govExpenditurePctGdp: gx,
       govRevenueUsd: govRevUsd,
@@ -1155,7 +1215,7 @@ export function buildProductionProfile(raw: RawCountryProfile, allCountries?: Re
     }
   }
 
-  const activeMacro: [TradeCategoryId, number][] = Object.keys(allMacroTotals).map((id) => [id as TradeCategoryId, round(latestMacroMap[id] || 0, 1)]);
+  const activeMacro: [TradeCategoryId, number][] = Object.keys(allMacroTotals).map((id) => [id as TradeCategoryId, Math.round(latestMacroMap[id] || 0)]);
   activeMacro.sort((a, b) => {
     const diff = b[1] - a[1];
     if (diff !== 0) return diff;
@@ -1181,7 +1241,7 @@ export function buildProductionProfile(raw: RawCountryProfile, allCountries?: Re
     }
   }
 
-  const activeDetailed: [string, number][] = Object.keys(allDetailedTotals).map((code) => [code, round(latestDetailedMap[code] || 0, 1)]);
+  const activeDetailed: [string, number][] = Object.keys(allDetailedTotals).map((code) => [code, Math.round(latestDetailedMap[code] || 0)]);
   activeDetailed.sort((a, b) => {
     const diff = b[1] - a[1];
     if (diff !== 0) return diff;
@@ -1218,7 +1278,7 @@ export function buildProductionProfile(raw: RawCountryProfile, allCountries?: Re
     }
   }
 
-  const activePartners: [string, number][] = Object.keys(allPartnersTotalMap).map((code) => [code, round(latestPartnerMap[code] || 0, 1)]);
+  const activePartners: [string, number][] = Object.keys(allPartnersTotalMap).map((code) => [code, Math.round(latestPartnerMap[code] || 0)]);
   activePartners.sort((a, b) => {
     const diff = b[1] - a[1];
     if (diff !== 0) return diff;
@@ -1292,9 +1352,10 @@ export async function exportCountryDatasets(countries: Record<string, RawCountry
         break;
       }
     }
-    const val = latestGdp ?? COUNTRY_BY_CODE.get(code)?.gdp;
+    const fallback = COUNTRY_BY_CODE.get(code)?.gdp;
+    const val = latestGdp ?? (fallback != null ? Math.round(fallback * 1e9) : undefined);
     if (val != null) {
-      gdpMap[code] = round(val, 1);
+      gdpMap[code] = Math.round(val);
     }
 
     if (profile.years.length > 0) {
@@ -1341,9 +1402,8 @@ export async function runCountryPipeline(forceUpdate = false, verbose?: boolean)
       const cache = await loadCountryCache();
       const force = forceUpdate || isUpdate();
       if (force) {
-        logger.info('Force update requested (-u): resetting data.json.br cache to re-download all countries from scratch...');
+        logger.info('Force update requested (-u): resetting cache to re-download all countries from scratch...');
         cache.countries = {};
-        delete cache.meta;
       }
 
       const targetYears = range(START_YEAR, CURRENT_YEAR);
@@ -1352,7 +1412,7 @@ export async function runCountryPipeline(forceUpdate = false, verbose?: boolean)
       // 1. Identify which countries have missing streams or updated checksums
       const countriesNeedingUpdate = COUNTRIES.filter((c) => {
         const existing = cache.countries[c.code];
-        return force || !isCountryComplete(existing, targetYears, c.id, catalog, cache.meta?.imfLastModified);
+        return force || !isCountryComplete(existing, targetYears, c.id, catalog, existing?.imfLastModified);
       });
 
       if (countriesNeedingUpdate.length > 0) {
@@ -1368,29 +1428,11 @@ export async function runCountryPipeline(forceUpdate = false, verbose?: boolean)
         // Stage 3: Commercial Services Exports (UN Comtrade EBOPS)
         const servicesChanged = await syncServicesStage(cache, catalog, countriesNeedingUpdate);
 
-        const imfChanged = Boolean(catalog.imfLastModified && catalog.imfLastModified !== cache.meta?.imfLastModified);
-        let hasChanges = macroChanged || goodsChanged || servicesChanged;
+        const hasChanges = macroChanged || goodsChanged || servicesChanged;
 
-        if (imfChanged) {
-          cache.meta = {
-            imfLastModified: catalog.imfLastModified,
-            lastUpdated: new Date().toISOString(),
-          };
-          hasChanges = true;
-        } else if (hasChanges) {
-          cache.meta = {
-            ...cache.meta,
-            lastUpdated: new Date().toISOString(),
-          };
-        }
-
+        await flushPendingJsonSaves();
         if (hasChanges) {
-          writeJsonAsync(DATA_FILE, cache);
-        }
-
-        await flushPendingJsonSaves(DATA_FILE);
-        if (hasChanges) {
-          logger.success(`Updated raw L1 cache saved to ${DATA_FILE}`);
+          logger.success(`Updated raw Tier 1 cache saved to ${DATA_DIR}`);
         }
       }
 

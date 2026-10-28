@@ -5,9 +5,11 @@ import { createChart } from '@/components/sections/SectionChart';
 import { CONTROL_DELAYS } from '@/projects/constants';
 import { chartOption, createRankedBarSeries, createStaticLegend, createStaticLegendSeries, resolveVisiblePeriod } from '@/utils/chart-builder';
 import type { ControlSearchItem } from '@/utils/project';
-import { BILLIONS_SCALE, DEFAULT_TOP_COUNT, MAX_PERCENT_AXIS_BOUND, MAX_TOP_COUNT, MIN_PERCENT_AXIS_BOUND, MIN_TOP_COUNT, PERCENT_HEADROOM_RATIO, PERCENT_ROUND_STEP } from '../constants';
+import { resolveAdaptiveScale } from '@/utils/scale';
+import { DEFAULT_TOP_COUNT, MAX_PERCENT_AXIS_BOUND, MAX_TOP_COUNT, MIN_PERCENT_AXIS_BOUND, MIN_TOP_COUNT, PERCENT_HEADROOM_RATIO, PERCENT_ROUND_STEP } from '../constants';
 import type { Section } from '../project';
 import { getDetailedCategoryColor, tradeCategoryColors, tradeColors } from '../tokens';
+import { getFlowVolume, getYearCategoryBreakdown, resolveFlowScale } from '../trade';
 
 /** Section builder for Country Foreign Trade by Commodity & Service Category chart. */
 export const tradeCategoriesSection: Section = ({ t, fmt }) => {
@@ -73,10 +75,17 @@ export const tradeCategoriesSection: Section = ({ t, fmt }) => {
               type: 'toggle',
               defaultValue: 'absolute',
               label: t.common.metric,
-              options: [
-                { value: 'absolute', label: `${fmt.scale(BILLIONS_SCALE)} ($)` },
-                { value: 'percent', label: `${t.common.share} (%)` },
-              ],
+              options: (state: Record<string, unknown>) => {
+                const isDet = state.level === 'detailed';
+                const selCountries = (state.countries as string[]) || [];
+                const rawCats = (state.categories as string[]) || [];
+                const selCats = rawCats.filter((c) => (isDet ? detailedCodesSet.has(c) : macroCodesSet.has(c)));
+                const scaleLabel = resolveFlowScale(countryData.timeline, isDet, selCountries, selCats, fmt);
+                return [
+                  { value: 'absolute', label: scaleLabel ? `${scaleLabel} ($)` : '$' },
+                  { value: 'percent', label: `${t.common.share} (%)` },
+                ];
+              },
             },
             {
               id: 'level',
@@ -109,6 +118,7 @@ export const tradeCategoriesSection: Section = ({ t, fmt }) => {
               type: 'multi-search-select',
               placeholder: t.proj.tradePartners.partners,
               emptyLabel: t.proj.tradePartners.noPartnersFound,
+              formatCount: fmt.currency,
               items: activePartners.map(([code, volume]) => ({
                 value: code,
                 label: fmt.region(code),
@@ -120,6 +130,7 @@ export const tradeCategoriesSection: Section = ({ t, fmt }) => {
               type: 'multi-search-select',
               placeholder: (state: Record<string, unknown>) => (state.level === 'detailed' ? t.proj.tradeCategories.detailedCategories : t.proj.tradeCategories.macroCategories),
               emptyLabel: t.proj.tradeCategories.noCategoriesFound,
+              formatCount: fmt.currency,
               items: (state: Record<string, unknown>) => (state.level === 'detailed' ? detailedItems : macroItems),
             },
           ] as const,
@@ -132,26 +143,23 @@ export const tradeCategoriesSection: Section = ({ t, fmt }) => {
       const isDetailed = tradeCategoriesStore.level === 'detailed';
       const top = tradeCategoriesStore.top;
       const selectedCountries = (tradeCategoriesStore.countries as string[]) || [];
-      const hasSelectedCountries = selectedCountries.length > 0;
       const useConst = Boolean(countryStore.inConstant2021);
 
-      const validCodesSet = new Set(isDetailed ? countryData.activeDetailed.map(([c]) => c) : countryData.activeMacro.map(([id]) => id as string));
       const rawSelectedCategories = (tradeCategoriesStore.categories as string[]) || [];
-      const selectedCategories = rawSelectedCategories.filter((c) => validCodesSet.has(c));
+      const selectedCategories =
+        rawSelectedCategories.length > 0
+          ? rawSelectedCategories.filter((c) => (isDetailed ? countryData.activeDetailed.some(([code]) => code === c) : countryData.activeMacro.some(([id]) => id === c)))
+          : [];
       const hasSelectedCategories = selectedCategories.length > 0;
 
       const baseTitle = hasSelectedCategories ? t.proj.tradeCategories.title : `${t.proj.tradeCategories.title} (${t.common.top} ${top})`;
       const title = `${countryName} — ${baseTitle}`;
 
-      const categorySeriesData: (number | null | undefined)[][] = hasSelectedCategories
-        ? selectedCategories.flatMap((cat) => [
-            countryData.timeline.map((y) => (isDetailed ? y.exports.detailed?.[cat] : y.exports.macro?.[cat as TradeCategoryId])),
-            countryData.timeline.map((y) => (isDetailed ? y.imports.detailed?.[cat] : y.imports.macro?.[cat as TradeCategoryId])),
-          ])
-        : [countryData.timeline.map((y) => y.exports.total), countryData.timeline.map((y) => y.imports.total)];
-
       const { startIdx, endIdx } = resolveVisiblePeriod(countryData.years, countryStore.years, {
-        seriesData: categorySeriesData,
+        seriesData: [
+          countryData.timeline.map((y) => getFlowVolume(y.exports, isDetailed, selectedCountries, selectedCategories) || null),
+          countryData.timeline.map((y) => getFlowVolume(y.imports, isDetailed, selectedCountries, selectedCategories) || null),
+        ],
       });
       const showLabels = countryStore.labels;
 
@@ -159,7 +167,8 @@ export const tradeCategoriesSection: Section = ({ t, fmt }) => {
       const countTimeline = visibleTimeline.length;
       const visibleYears = new Array<number>(countTimeline);
 
-      const upperSelectedCountries = selectedCountries.map((c) => c.toUpperCase());
+      const visibleBaseExports = new Array<number>(countTimeline);
+      const visibleBaseImports = new Array<number>(countTimeline);
       const visibleTotalExports = new Array<number | null>(countTimeline);
       const visibleTotalImports = new Array<number | null>(countTimeline);
       const visibleTradeBalance = new Array<number>(countTimeline);
@@ -169,25 +178,25 @@ export const tradeCategoriesSection: Section = ({ t, fmt }) => {
         const kFactor = useConst ? (deflator?.[y.year] ?? 1) : 1;
         visibleYears[i] = y.year;
 
-        if (!hasSelectedCountries) {
-          visibleTotalExports[i] = y.exports.total != null ? round(y.exports.total * kFactor, 2) : null;
-          visibleTotalImports[i] = y.imports.total != null ? round(y.imports.total * kFactor, 2) : null;
-        } else {
-          let expTot = 0;
-          let impTot = 0;
-          for (let k = 0; k < upperSelectedCountries.length; k++) {
-            const pCode = upperSelectedCountries[k];
-            const pExp = y.exports.partners[pCode];
-            if (pExp) expTot += pExp.total;
-            const pImp = y.imports.partners[pCode];
-            if (pImp) impTot += pImp.total;
-          }
-          visibleTotalExports[i] = expTot > 0 ? round(expTot * kFactor, 2) : null;
-          visibleTotalImports[i] = impTot > 0 ? round(impTot * kFactor, 2) : null;
-        }
+        const baseExp = getFlowVolume(y.exports, isDetailed, selectedCountries, []);
+        const baseImp = getFlowVolume(y.imports, isDetailed, selectedCountries, []);
+        const expTot = hasSelectedCategories ? getFlowVolume(y.exports, isDetailed, selectedCountries, selectedCategories) : baseExp;
+        const impTot = hasSelectedCategories ? getFlowVolume(y.imports, isDetailed, selectedCountries, selectedCategories) : baseImp;
 
+        visibleBaseExports[i] = baseExp > 0 ? round(baseExp * kFactor, 2) : 0;
+        visibleBaseImports[i] = baseImp > 0 ? round(baseImp * kFactor, 2) : 0;
+        visibleTotalExports[i] = expTot > 0 ? round(expTot * kFactor, 2) : null;
+        visibleTotalImports[i] = impTot > 0 ? round(impTot * kFactor, 2) : null;
         visibleTradeBalance[i] = (visibleTotalExports[i] ?? 0) - (visibleTotalImports[i] ?? 0);
       }
+
+      const {
+        divisor,
+        scaleLabel,
+        data: [scaledTotalExports, scaledTotalImports, scaledTradeBalance],
+      } = resolveAdaptiveScale([visibleTotalExports, visibleTotalImports, visibleTradeBalance], fmt);
+      const curr = useConst ? '2021 $' : '$';
+      const unit = scaleLabel ? `${scaleLabel} (${curr})` : `(${curr})`;
 
       const getCodeColor = (code: string) => (isDetailed ? getDetailedCategoryColor(code) : tradeCategoryColors[code as TradeCategoryId]);
 
@@ -208,27 +217,12 @@ export const tradeCategoriesSection: Section = ({ t, fmt }) => {
           const yRec = visibleTimeline[i];
           const kFactor = useConst ? (deflator?.[yRec.year] ?? 1) : 1;
           const flow = isExp ? yRec.exports : yRec.imports;
-          const rawYearMap: Record<string, number> = {};
+          const rawYearMap = getYearCategoryBreakdown(flow, isDetailed, selectedCountries);
 
-          if (hasSelectedCountries) {
-            for (let k = 0; k < upperSelectedCountries.length; k++) {
-              const pCode = upperSelectedCountries[k];
-              const p = flow.partners[pCode];
-              if (!p) continue;
-              const catMap = isDetailed ? p.detailed : p.macro;
-              for (const code in catMap) {
-                rawYearMap[code] = (rawYearMap[code] || 0) + catMap[code];
-              }
-            }
-          } else {
-            const catMap = isDetailed ? flow.detailed : flow.macro;
-            for (const code in catMap) {
-              rawYearMap[code] = catMap[code];
-            }
-          }
-
-          const yearTotal = (isExp ? visibleTotalExports[i] : visibleTotalImports[i]) || 0;
+          const yearBaseTotal = (isExp ? visibleBaseExports[i] : visibleBaseImports[i]) || 0;
           const yearTop: [string, number, number][] = [];
+
+          let yearShareSum = 0;
 
           if (hasSelectedCategories) {
             for (let k = 0; k < selectedCategories.length; k++) {
@@ -236,9 +230,11 @@ export const tradeCategoriesSection: Section = ({ t, fmt }) => {
               const val = rawYearMap[catId];
               if (val != null && val > 0) {
                 const deflatedVal = val * kFactor;
-                const roundedVal = round(deflatedVal, 2);
-                const share = percentage(deflatedVal, yearTotal, 1);
+                const roundedVal = round(deflatedVal / divisor, 2);
+                const share = percentage(deflatedVal, yearBaseTotal, 1);
                 yearTop.push([catId, roundedVal, share]);
+                activeCodesSet.add(catId);
+                yearShareSum += share;
               }
             }
           } else {
@@ -252,19 +248,15 @@ export const tradeCategoriesSection: Section = ({ t, fmt }) => {
             for (let k = 0; k < topCount; k++) {
               const [code, val] = positiveEntries[k];
               const deflatedVal = val * kFactor;
-              const roundedVal = round(deflatedVal, 2);
-              const share = percentage(deflatedVal, yearTotal, 1);
+              const roundedVal = round(deflatedVal / divisor, 2);
+              const share = percentage(deflatedVal, yearBaseTotal, 1);
               yearTop.push([code, roundedVal, share]);
+              activeCodesSet.add(code);
+              yearShareSum += share;
             }
           }
 
           filteredYearsData.push(yearTop);
-          let yearShareSum = 0;
-          for (let k = 0; k < yearTop.length; k++) {
-            const [code, , share] = yearTop[k];
-            activeCodesSet.add(code);
-            yearShareSum += share;
-          }
           if (yearShareSum > maxStack) maxStack = yearShareSum;
         }
 
@@ -292,12 +284,13 @@ export const tradeCategoriesSection: Section = ({ t, fmt }) => {
       const effectivePercentBound =
         maxStack > 0 ? Math.min(MAX_PERCENT_AXIS_BOUND, Math.ceil((maxStack * PERCENT_HEADROOM_RATIO) / PERCENT_ROUND_STEP) * PERCENT_ROUND_STEP || MIN_PERCENT_AXIS_BOUND) : MAX_PERCENT_AXIS_BOUND;
 
-      const legendCodes = (isDetailed ? countryData.activeDetailed : countryData.activeMacro).map(([c]) => c as string).filter((c) => activeCodesSet.has(c));
-
-      const legendItems = legendCodes.map((code) => ({
-        name: getCodeName(code),
-        color: getCodeColor(code),
-      }));
+      const activeList = isDetailed ? countryData.activeDetailed : countryData.activeMacro;
+      const legendItems = activeList
+        .filter(([code]) => activeCodesSet.has(code))
+        .map(([code]) => ({
+          name: getCodeName(code),
+          color: getCodeColor(code),
+        }));
 
       return {
         title,
@@ -309,12 +302,12 @@ export const tradeCategoriesSection: Section = ({ t, fmt }) => {
               positive: {
                 title: t.common.exports,
                 color: tradeColors.exportTotal,
-                total: ({ dataIndex }) => fmt.number(visibleTotalExports[dataIndex] || 0),
+                total: ({ dataIndex }) => fmt.number(scaledTotalExports[dataIndex] || 0),
               },
               negative: {
                 title: t.common.imports,
                 color: tradeColors.importTotal,
-                total: ({ dataIndex }) => fmt.number(visibleTotalImports[dataIndex] || 0),
+                total: ({ dataIndex }) => fmt.number(scaledTotalImports[dataIndex] || 0),
               },
               row: ({ data: rowData }) => {
                 const item = rowData as { val: number; share: number };
@@ -324,7 +317,7 @@ export const tradeCategoriesSection: Section = ({ t, fmt }) => {
                 };
               },
               footer: ({ dataIndex }) => {
-                const balance = visibleTradeBalance[dataIndex] || 0;
+                const balance = scaledTradeBalance[dataIndex] || 0;
                 const sign = balance > 0 ? '+' : '';
                 return {
                   label: t.common.balance,
@@ -340,7 +333,7 @@ export const tradeCategoriesSection: Section = ({ t, fmt }) => {
             },
             yAxis: {
               type: 'value',
-              name: isPercent ? '%' : `${fmt.scale(BILLIONS_SCALE)} (${useConst ? '2021 $' : '$'})`,
+              name: isPercent ? '%' : unit,
               max: isPercent ? effectivePercentBound : undefined,
               min: isPercent ? -effectivePercentBound : undefined,
               axisLabel: {

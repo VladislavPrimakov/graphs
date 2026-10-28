@@ -100,33 +100,38 @@ function getDateTimeFormat(lang: Language, options?: Intl.DateTimeFormatOptions)
   return fmt;
 }
 
-/** Formats a numeric value with locale-specific grouping and decimal separators (default: up to 1 fraction digit, integers without trailing zeroes). */
+/** Formats a numeric value with locale-specific grouping and decimal separators (default: up to 2 fraction digits, integers without trailing zeroes). */
 function formatNumber(lang: Language, value: number, options?: Intl.NumberFormatOptions): string {
   return getNumberFormat(lang, {
     minimumFractionDigits: 0,
-    maximumFractionDigits: 1,
+    maximumFractionDigits: 2,
     ...options,
   }).format(value);
 }
 
-/** Formats a monetary amount into a localized currency string. */
+/** Formats a monetary amount into a localized currency string. Defaults to USD, compact notation, narrow symbol, and up to 2 fraction digits. */
 function formatCurrency(lang: Language, amount: number, currency = 'USD', options?: Intl.NumberFormatOptions): string {
+  const isCompact = (options?.notation ?? 'compact') === 'compact';
   return getNumberFormat(lang, {
     style: 'currency',
     currency,
-    maximumFractionDigits: 0,
+    currencyDisplay: 'narrowSymbol',
+    notation: 'compact',
+    compactDisplay: 'short',
+    maximumFractionDigits: isCompact ? 2 : 0,
     ...options,
   }).format(amount);
 }
 
-/** Formats a percentage value (0..100) according to locale conventions. */
-function formatPercent(lang: Language, value: number, options?: Intl.NumberFormatOptions): string {
+/** Formats a percentage value (0..100) according to locale conventions. Safely treats non-finite, null, or undefined as 0. */
+function formatPercent(lang: Language, value: number | null | undefined, options?: Intl.NumberFormatOptions): string {
+  const num = value != null && Number.isFinite(value) ? value : 0;
   return getNumberFormat(lang, {
     style: 'percent',
     minimumFractionDigits: 1,
     maximumFractionDigits: 1,
     ...options,
-  }).format(value / 100);
+  }).format(num / 100);
 }
 
 /**
@@ -406,7 +411,7 @@ function getRegionColor(regionCode?: string): string {
 export interface LocalizedFormatters {
   /** Formats general numbers (default: up to 1 fraction digit, integers without trailing zeroes). */
   number: (value: number, options?: Intl.NumberFormatOptions) => string;
-  /** Formats monetary currency amount. */
+  /** Formats monetary currency amount (defaults: USD, compact notation e.g. $1.5M / 1,5 млрд $, narrow symbol). */
   currency: (amount: number, currency?: string, options?: Intl.NumberFormatOptions) => string;
   /** Formats percentage from a 0..100 numeric value. */
   percent: (value: number, options?: Intl.NumberFormatOptions) => string;

@@ -10,9 +10,6 @@ export const DEFAULT_TOP_COUNT = 7;
 /** Default ISO alpha-2 country code on initial dashboard load. @default 'us' */
 export const DEFAULT_COUNTRY_CODE = 'us';
 
-/** Scale factor for monetary figures in billion USD. @default 1000000000 */
-export const BILLIONS_SCALE = 1e9;
-
 /** Headroom multiplier for adaptive dynamic Y-axis maximum scaling. @default 1.15 */
 export const PERCENT_HEADROOM_RATIO = 1.15;
 

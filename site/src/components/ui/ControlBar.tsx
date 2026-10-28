@@ -254,6 +254,7 @@ function ControlField({ spec, value, state, onChange, disabled: overrideDisabled
         <SearchSelect
           mode="single"
           items={items}
+          formatCount={spec.formatCount}
           value={selectedVal}
           defaultValue={spec.defaultValue}
           onChange={(val) => onChange(val)}
@@ -274,6 +275,7 @@ function ControlField({ spec, value, state, onChange, disabled: overrideDisabled
         <SearchSelect
           mode="multi"
           items={items}
+          formatCount={spec.formatCount}
           selectedValues={selected}
           onSelect={(val) => {
             if (!selected.includes(val)) {

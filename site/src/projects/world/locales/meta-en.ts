@@ -2,7 +2,7 @@ import type { ProjectLocaleMeta } from '@/utils/project';
 
 export const meta = {
   title: 'World',
-  description: 'Comparative macroeconomic, industrial, energy, and motorization indicators: GDP at PPP, manufacturing output, electricity generation, clean power, and passenger cars.',
+  description: 'Comparative macroeconomic, industrial, energy, and motorization indicators: GDP at PPP, manufacturing, electricity generation, clean power, and passenger cars.',
   sections: {
     'gdp-ppp': 'GDP (PPP)',
     'gdp-per-capita-ppp': 'GDP per Capita',

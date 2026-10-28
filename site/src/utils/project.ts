@@ -98,6 +98,7 @@ export interface SingleSearchSelectControl extends BaseControl {
   placeholder?: string | ((state: Record<string, unknown>) => string);
   emptyLabel?: string;
   items: readonly ControlSearchItem[] | ControlSearchItem[] | ((state: Record<string, unknown>) => readonly ControlSearchItem[] | ControlSearchItem[]);
+  formatCount?: (count: number) => string;
   defaultValue?: string;
 }
 
@@ -108,6 +109,7 @@ export interface MultiSearchSelectControl extends BaseControl {
   allLabel?: string;
   allCount?: number | ((state: Record<string, unknown>) => number | undefined);
   items: readonly ControlSearchItem[] | ControlSearchItem[] | ((state: Record<string, unknown>) => readonly ControlSearchItem[] | ControlSearchItem[]);
+  formatCount?: (count: number) => string;
   defaultValue?: readonly string[] | string[];
 }
 

@@ -1,7 +1,6 @@
-import { round } from '@graphs/shared/math';
 import { createChart } from '@/components/sections/SectionChart';
 import { chartOption, createBarSeries, resolveVisiblePeriod } from '@/utils/chart-builder';
-import { BILLIONS_SCALE } from '../constants';
+import { resolveAdaptiveScale } from '@/utils/scale';
 import type { Section } from '../project';
 import { budgetColors } from '../tokens';
 
@@ -70,7 +69,6 @@ export const macroSection: Section = ({ t, fmt, tokens }) => {
       const count = visibleTimeline.length;
 
       const visibleYears = new Array<number>(count);
-      const visibleBalances = new Array<number | null>(count);
       const visibleBalancesPct = new Array<number | null>(count);
       const expendituresData = new Array<{ value: number | null; gdpPct: number | null }>(count);
       const revenuesData = new Array<{ value: number | null; gdpPct: number | null }>(count);
@@ -78,20 +76,42 @@ export const macroSection: Section = ({ t, fmt, tokens }) => {
       const gdpData = new Array<number | null>(count);
       const budgetXAxisData = new Array<string>(count);
 
+      const rawBal = new Array<number | null>(count);
+      const rawExp = new Array<number | null>(count);
+      const rawRev = new Array<number | null>(count);
+      const rawDebt = new Array<number | null>(count);
+      const rawGdp = new Array<number | null>(count);
+
       for (let i = 0; i < count; i++) {
         const y = visibleTimeline[i];
         const m = y.macro;
         const yr = y.year;
         const k = useConst && macroK ? (macroK[yr] ?? 1.0) : 1.0;
-        const bal = m.govBalanceUsd != null ? round(m.govBalanceUsd * k, 2) : null;
 
         visibleYears[i] = yr;
-        visibleBalances[i] = bal;
         visibleBalancesPct[i] = m.govBalancePctGdp;
-        expendituresData[i] = { value: m.govExpenditureUsd != null ? round(m.govExpenditureUsd * k, 2) : null, gdpPct: m.govExpenditurePctGdp };
-        revenuesData[i] = { value: m.govRevenueUsd != null ? round(m.govRevenueUsd * k, 2) : null, gdpPct: m.govRevenuePctGdp };
-        debtData[i] = { value: m.govDebtUsd != null ? round(m.govDebtUsd * k, 2) : null, gdpPct: m.govDebtPctGdp };
-        gdpData[i] = m.gdpNominalUsd != null ? round(m.gdpNominalUsd * k, 2) : null;
+        rawBal[i] = m.govBalanceUsd != null ? m.govBalanceUsd * k : null;
+        rawExp[i] = m.govExpenditureUsd != null ? m.govExpenditureUsd * k : null;
+        rawRev[i] = m.govRevenueUsd != null ? m.govRevenueUsd * k : null;
+        rawDebt[i] = m.govDebtUsd != null ? m.govDebtUsd * k : null;
+        rawGdp[i] = m.gdpNominalUsd != null ? m.gdpNominalUsd * k : null;
+      }
+
+      const {
+        scaleLabel,
+        data: [scaledGdp, scaledDebt, scaledExp, scaledRev, visibleBalances],
+      } = resolveAdaptiveScale([rawGdp, rawDebt, rawExp, rawRev, rawBal], fmt);
+      const curr = useConst ? '2021 $' : '$';
+      const unit = scaleLabel ? `${scaleLabel} (${curr})` : `(${curr})`;
+
+      for (let i = 0; i < count; i++) {
+        const yr = visibleYears[i];
+        const bal = visibleBalances[i];
+        const m = visibleTimeline[i].macro;
+        expendituresData[i] = { value: scaledExp[i], gdpPct: m.govExpenditurePctGdp };
+        revenuesData[i] = { value: scaledRev[i], gdpPct: m.govRevenuePctGdp };
+        debtData[i] = { value: scaledDebt[i], gdpPct: m.govDebtPctGdp };
+        gdpData[i] = scaledGdp[i];
 
         if (bal == null) {
           budgetXAxisData[i] = `{year|${yr}}`;
@@ -146,7 +166,7 @@ export const macroSection: Section = ({ t, fmt, tokens }) => {
             yAxis: {
               type: 'value',
               min: 0,
-              name: `${fmt.scale(BILLIONS_SCALE)} (${useConst ? '2021 $' : '$'})`,
+              name: unit,
             },
             series: [
               createBarSeries({

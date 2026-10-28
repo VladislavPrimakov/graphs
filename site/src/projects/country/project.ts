@@ -36,6 +36,7 @@ export const project = defineProject<typeof dict, typeof data, typeof sectionDat
           type: 'single-search-select',
           defaultValue: DEFAULT_COUNTRY_CODE,
           label: t.proj.country,
+          formatCount: fmt.currency,
           items: toolbarMeta.countries.map((code) => ({
             value: code,
             label: fmt.region(code),

@@ -2093,6 +2093,7 @@ function renderRows<TData>(
     const raw = extractPointValue(item.data ?? item.value);
     if (raw === undefined || Number.isNaN(raw)) continue;
     const num = isAbs ? Math.abs(raw) : raw;
+    if (isAbs && num === 0) continue;
 
     const seriesName = String(item.seriesName ?? '');
     const seriesId = String(item.seriesId ?? '');
@@ -2143,7 +2144,10 @@ function buildDualTooltip<TData>(config: DualTooltipSpec<TData>): (params: unkno
     const posItems: CallbackDataParams[] = [];
     const negItems: CallbackDataParams[] = [];
     for (const item of tick.ctx.items) {
-      const num = Number(extractPointValue(item.data ?? item.value));
+      const rawVal = extractPointValue(item.data ?? item.value);
+      if (rawVal === undefined || Number.isNaN(rawVal)) continue;
+      const num = Number(rawVal);
+      if (num === 0) continue;
       if (num < 0 || String(item.seriesId).startsWith('imp')) negItems.push(item);
       else if (num > 0 || String(item.seriesId).startsWith('exp')) posItems.push(item);
     }

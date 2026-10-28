@@ -4,9 +4,11 @@ import { createChart } from '@/components/sections/SectionChart';
 import { CONTROL_DELAYS } from '@/projects/constants';
 import { chartOption, createRankedBarSeries, createStaticLegend, createStaticLegendSeries, resolveVisiblePeriod } from '@/utils/chart-builder';
 import type { ControlSearchItem } from '@/utils/project';
-import { BILLIONS_SCALE, DEFAULT_TOP_COUNT, MAX_PERCENT_AXIS_BOUND, MAX_TOP_COUNT, MIN_PERCENT_AXIS_BOUND, MIN_TOP_COUNT, PERCENT_HEADROOM_RATIO, PERCENT_ROUND_STEP } from '../constants';
+import { resolveAdaptiveScale } from '@/utils/scale';
+import { DEFAULT_TOP_COUNT, MAX_PERCENT_AXIS_BOUND, MAX_TOP_COUNT, MIN_PERCENT_AXIS_BOUND, MIN_TOP_COUNT, PERCENT_HEADROOM_RATIO, PERCENT_ROUND_STEP } from '../constants';
 import type { Section } from '../project';
 import { getDetailedCategoryColor, tradeCategoryColors, tradeColors } from '../tokens';
+import { getFlowVolume, getYearPartnerBreakdown, resolveFlowScale } from '../trade';
 
 /** Section builder for Country Foreign Trade Leading Bilateral Trading Partners chart. */
 export const tradePartnersSection: Section = ({ t, fmt }) => {
@@ -23,6 +25,9 @@ export const tradePartnersSection: Section = ({ t, fmt }) => {
       const activePartners = countryData.activePartners;
       const activeMacro = countryData.activeMacro;
       const activeDetailed = countryData.activeDetailed;
+
+      const macroCodesSet = new Set(activeMacro.map(([id]) => id as string));
+      const detailedCodesSet = new Set(activeDetailed.map(([code]) => code));
 
       const macroItems: ControlSearchItem[] = activeMacro.map(([id, count]) => ({
         value: id,
@@ -62,10 +67,17 @@ export const tradePartnersSection: Section = ({ t, fmt }) => {
               type: 'toggle',
               defaultValue: 'absolute',
               label: t.common.metric,
-              options: [
-                { value: 'absolute', label: `${fmt.scale(BILLIONS_SCALE)} ($)` },
-                { value: 'percent', label: `${t.common.share} (%)` },
-              ],
+              options: (state: Record<string, unknown>) => {
+                const isDet = state.level === 'detailed';
+                const selCountries = (state.countries as string[]) || [];
+                const rawCats = (state.categories as string[]) || [];
+                const selCats = rawCats.filter((c) => (isDet ? detailedCodesSet.has(c) : macroCodesSet.has(c)));
+                const scaleLabel = resolveFlowScale(countryData.timeline, isDet, selCountries, selCats, fmt);
+                return [
+                  { value: 'absolute', label: scaleLabel ? `${scaleLabel} ($)` : '$' },
+                  { value: 'percent', label: `${t.common.share} (%)` },
+                ];
+              },
             },
             {
               id: 'level',
@@ -93,6 +105,7 @@ export const tradePartnersSection: Section = ({ t, fmt }) => {
               type: 'multi-search-select',
               placeholder: t.proj.tradePartners.partners,
               emptyLabel: t.proj.tradePartners.noPartnersFound,
+              formatCount: fmt.currency,
               items: activePartners.map(([code, volume]) => ({
                 value: code,
                 label: fmt.region(code),
@@ -104,6 +117,7 @@ export const tradePartnersSection: Section = ({ t, fmt }) => {
               type: 'multi-search-select',
               placeholder: (state: Record<string, unknown>) => (state.level === 'detailed' ? t.proj.tradeCategories.detailedCategories : t.proj.tradeCategories.macroCategories),
               emptyLabel: t.proj.tradeCategories.noCategoriesFound,
+              formatCount: fmt.currency,
               items: (state: Record<string, unknown>) => (state.level === 'detailed' ? detailedItems : macroItems),
             },
           ] as const,
@@ -120,27 +134,26 @@ export const tradePartnersSection: Section = ({ t, fmt }) => {
       const selectedCountries = (partnersStore.countries as string[]) || [];
       const hasSelectedCountries = selectedCountries.length > 0;
 
-      const validCodesSet = new Set(isDetailed ? countryData.activeDetailed.map(([c]) => c) : countryData.activeMacro.map(([id]) => id as string));
       const rawSelectedCategories = (partnersStore.categories as string[]) || [];
-      const selectedCategories = rawSelectedCategories.filter((c) => validCodesSet.has(c));
+      const selectedCategories =
+        rawSelectedCategories.length > 0
+          ? rawSelectedCategories.filter((c) => (isDetailed ? countryData.activeDetailed.some(([code]) => code === c) : countryData.activeMacro.some(([id]) => id === c)))
+          : [];
       const hasSelectedCategories = selectedCategories.length > 0;
 
-      const partnerSeriesData: (number | null | undefined)[][] = hasSelectedCountries
-        ? selectedCountries.flatMap((c) => {
-            const u = c.toUpperCase();
-            return [countryData.timeline.map((y) => y.exports.partners?.[u]?.total), countryData.timeline.map((y) => y.imports.partners?.[u]?.total)];
-          })
-        : [countryData.timeline.map((y) => y.exports.total), countryData.timeline.map((y) => y.imports.total)];
-
       const { startIdx, endIdx } = resolveVisiblePeriod(countryData.years, countryStore.years, {
-        seriesData: partnerSeriesData,
+        seriesData: [
+          countryData.timeline.map((y) => getFlowVolume(y.exports, isDetailed, selectedCountries, selectedCategories) || null),
+          countryData.timeline.map((y) => getFlowVolume(y.imports, isDetailed, selectedCountries, selectedCategories) || null),
+        ],
       });
 
       const visibleTimeline = startIdx < endIdx ? countryData.timeline.slice(startIdx, endIdx) : [];
       const countTimeline = visibleTimeline.length;
       const visibleYears = new Array<number>(countTimeline);
 
-      const upperSelectedCountries = selectedCountries.map((c) => c.toUpperCase());
+      const visibleBaseExports = new Array<number>(countTimeline);
+      const visibleBaseImports = new Array<number>(countTimeline);
       const visibleTotalExports = new Array<number | null>(countTimeline);
       const visibleTotalImports = new Array<number | null>(countTimeline);
       const visibleTradeBalance = new Array<number>(countTimeline);
@@ -150,27 +163,25 @@ export const tradePartnersSection: Section = ({ t, fmt }) => {
         const kFactor = useConst ? (deflator?.[y.year] ?? 1) : 1;
         visibleYears[i] = y.year;
 
-        let baseExp = 0;
-        let baseImp = 0;
-        if (!hasSelectedCategories) {
-          baseExp = y.exports.total;
-          baseImp = y.imports.total;
-        } else {
-          const expCatMap = isDetailed ? y.exports.detailed : y.exports.macro;
-          const impCatMap = isDetailed ? y.imports.detailed : y.imports.macro;
-          for (let cIdx = 0; cIdx < selectedCategories.length; cIdx++) {
-            const catId = selectedCategories[cIdx];
-            const expEntry = expCatMap[catId];
-            if (expEntry) baseExp += expEntry;
-            const impEntry = impCatMap[catId];
-            if (impEntry) baseImp += impEntry;
-          }
-        }
+        const baseExp = getFlowVolume(y.exports, isDetailed, [], selectedCategories);
+        const baseImp = getFlowVolume(y.imports, isDetailed, [], selectedCategories);
+        const expTot = hasSelectedCountries ? getFlowVolume(y.exports, isDetailed, selectedCountries, selectedCategories) : baseExp;
+        const impTot = hasSelectedCountries ? getFlowVolume(y.imports, isDetailed, selectedCountries, selectedCategories) : baseImp;
 
-        visibleTotalExports[i] = baseExp > 0 ? round(baseExp * kFactor, 2) : null;
-        visibleTotalImports[i] = baseImp > 0 ? round(baseImp * kFactor, 2) : null;
+        visibleBaseExports[i] = baseExp > 0 ? round(baseExp * kFactor, 2) : 0;
+        visibleBaseImports[i] = baseImp > 0 ? round(baseImp * kFactor, 2) : 0;
+        visibleTotalExports[i] = expTot > 0 ? round(expTot * kFactor, 2) : null;
+        visibleTotalImports[i] = impTot > 0 ? round(impTot * kFactor, 2) : null;
         visibleTradeBalance[i] = (visibleTotalExports[i] ?? 0) - (visibleTotalImports[i] ?? 0);
       }
+
+      const {
+        divisor,
+        scaleLabel,
+        data: [scaledTotalExports, scaledTotalImports, scaledTradeBalance],
+      } = resolveAdaptiveScale([visibleTotalExports, visibleTotalImports, visibleTradeBalance], fmt);
+      const curr = useConst ? '2021 $' : '$';
+      const unit = scaleLabel ? `${scaleLabel} (${curr})` : `(${curr})`;
 
       const activeCodesSet = new Set<string>();
       let maxStack = 0;
@@ -186,77 +197,43 @@ export const tradePartnersSection: Section = ({ t, fmt }) => {
           const yRec = visibleTimeline[i];
           const kFactor = useConst ? (deflator?.[yRec.year] ?? 1) : 1;
           const flow = isExp ? yRec.exports : yRec.imports;
-          const rawYearMap = flow.partners || {};
-          const yearBaseTotal = (isExp ? visibleTotalExports[i] : visibleTotalImports[i]) || 0;
+          const rawYearMap = getYearPartnerBreakdown(flow, isDetailed, selectedCategories);
+          const yearBaseTotal = (isExp ? visibleBaseExports[i] : visibleBaseImports[i]) || 0;
           const yearTop: [string, number, number][] = [];
+          let yearShareSum = 0;
 
           if (hasSelectedCountries) {
-            for (let k = 0; k < upperSelectedCountries.length; k++) {
-              const pCodeUpper = upperSelectedCountries[k];
-              const partner = rawYearMap[pCodeUpper];
-              if (!partner) continue;
-
-              let val = 0;
-              if (hasSelectedCategories) {
-                const catMap = isDetailed ? partner.detailed : partner.macro;
-                for (let cIdx = 0; cIdx < selectedCategories.length; cIdx++) {
-                  const entry = catMap[selectedCategories[cIdx]];
-                  if (entry) val += entry;
-                }
-                val = round(val, 2);
-              } else {
-                val = partner.total;
-              }
-
-              if (val > 0) {
+            for (let k = 0; k < selectedCountries.length; k++) {
+              const pCode = selectedCountries[k];
+              const val = rawYearMap[pCode];
+              if (val != null && val > 0) {
                 const deflatedVal = val * kFactor;
-                const roundedVal = round(deflatedVal, 2);
+                const roundedVal = round(deflatedVal / divisor, 2);
                 const share = percentage(deflatedVal, yearBaseTotal, 1);
-                yearTop.push([pCodeUpper, roundedVal, share]);
+                yearTop.push([pCode, roundedVal, share]);
+                activeCodesSet.add(pCode);
+                yearShareSum += share;
               }
             }
           } else {
-            const positiveEntries: [string, number][] = [];
-
-            for (const pCodeUpper in rawYearMap) {
-              const partner = rawYearMap[pCodeUpper];
-              if (!partner) continue;
-
-              let val = 0;
-              if (hasSelectedCategories) {
-                const catMap = isDetailed ? partner.detailed : partner.macro;
-                for (let cIdx = 0; cIdx < selectedCategories.length; cIdx++) {
-                  const entry = catMap[selectedCategories[cIdx]];
-                  if (entry) val += entry;
-                }
-                val = round(val, 2);
-              } else {
-                val = partner.total;
-              }
-
-              if (val > 0) {
-                positiveEntries.push([pCodeUpper, val]);
-              }
+            const entries: [string, number][] = [];
+            for (const pCode in rawYearMap) {
+              entries.push([pCode, rawYearMap[pCode]]);
             }
-
-            positiveEntries.sort((a, b) => b[1] - a[1]);
-            const topCount = Math.min(top, positiveEntries.length);
+            entries.sort((a, b) => b[1] - a[1]);
+            const topCount = Math.min(top, entries.length);
             for (let k = 0; k < topCount; k++) {
-              const [pCodeUpper, val] = positiveEntries[k];
+              const [pCode, val] = entries[k];
               const deflatedVal = val * kFactor;
-              const roundedVal = round(deflatedVal, 2);
+              const roundedVal = round(deflatedVal / divisor, 2);
               const share = percentage(deflatedVal, yearBaseTotal, 1);
-              yearTop.push([pCodeUpper, roundedVal, share]);
+              yearTop.push([pCode, roundedVal, share]);
+              activeCodesSet.add(pCode);
+              yearShareSum += share;
             }
           }
 
           filteredYearsData.push(yearTop);
-          let yearShareSum = 0;
-          for (let k = 0; k < yearTop.length; k++) {
-            const [code, , share] = yearTop[k];
-            activeCodesSet.add(code);
-            yearShareSum += share;
-          }
           if (yearShareSum > maxStack) maxStack = yearShareSum;
         }
 
@@ -282,11 +259,12 @@ export const tradePartnersSection: Section = ({ t, fmt }) => {
       const expSeries = buildTradeSeries('exp');
       const impSeries = buildTradeSeries('imp');
 
-      const legendCodes = countryData.activePartners.map(([c]) => c as string).filter((c) => activeCodesSet.has(c));
-      const legendItems = legendCodes.map((code) => ({
-        name: fmt.region(code),
-        color: fmt.regionColor(code),
-      }));
+      const legendItems = countryData.activePartners
+        .filter(([code]) => activeCodesSet.has(code))
+        .map(([code]) => ({
+          name: fmt.region(code),
+          color: fmt.regionColor(code),
+        }));
 
       const countryName = fmt.region(countryData.code);
       let catTitlePart = '';
@@ -318,12 +296,12 @@ export const tradePartnersSection: Section = ({ t, fmt }) => {
               positive: {
                 title: t.common.exports,
                 color: tradeColors.exportTotal,
-                total: ({ dataIndex }) => fmt.number(visibleTotalExports[dataIndex] || 0),
+                total: ({ dataIndex }) => fmt.number(scaledTotalExports[dataIndex] || 0),
               },
               negative: {
                 title: t.common.imports,
                 color: tradeColors.importTotal,
-                total: ({ dataIndex }) => fmt.number(visibleTotalImports[dataIndex] || 0),
+                total: ({ dataIndex }) => fmt.number(scaledTotalImports[dataIndex] || 0),
               },
               row: ({ data: rowData }) => {
                 const { val, share } = rowData as { val: number; share: number };
@@ -333,7 +311,7 @@ export const tradePartnersSection: Section = ({ t, fmt }) => {
                 };
               },
               footer: ({ dataIndex }) => {
-                const balance = visibleTradeBalance[dataIndex] || 0;
+                const balance = scaledTradeBalance[dataIndex] || 0;
                 const sign = balance > 0 ? '+' : '';
                 return {
                   label: t.common.balance,
@@ -349,7 +327,7 @@ export const tradePartnersSection: Section = ({ t, fmt }) => {
             },
             yAxis: {
               type: 'value',
-              name: isPercent ? '%' : `${fmt.scale(BILLIONS_SCALE)} (${useConst ? '2021 $' : '$'})`,
+              name: isPercent ? '%' : unit,
               max: isPercent ? effectivePercentBound : undefined,
               min: isPercent ? -effectivePercentBound : undefined,
               axisLabel: {

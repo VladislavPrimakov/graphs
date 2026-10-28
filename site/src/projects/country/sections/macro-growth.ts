@@ -1,7 +1,8 @@
 import type { LineSeriesOption } from 'echarts';
 import { createChart } from '@/components/sections/SectionChart';
 import { chartOption, resolveEffectiveMax, resolveVisiblePeriod } from '@/utils/chart-builder';
-import { BILLIONS_SCALE, GROWTH_HEADROOM, GROWTH_RATIO, GROWTH_ROUND_STEP, MARK_LINE_WIDTH, REAL_GDP_LINE_WIDTH } from '../constants';
+import { resolveAdaptiveScale } from '@/utils/scale';
+import { GROWTH_HEADROOM, GROWTH_RATIO, GROWTH_ROUND_STEP, MARK_LINE_WIDTH, REAL_GDP_LINE_WIDTH } from '../constants';
 import type { Section } from '../project';
 import { budgetColors } from '../tokens';
 
@@ -45,6 +46,8 @@ export const macroGrowthSection: Section = ({ t, fmt, tokens }) => {
       const expenditureSeriesData = new Array<{ value: number | null; diff: number | null }>(count);
       const debtSeriesData = new Array<{ value: number | null; diff: number | null }>(count);
 
+      let maxDiff = 0;
+
       for (let i = 0; i < count; i++) {
         const y = visibleTimeline[i];
         const m = y.macro;
@@ -62,6 +65,8 @@ export const macroGrowthSection: Section = ({ t, fmt, tokens }) => {
         revenueSeriesData[i] = { value: gr.revenueYoy, diff: gr.revenueDiffUsd };
         expenditureSeriesData[i] = { value: gr.expenditureYoy, diff: gr.expenditureDiffUsd };
         debtSeriesData[i] = { value: gr.debtYoy, diff: gr.debtDiffUsd };
+
+        maxDiff = Math.max(maxDiff, Math.abs(gr.gdpDiffUsd || 0), Math.abs(gr.revenueDiffUsd || 0), Math.abs(gr.expenditureDiffUsd || 0), Math.abs(gr.debtDiffUsd || 0));
       }
 
       const visibleSeries = [gdpYoy, gdpRealGrowth, revenueYoy, expenditureYoy, debtYoy];
@@ -70,6 +75,9 @@ export const macroGrowthSection: Section = ({ t, fmt, tokens }) => {
         headroom: GROWTH_HEADROOM,
         roundStep: GROWTH_ROUND_STEP,
       });
+
+      const { scaleLabel, divisor } = resolveAdaptiveScale(maxDiff, fmt);
+      const diffUnit = scaleLabel ? `${scaleLabel} ($)` : '($)';
 
       const series: LineSeriesOption[] = [
         {
@@ -148,9 +156,12 @@ export const macroGrowthSection: Section = ({ t, fmt, tokens }) => {
               row: ({ seriesName, value, data: rowData }) => {
                 const item = typeof rowData === 'object' && rowData !== null ? (rowData as { diff?: number | null }) : undefined;
                 const sign = value > 0 ? '+' : '';
-                const diffSign = item?.diff != null && item.diff > 0 ? '+' : item?.diff != null && item.diff < 0 ? '-' : '';
-                const subValue =
-                  item?.diff != null ? `${diffSign}${fmt.number(Math.abs(item.diff), { minimumFractionDigits: 1, maximumFractionDigits: 1 })} ${fmt.scale(BILLIONS_SCALE)} ($)` : undefined;
+                let subValue: string | undefined;
+                if (item?.diff != null) {
+                  const diffSign = item.diff > 0 ? '+' : item.diff < 0 ? '-' : '';
+                  const scaledDiff = Math.abs(item.diff) / divisor;
+                  subValue = `${diffSign}${fmt.number(scaledDiff, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} ${diffUnit}`;
+                }
                 return {
                   label: seriesName,
                   value: `${sign}${fmt.percent(value)}`,

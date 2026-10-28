@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { readJsonSync } from '@/utils/fs';
 import { createFormat } from '../../../site/src/utils/format';
@@ -8,22 +9,51 @@ import type { CountryPipelineCache, RawCountryProfile } from './index';
 const LOCALES: readonly Language[] = ['en', 'ru', 'uk', 'de'] as const;
 
 /** UN Comtrade statistical, customs, and non-country area codes that must never appear in partner data. */
-const FORBIDDEN_STATISTICAL_CODES = new Set(['_X', 'XX', 'X1', 'X2', 'E19', 'F19', 'O19', 'A79', 'A59', 'F97', 'E29', 'A49', 'F49', 'R91', 'NTZ', '_AC', '_CI', '_SM', '_TK', '_WI', '_ZP']);
+const FORBIDDEN_STATISTICAL_CODES = new Set([
+  '_X',
+  'XX',
+  'X1',
+  'X2',
+  'E19',
+  'F19',
+  'O19',
+  'A79',
+  'A59',
+  'F97',
+  'E29',
+  'A49',
+  'F49',
+  'R91',
+  'R20',
+  'S19',
+  'NTZ',
+  '_AC',
+  '_CI',
+  '_SM',
+  '_TK',
+  '_WI',
+  '_ZP',
+]);
 
 /** Known historical sovereign states and custom unions with dedicated localization entries. */
 const HISTORICAL_CODES = ['SUN', 'YUG', 'SCG', 'CSK', 'DDR', 'ANT', 'ZA1', 'YMD', 'PUS', 'PCI', 'ATB'] as const;
 
 function loadDataJson(): CountryPipelineCache {
-  const filePath = resolve(import.meta.dir, 'data.json.br');
+  const dirPath = resolve(import.meta.dir, 'data');
+  const cache: CountryPipelineCache = { countries: {} };
   try {
-    const parsed = readJsonSync<CountryPipelineCache | Record<string, RawCountryProfile>>(filePath);
-    if ('countries' in parsed && typeof parsed.countries === 'object') {
-      return parsed as CountryPipelineCache;
+    const entries = readdirSync(dirPath);
+    for (const file of entries) {
+      if (!file.endsWith('.json.br')) continue;
+      const parsed = readJsonSync<RawCountryProfile>(resolve(dirPath, file));
+      if (parsed?.code) {
+        cache.countries[parsed.code.toLowerCase()] = parsed;
+      }
     }
-    return { countries: parsed as Record<string, RawCountryProfile> };
   } catch {
     return { countries: {} };
   }
+  return cache;
 }
 
 function isRegionResolved(lang: Language, code: string, localized: string): boolean {

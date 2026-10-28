@@ -1,8 +1,8 @@
-import { round } from '@graphs/shared/math';
 import type { DefaultLabelFormatterCallbackParams as CallbackDataParams } from 'echarts';
 import { createChart } from '@/components/sections/SectionChart';
 import { chartOption, createBarSeries, resolveVisiblePeriod } from '@/utils/chart-builder';
-import { BALANCE_LINE_WIDTH, BALANCE_SYMBOL_SIZE, BILLIONS_SCALE } from '../constants';
+import { resolveAdaptiveScale } from '@/utils/scale';
+import { BALANCE_LINE_WIDTH, BALANCE_SYMBOL_SIZE } from '../constants';
 import type { Section } from '../project';
 import { tradeColors } from '../tokens';
 
@@ -20,6 +20,7 @@ export const tradeStructureSection: Section = ({ t, fmt }) => {
     buildView: ({ countryData, deflator }, { countryStore }) => {
       const countryName = fmt.region(countryData.code);
       const title = `${countryName} — ${t.proj.tradeStructure.title}`;
+      const showLabels = Boolean(countryStore.labels);
       const useConst = Boolean(countryStore.inConstant2021);
       const { startIdx, endIdx } = resolveVisiblePeriod(countryData.years, countryStore.years, {
         seriesData: [countryData.timeline.map((y) => y.exports.total), countryData.timeline.map((y) => y.imports.total)],
@@ -29,25 +30,40 @@ export const tradeStructureSection: Section = ({ t, fmt }) => {
       const count = visibleTimeline.length;
 
       const visibleYears = new Array<number>(count);
-      const visibleBalances = new Array<number | null>(count);
       const exportsData = new Array<{ value: number | null; goods: number | null; services: number | null }>(count);
       const importsData = new Array<{ value: number | null; goods: number | null; services: number | null }>(count);
+
+      const rawExp = new Array<number | null>(count);
+      const rawGoodsExp = new Array<number | null>(count);
+      const rawServExp = new Array<number | null>(count);
+      const rawImp = new Array<number | null>(count);
+      const rawGoodsImp = new Array<number | null>(count);
+      const rawServImp = new Array<number | null>(count);
+      const rawBal = new Array<number | null>(count);
 
       for (let i = 0; i < count; i++) {
         const y = visibleTimeline[i];
         const k = useConst ? (deflator?.[y.year] ?? 1) : 1;
         visibleYears[i] = y.year;
-        visibleBalances[i] = y.netBalanceUsd != null ? round(y.netBalanceUsd * k, 2) : null;
-        exportsData[i] = {
-          value: y.exports.total != null ? round(y.exports.total * k, 2) : null,
-          goods: y.exports.goods != null ? round(y.exports.goods * k, 2) : null,
-          services: y.exports.services != null ? round(y.exports.services * k, 2) : null,
-        };
-        importsData[i] = {
-          value: y.imports.total != null ? round(y.imports.total * k, 2) : null,
-          goods: y.imports.goods != null ? round(y.imports.goods * k, 2) : null,
-          services: y.imports.services != null ? round(y.imports.services * k, 2) : null,
-        };
+        rawBal[i] = y.netBalanceUsd != null ? y.netBalanceUsd * k : null;
+        rawExp[i] = y.exports.total != null ? y.exports.total * k : null;
+        rawGoodsExp[i] = y.exports.goods != null ? y.exports.goods * k : null;
+        rawServExp[i] = y.exports.services != null ? y.exports.services * k : null;
+        rawImp[i] = y.imports.total != null ? y.imports.total * k : null;
+        rawGoodsImp[i] = y.imports.goods != null ? y.imports.goods * k : null;
+        rawServImp[i] = y.imports.services != null ? y.imports.services * k : null;
+      }
+
+      const {
+        scaleLabel,
+        data: [scaledExp, scaledGoodsExp, scaledServExp, scaledImp, scaledGoodsImp, scaledServImp, visibleBalances],
+      } = resolveAdaptiveScale([rawExp, rawGoodsExp, rawServExp, rawImp, rawGoodsImp, rawServImp, rawBal], fmt);
+      const curr = useConst ? '2021 $' : '$';
+      const unit = scaleLabel ? `${scaleLabel} (${curr})` : `(${curr})`;
+
+      for (let i = 0; i < count; i++) {
+        exportsData[i] = { value: scaledExp[i], goods: scaledGoodsExp[i], services: scaledServExp[i] };
+        importsData[i] = { value: scaledImp[i], goods: scaledGoodsImp[i], services: scaledServImp[i] };
       }
 
       return {
@@ -87,7 +103,7 @@ export const tradeStructureSection: Section = ({ t, fmt }) => {
             },
             yAxis: {
               type: 'value',
-              name: `${fmt.scale(BILLIONS_SCALE)} (${useConst ? '2021 $' : '$'})`,
+              name: unit,
             },
             series: [
               createBarSeries({
@@ -96,7 +112,7 @@ export const tradeStructureSection: Section = ({ t, fmt }) => {
                 color: tradeColors.exportTotal,
                 data: exportsData,
                 label: {
-                  show: true,
+                  show: showLabels,
                   color: tradeColors.exportTotal,
                 },
                 formatLabel: ({ value }) => fmt.number(value),
@@ -107,7 +123,7 @@ export const tradeStructureSection: Section = ({ t, fmt }) => {
                 color: tradeColors.importTotal,
                 data: importsData,
                 label: {
-                  show: true,
+                  show: showLabels,
                   color: tradeColors.importTotal,
                 },
                 formatLabel: ({ value }) => fmt.number(value),
@@ -121,7 +137,7 @@ export const tradeStructureSection: Section = ({ t, fmt }) => {
                 lineStyle: { width: BALANCE_LINE_WIDTH, type: 'dashed' },
                 data: visibleBalances,
                 label: {
-                  show: true,
+                  show: showLabels,
                   formatter: (params: CallbackDataParams) => {
                     const num = Number(params.value);
                     if (Number.isNaN(num)) return '';

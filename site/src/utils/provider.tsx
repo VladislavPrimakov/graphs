@@ -132,10 +132,11 @@ function getServerSystemThemeSnapshot(): ResolvedTheme {
 
 /** Resolves the user's preferred language from browser settings matching supported site languages. */
 export function resolveBrowserLanguage(): Language {
-  if (typeof navigator === 'undefined' || !navigator.languages) {
+  if (typeof navigator === 'undefined') {
     return DEFAULT_LANGUAGE;
   }
-  for (const tag of navigator.languages) {
+  const candidates = navigator.languages?.length ? navigator.languages : navigator.language ? [navigator.language] : [];
+  for (const tag of candidates) {
     const code = tag.split('-')[0].toLowerCase();
     if (SUPPORTED_LANGUAGE_CODES.includes(code as Language)) {
       return code as Language;
@@ -229,20 +230,15 @@ export const AppProvider: React.FC<AppProviderProps> = ({ lang, common, cldr, pr
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    const stored = localStorage.getItem('lang') as Language | null;
+    let stored = localStorage.getItem('lang') as Language | null;
     if (!stored || !(stored in LANGUAGE_MAP)) {
-      // First visit: detect browser language preference
-      const browserLang = resolveBrowserLanguage();
-      // Only auto-redirect if landed on default un-prefixed locale and browser prefers a supported non-default locale
-      if (lang === DEFAULT_LANGUAGE && browserLang !== DEFAULT_LANGUAGE) {
-        localStorage.setItem('lang', browserLang);
-        navigate(getLocalizedPath(getFullCurrentPath(), browserLang), { replace: true, preventScrollReset: true });
-        return;
-      }
-      localStorage.setItem('lang', lang);
-    } else if (stored !== lang) {
-      // Keep localStorage in sync with explicitly visited URL locale
-      localStorage.setItem('lang', lang);
+      stored = resolveBrowserLanguage();
+      localStorage.setItem('lang', stored);
+    }
+
+    if (stored !== lang) {
+      navigate(getLocalizedPath(getFullCurrentPath(), stored), { replace: true, preventScrollReset: true });
+      return;
     }
 
     const handleSync = (e: StorageEvent) => {

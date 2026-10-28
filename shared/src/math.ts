@@ -3,7 +3,7 @@
  */
 
 /** Rounds a numeric value to a specified number of decimal places. */
-export function round(value: number, decimals = 1): number {
+export function round(value: number, decimals = 2): number {
   if (!Number.isFinite(value)) return 0;
   if (decimals === 0) return Math.round(value);
   const factor = 10 ** decimals;

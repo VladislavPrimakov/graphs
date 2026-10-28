@@ -15,6 +15,8 @@ export interface SearchSelectItem {
 interface SearchSelectBaseProps {
   /** Array of all candidate items. */
   items: readonly SearchSelectItem[] | SearchSelectItem[];
+  /** Optional custom formatter for numerical item counts in badge. */
+  formatCount?: (count: number) => string;
   /** Input placeholder label. */
   placeholder?: string;
   /** Empty state message. */
@@ -230,12 +232,15 @@ export const SearchSelect: React.FC<SearchSelectProps> = (props) => {
                   </div>
                   <span className="truncate">{props.allLabel}</span>
                 </div>
-                {effectiveAllCount !== undefined && <span className="font-mono text-3xs text-content-muted shrink-0 tabular-nums">{fmt.number(effectiveAllCount)}</span>}
+                {effectiveAllCount !== undefined && (
+                  <span className="font-mono text-3xs text-content-muted shrink-0 tabular-nums">{props.formatCount ? props.formatCount(effectiveAllCount) : fmt.number(effectiveAllCount)}</span>
+                )}
               </Command.Item>
             )}
             {sortedItems.map((item) => {
               const isSelected = selectedSet.has(item.value);
-              const itemTitle = item.count !== undefined ? `${item.label} (${fmt.number(item.count)})` : item.label;
+              const formattedCount = item.count !== undefined ? (props.formatCount ? props.formatCount(item.count) : fmt.number(item.count)) : undefined;
+              const itemTitle = formattedCount !== undefined ? `${item.label} (${formattedCount})` : item.label;
               return (
                 <Command.Item
                   key={String(item.value)}
@@ -272,7 +277,7 @@ export const SearchSelect: React.FC<SearchSelectProps> = (props) => {
                     {item.icon && <span className="shrink-0 flex items-center opacity-70">{item.icon}</span>}
                     <span className="truncate">{item.label}</span>
                   </div>
-                  {item.count !== undefined && <span className="font-mono text-3xs text-content-muted shrink-0 tabular-nums">{fmt.number(item.count)}</span>}
+                  {formattedCount !== undefined && <span className="font-mono text-3xs text-content-muted shrink-0 tabular-nums">{formattedCount}</span>}
                 </Command.Item>
               );
             })}

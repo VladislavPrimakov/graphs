@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.7] - 2026-10-29
+
+### Tooling
+
+#### Added
+- Added `CountryProfileData`, `CountryYearRecord`, and `CountryTradeFlow` domain schemas in `@graphs/shared/types/country` standardizing multi-decade macroeconomic indicators, bilateral trade flows, and commodity/service breakdowns in raw USD.
+
+---
+
+### Pipelines (@graphs/pipelines)
+
+#### Changed
+- Sharded Tier 1 raw country snapshots from monolithic 96 MB `data.json.br` into individual compressed files (`data/{countryCode}.json.br`) across 192 sovereign nations, reducing repository snapshot footprint and isolating cache invalidation per country.
+- Standardized bilateral trading partner codes and profile keys to lowercase ISO-2 across ETL pipelines and Tier 2 JSON exports.
+
+#### Removed
+- Removed monolithic `pipelines/src/country/data.json.br` in favor of per-country compressed snapshots.
+
+---
+
+### Site (@graphs/site)
+
+#### Added
+- Added `resolveAdaptiveScale` in `@/utils/scale` dynamically scaling monetary series across trillions, billions, millions, and thousands with localized unit formatting.
+- Added centralized trade engine in `site/src/projects/country/trade.ts` with zero-allocation `getFlowVolume`, linear `resolveFlowScale`, and fast-path category/partner dictionary projections.
+- Added `formatCount` prop to `SearchSelect` and `ControlBar` allowing controls to customize badge count formatting with localized currency scales.
+
+#### Changed
+- Optimized `trade-categories` and `trade-partners` dashboard sections in `country`, eliminating duplicate timeline passes, intermediate array allocations in period resolution, and redundant dictionary iterations.
+- Standardized country URLs and query parameters to lowercase ISO-2 across all search selects and toolbar stores.
+
+#### Fixed
+- Fixed that `trade-structure` ignored the coordinated `labels` toolbar toggle by synchronizing bar and line label visibility to `countryStore.labels`.
+
+---
+
 ## [1.3.6] - 2026-10-27
 
 ### Tooling
