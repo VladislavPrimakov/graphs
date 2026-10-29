@@ -1,14 +1,12 @@
 import path from 'node:path';
 import type { AttackDataGroup } from '@graphs/shared/types/war-rf-ua/strikes';
-import { fileExists, readJson, writeJsonAsync } from '@/utils/fs';
+import { KAGGLE_API_TOKEN } from '@/utils/env';
+import { fileExists, getRawDataPath, readJson, writeJsonAsyncToR2 } from '@/utils/fs';
 import { fetchWithRetry } from '@/utils/http';
 import { getLogger } from '@/utils/logger';
 import { round, sum } from '@/utils/math';
-import { loadEnv } from '@/utils/paths';
 
-loadEnv();
-
-const DATA_RF_PATH = `${import.meta.dir}/data-attacks-rf.json.br`;
+const DATA_RF_PATH = getRawDataPath('war-rf-ua', 'data-attacks-rf.json');
 const KAGGLE_DATASET = 'piterfm/massive-missile-attacks-on-ukraine';
 
 /** Downloads a dataset file from Kaggle API following storage redirection directly in memory. */
@@ -325,7 +323,7 @@ export async function parseRfAttacks(forceUpdate = false): Promise<AttackDataGro
     }
   }
 
-  const token = process.env.KAGGLE_API_TOKEN;
+  const token = KAGGLE_API_TOKEN;
   if (!token) {
     if (snapshot) {
       logger.debug('KAGGLE_API_TOKEN not found. Reusing committed data-attacks-rf.json snapshot.');
@@ -364,7 +362,7 @@ export async function parseRfAttacks(forceUpdate = false): Promise<AttackDataGro
     lastUpdated: new Date().toISOString(),
   };
 
-  await writeJsonAsync(DATA_RF_PATH, attackGroup);
+  await writeJsonAsyncToR2(DATA_RF_PATH, attackGroup);
   logger.debug(`Updated ${path.basename(DATA_RF_PATH)} with latest Kaggle attacks data (v${latestVersion ?? 'unknown'})`);
   return attackGroup;
 }

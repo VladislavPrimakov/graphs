@@ -10,14 +10,14 @@ import type {
   UkraineDataset,
 } from '@graphs/shared/types/ukraine';
 import XLSX, { type WorkSheet } from 'xlsx';
-import { exportDataset, getPipelineDataPath } from '@/utils/dataset';
-import { fileExists, readJson, writeJsonAsync } from '@/utils/fs';
+import { ensurePipelineL1, fileExists, getRawDataPath, readJson, writeJsonAsyncToR2, writeJsonAsyncToSite } from '@/utils/fs';
 import { fetchBinaryWithMeta, fetchHeadMeta, fetchWithRetry, isRemoteMetaEqual, type RemoteFileMeta } from '@/utils/http';
 import { getPipelineLogger, isUpdate, isVerbose, runWithLogger } from '@/utils/logger';
 import { percentage, percentageNullable, round, scaleMagnitude } from '@/utils/math';
+import { updateMetadata } from '@/utils/metadata';
 import { resolveRegionCode } from '@/utils/region';
 
-const DATA_FILE = getPipelineDataPath('ukraine');
+const DATA_FILE = getRawDataPath('ukraine');
 
 const URL_BUDGET = 'https://bank.gov.ua/files/macro/C_budget_m.xlsx';
 const URL_TRADE = 'https://bank.gov.ua/files/ES/Trade_y.xlsx';
@@ -111,7 +111,8 @@ async function exportUkraine(sections: UkrainePipelineCache['sections']): Promis
     maxYear,
     defaultPeriod,
   };
-  await exportDataset('ukraine', dataset);
+  await writeJsonAsyncToSite('ukraine/data.json', dataset);
+  await updateMetadata('ukraine');
 }
 
 /** Fetches monthly average USD/UAH exchange rates from NBU API, reusing cached historical rates. */
@@ -790,6 +791,8 @@ export async function runUkrainePipeline(forceUpdate = false, verbose?: boolean)
       const logger = getPipelineLogger('ukraine');
       logger.start('Ukraine');
 
+      await ensurePipelineL1('ukraine');
+
       let existingCache: UkrainePipelineCache | null = null;
       if (await fileExists(DATA_FILE)) {
         try {
@@ -1079,7 +1082,7 @@ export async function runUkrainePipeline(forceUpdate = false, verbose?: boolean)
         'trade-categories': tradeCategoriesSectionData,
       };
 
-      await writeJsonAsync(DATA_FILE, { meta: newMeta, rates: ratesCache, sections });
+      await writeJsonAsyncToR2(DATA_FILE, { meta: newMeta, rates: ratesCache, sections });
       await exportUkraine(sections);
       logger.complete(`${budgetYears[0]}–${budgetYears[budgetYears.length - 1]} budget, debt & trade`);
     },

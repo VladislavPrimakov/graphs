@@ -1,10 +1,9 @@
 import { describe, expect, it } from 'bun:test';
-import { readJson } from '@/utils/fs';
-import { getPipelineDataPath } from '@/utils/paths';
+import { getRawDataPath, readJson } from '@/utils/fs';
 import type { SpaceLaunchesPipelineCache } from './index';
 
 describe('space-launches data validation', async () => {
-  const dataPath = getPipelineDataPath('space-launches');
+  const dataPath = getRawDataPath('space-launches');
   const data = await readJson<SpaceLaunchesPipelineCache>(dataPath);
   const launches = data?.launches ?? [];
 

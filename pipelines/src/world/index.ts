@@ -9,18 +9,14 @@ import type {
   WorldToolbarMeta,
 } from '@graphs/shared/types/world';
 import countries from 'i18n-iso-countries';
-import { exportProjectMeta, getPipelineDataPath } from '@/utils/dataset';
-import { fileExists, readJson, writeJsonAsync } from '@/utils/fs';
+import { ensurePipelineL1, fileExists, getRawDataPath, readJson, writeJsonAsyncToR2, writeJsonAsyncToSite } from '@/utils/fs';
 import { fetchHeadMeta, fetchWithRetry, isRemoteMetaEqual, type RemoteFileMeta } from '@/utils/http';
 import { getPipelineLogger, isUpdate, isVerbose, runWithLogger } from '@/utils/logger';
 import { range, round } from '@/utils/math';
 import { updateMetadata } from '@/utils/metadata';
-import { loadEnv } from '@/utils/paths';
 import { resolveRegionCode } from '@/utils/region';
 
-loadEnv();
-
-const DATA_FILE = getPipelineDataPath('world');
+const DATA_FILE = getRawDataPath('world');
 
 const OWID_ENERGY_URL = 'https://raw.githubusercontent.com/owid/energy-data/master/owid-energy-data.csv';
 const WDI_SOURCE_URL = 'https://api.worldbank.org/v2/sources/2?format=json';
@@ -149,9 +145,9 @@ async function exportWorld(sections: WorldPipelineCache['sections']): Promise<vo
     maxTop: MAX_TOP,
   };
 
-  await exportProjectMeta('world', toolbarMeta, 'toolbar-meta.json');
+  await writeJsonAsyncToSite('world/toolbar-meta.json', toolbarMeta);
   for (const [id, secData] of Object.entries(sections)) {
-    await exportProjectMeta('world', secData, `${id}.json`);
+    await writeJsonAsyncToSite(`world/${id}.json`, secData);
   }
   await updateMetadata('world');
 }
@@ -764,10 +760,12 @@ export async function runWorldPipeline(forceUpdate = false, verbose?: boolean): 
       const logger = getPipelineLogger('world');
       logger.start('World');
 
+      await ensurePipelineL1('world');
+
       const force = forceUpdate || isUpdate();
       let cache = await loadWorldCache();
       if (force) {
-        logger.info('Force update requested (-u): resetting data.json.br cache...');
+        logger.info('Force update requested (-u): resetting data.json cache...');
         cache = null;
       }
 
@@ -951,7 +949,7 @@ export async function runWorldPipeline(forceUpdate = false, verbose?: boolean): 
         'passenger-cars': { years, series: carsFormatted.series, growth: carsFormatted.growth },
       };
 
-      await writeJsonAsync(DATA_FILE, {
+      await writeJsonAsyncToR2(DATA_FILE, {
         meta: {
           wdiLastUpdated: remoteWdiDate || cache?.meta?.wdiLastUpdated || null,
           owid: remoteOwidMeta || cache?.meta?.owid || null,

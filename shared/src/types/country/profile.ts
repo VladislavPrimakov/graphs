@@ -1,16 +1,5 @@
 /** 10 standardized physical goods macro categories (covering all 97 HS-2 chapters). */
-export const GOODS_CATEGORY_IDS = [
-  'ag',
-  'mn',
-  'ch',
-  'wd',
-  'tx',
-  'sg',
-  'mt',
-  'mc',
-  'tr',
-  'mi',
-] as const;
+export const GOODS_CATEGORY_IDS = ['ag', 'mn', 'ch', 'wd', 'tx', 'sg', 'mt', 'mc', 'tr', 'mi'] as const;
 
 export type GoodsCategoryId = (typeof GOODS_CATEGORY_IDS)[number];
 

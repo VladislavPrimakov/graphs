@@ -155,7 +155,6 @@ export const macroSection: Section = ({ t, fmt, tokens }) => {
               type: 'category',
               data: budgetXAxisData,
               axisLabel: {
-                interval: visibleYears.length > 15 ? 'auto' : 0,
                 rich: {
                   year: { color: tokens.text.secondary },
                   balNeg: { color: tokens.status.danger },

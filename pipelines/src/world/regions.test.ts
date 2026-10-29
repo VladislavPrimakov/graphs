@@ -1,7 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { readdirSync } from 'node:fs';
-import { resolve } from 'node:path';
-import { readJsonSync } from '@/utils/fs';
+import { getRawDataPath, readJsonSync } from '@/utils/fs';
 import { createFormat } from '../../../site/src/utils/format';
 import type { Language } from '../../../site/src/utils/language';
 import { CURRENT_YEAR, START_YEAR, type WorldPipelineCache } from './index';
@@ -12,7 +10,7 @@ const LOCALES: readonly Language[] = ['en', 'ru', 'uk', 'de'] as const;
 const FORBIDDEN_CODES = new Set(['XKX', 'WLD', '1W', 'OWID_WRL', 'World', '_X', 'XX']);
 
 function loadWorldCacheData(): WorldPipelineCache {
-  const filePath = resolve(import.meta.dir, 'data.json.br');
+  const filePath = getRawDataPath('world');
   try {
     return readJsonSync<WorldPipelineCache>(filePath);
   } catch {
@@ -20,21 +18,15 @@ function loadWorldCacheData(): WorldPipelineCache {
   }
 }
 
-function loadPublicWorldEntities(): Set<string> {
-  const dir = resolve(import.meta.dir, '../../../site/public/data/world');
+function loadPublicWorldEntities(cache: WorldPipelineCache): Set<string> {
   const allEntities = new Set<string>();
-  try {
-    const files = readdirSync(dir).filter((f) => f.endsWith('.json'));
-    for (const file of files) {
-      const content = readJsonSync<{ entities?: string[]; series?: Record<string, unknown> }>(resolve(dir, file));
-      if (content.entities) {
-        for (const e of content.entities) allEntities.add(e);
-      }
-      if (content.series) {
-        for (const k of Object.keys(content.series)) allEntities.add(k);
+  for (const sec of Object.values(cache.sections ?? {})) {
+    if (sec.series) {
+      for (const k of Object.keys(sec.series)) {
+        allEntities.add(k);
       }
     }
-  } catch {}
+  }
   return allEntities;
 }
 
@@ -59,7 +51,7 @@ function isRegionResolved(lang: Language, code: string, localized: string): bool
 
 describe('World Dashboard Region and Dataset Validation via Site Format', () => {
   const cache = loadWorldCacheData();
-  const publicEntities = loadPublicWorldEntities();
+  const publicEntities = loadPublicWorldEntities(cache);
   const formats = Object.fromEntries(LOCALES.map((l) => [l, createFormat(l)])) as Record<Language, ReturnType<typeof createFormat>>;
 
   test('world cache contains all required sections', () => {

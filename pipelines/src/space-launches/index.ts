@@ -7,11 +7,11 @@ import type {
   SpaceLaunchesDataset,
   SpaceLaunchesToolbarMeta,
 } from '@graphs/shared/types/space-launches';
-import { exportDataset, getPipelineDataPath } from '@/utils/dataset';
-import { fileExists, readJson, writeJsonAsync } from '@/utils/fs';
+import { ensurePipelineL1, fileExists, getRawDataPath, readJson, writeJsonAsyncToR2, writeJsonAsyncToSite } from '@/utils/fs';
 import { fetchWithRetry } from '@/utils/http';
 import { getPipelineLogger, isUpdate, isVerbose, runWithLogger } from '@/utils/logger';
 import { percentage, percentageNullable, range, ratio, round, sum } from '@/utils/math';
+import { updateMetadata } from '@/utils/metadata';
 import { resolveRegionCode } from '@/utils/region';
 
 /** Canonical historical orbital launch entry stored in offline snapshot cache. */
@@ -25,7 +25,7 @@ export interface StoredLaunch {
   status: number;
 }
 
-const DATA_FILE = getPipelineDataPath('space-launches');
+const DATA_FILE = getRawDataPath('space-launches');
 
 const API_HOST = 'll.thespacedevs.com';
 const API_VERSION = '2.3.0';
@@ -85,7 +85,8 @@ async function exportSpaceLaunches(sections: SpaceLaunchesPipelineCache['section
     ...sections,
     ...toolbarMeta,
   };
-  await exportDataset('space-launches', dataset);
+  await writeJsonAsyncToSite('space-launches/data.json', dataset);
+  await updateMetadata('space-launches');
 }
 
 interface LaunchRegionInput {
@@ -224,6 +225,8 @@ export async function runSpaceLaunchesPipeline(forceUpdate = false, verbose?: bo
     async () => {
       const logger = getPipelineLogger('space-launches');
       logger.start('Space Launches');
+
+      await ensurePipelineL1('space-launches');
 
       let cache: SpaceLaunchesPipelineCache | null = null;
       if (await fileExists(DATA_FILE)) {
@@ -868,7 +871,7 @@ export async function runSpaceLaunchesPipeline(forceUpdate = false, verbose?: bo
         remoteCount: preflightCount ?? cache?.meta?.remoteCount ?? allSorted.length,
       };
 
-      await writeJsonAsync(DATA_FILE, {
+      await writeJsonAsyncToR2(DATA_FILE, {
         meta: newMeta,
         launches: allSorted,
         sections,

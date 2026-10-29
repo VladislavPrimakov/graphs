@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.8] - 2026-10-29
+
+### Pipelines (@graphs/pipelines)
+
+#### Added
+- Added two-tier storage engine in `pipelines/src/utils/fs.ts` supporting on-demand Tier 1 (L1) raw snapshot synchronization via authenticated S3 client (`ensurePipelineL1`, `uploadToR2IfChanged`, `downloadFromR2IfChanged`, `writeJsonAsyncToR2`) and direct serialized production exports (`writeJsonAsyncToSite`).
+- Added strict environment enforcement in `pipelines/src/utils/env.ts` terminating process execution on missing upstream API tokens or Cloudflare credentials without code fallbacks.
+- Added committed human-readable military taxonomy JSON in `pipelines/src/war-rf-ua/classification.json` to track equipment classifications via version control diffs.
+
+#### Changed
+- Migrated Tier 1 raw cache snapshots from committed git binaries to private Cloudflare R2 bucket (`raw/*`) mirrored in gitignored `pipelines/raw/`, reducing git repository footprint.
+- Converted all 6 ETL pipelines (`ai-tokens`, `country`, `space-launches`, `ukraine`, `war-rf-ua`, `world`) to output production datasets directly to `site/public/data/` via `writeJsonAsyncToSite`.
+
+#### Removed
+- Removed all committed compressed binary cache files (`data.json.br`, `classification.json.br`, and per-country `data/*.json.br`) across all pipelines.
+- Removed obsolete helpers `pipelines/src/utils/dataset.ts` and `paths.ts` by consolidating path resolution and storage into `fs.ts`.
+
+---
+
 ## [1.3.7] - 2026-10-29
 
 ### Tooling

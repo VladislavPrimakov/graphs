@@ -1,12 +1,12 @@
 import { createHash } from 'node:crypto';
 import { AI_COMPANY_IDS, type AiCompanyId, type CompanySeriesItem, type RegionSeriesItem } from '@graphs/shared/types/ai-tokens';
-import { exportDataset, getPipelineDataPath } from '@/utils/dataset';
-import { fileExists, readJson, writeJsonAsync } from '@/utils/fs';
+import { ensurePipelineL1, fileExists, getRawDataPath, readJson, writeJsonAsyncToR2, writeJsonAsyncToSite } from '@/utils/fs';
 import { fetchHeadMeta, fetchWithRetry, isRemoteMetaEqual, type RemoteFileMeta } from '@/utils/http';
 import { getPipelineLogger, isUpdate, isVerbose, runWithLogger } from '@/utils/logger';
 import { percentage, round } from '@/utils/math';
+import { updateMetadata } from '@/utils/metadata';
 
-const DATA_FILE = getPipelineDataPath('ai-tokens');
+const DATA_FILE = getRawDataPath('ai-tokens');
 
 const URL_HOME = 'https://tokensperday.com';
 
@@ -95,6 +95,8 @@ export async function runAiTokensPipeline(forceUpdate = false, verbose?: boolean
       const logger = getPipelineLogger('ai-tokens');
       logger.start('AI Tokens');
 
+      await ensurePipelineL1('ai-tokens');
+
       let cache: AiTokensPipelineCache | null = null;
       if (await fileExists(DATA_FILE)) {
         try {
@@ -117,7 +119,8 @@ export async function runAiTokensPipeline(forceUpdate = false, verbose?: boolean
         remoteMeta = await fetchHeadMeta(URL_HOME);
         if (remoteMeta && isRemoteMetaEqual(cache.meta.remoteMeta, remoteMeta) && remoteMeta.etag) {
           logger.unchanged('ETag match');
-          await exportDataset('ai-tokens', cache.dataset);
+          await writeJsonAsyncToSite('ai-tokens/data.json', cache.dataset);
+          await updateMetadata('ai-tokens');
           return;
         }
       }
@@ -145,7 +148,8 @@ export async function runAiTokensPipeline(forceUpdate = false, verbose?: boolean
 
         if (!forceUpdate && hasValidDataset && cache?.meta?.viewsSha256 === viewsSha256) {
           logger.unchanged('SHA-256 match');
-          await exportDataset('ai-tokens', cache.dataset);
+          await writeJsonAsyncToSite('ai-tokens/data.json', cache.dataset);
+          await updateMetadata('ai-tokens');
           return;
         }
 
@@ -153,7 +157,8 @@ export async function runAiTokensPipeline(forceUpdate = false, verbose?: boolean
       } catch (err) {
         if (hasValidDataset && cache) {
           logger.warn(`Network query failed (${err instanceof Error ? err.message : String(err)}). Using cached dataset.`);
-          await exportDataset('ai-tokens', cache.dataset);
+          await writeJsonAsyncToSite('ai-tokens/data.json', cache.dataset);
+          await updateMetadata('ai-tokens');
           return;
         }
         throw new Error(`Failed to fetch ${URL_HOME} and no valid cache available: ${err}`);
@@ -323,7 +328,7 @@ export async function runAiTokensPipeline(forceUpdate = false, verbose?: boolean
         },
       };
 
-      await writeJsonAsync(DATA_FILE, {
+      await writeJsonAsyncToR2(DATA_FILE, {
         meta: {
           lastUpdated: new Date().toISOString(),
           viewsSha256: viewsSha256 || cache?.meta?.viewsSha256,
@@ -332,7 +337,8 @@ export async function runAiTokensPipeline(forceUpdate = false, verbose?: boolean
         views,
         dataset,
       });
-      await exportDataset('ai-tokens', dataset);
+      await writeJsonAsyncToSite('ai-tokens/data.json', dataset);
+      await updateMetadata('ai-tokens');
       logger.complete(`${months.length} months, ${companySeries.length} companies, ${regionSeries.length} regions`);
     },
     verbose,

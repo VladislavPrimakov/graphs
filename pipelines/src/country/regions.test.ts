@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { readJsonSync } from '@/utils/fs';
+import { getRawDataDir, readJsonSync } from '@/utils/fs';
 import { createFormat } from '../../../site/src/utils/format';
 import type { Language } from '../../../site/src/utils/language';
 import type { CountryPipelineCache, RawCountryProfile } from './index';
@@ -39,12 +39,12 @@ const FORBIDDEN_STATISTICAL_CODES = new Set([
 const HISTORICAL_CODES = ['SUN', 'YUG', 'SCG', 'CSK', 'DDR', 'ANT', 'ZA1', 'YMD', 'PUS', 'PCI', 'ATB'] as const;
 
 function loadDataJson(): CountryPipelineCache {
-  const dirPath = resolve(import.meta.dir, 'data');
+  const dirPath = getRawDataDir('country');
   const cache: CountryPipelineCache = { countries: {} };
   try {
     const entries = readdirSync(dirPath);
     for (const file of entries) {
-      if (!file.endsWith('.json.br')) continue;
+      if (!file.endsWith('.json')) continue;
       const parsed = readJsonSync<RawCountryProfile>(resolve(dirPath, file));
       if (parsed?.code) {
         cache.countries[parsed.code.toLowerCase()] = parsed;
@@ -82,7 +82,7 @@ describe('Country and Partner Region Parsing via Site Format', () => {
 
   test('data.json contains valid country profile entries', () => {
     if (countryCodes.length === 0) {
-      console.log('Notice: data.json.br is empty or not yet generated; skipping region assertions.');
+      console.log('Notice: country cache is empty or not yet generated; skipping region assertions.');
       expect(true).toBe(true);
       return;
     }

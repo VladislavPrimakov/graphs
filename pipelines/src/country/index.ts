@@ -2,29 +2,26 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { CountryToolbarMeta } from '@graphs/shared/types/country';
 import { type CountryMacroYear, type CountryPartnerTradeRecord, type CountryProfileData, type CountryYearRecord, TRADE_CATEGORY_IDS, type TradeCategoryId } from '@graphs/shared/types/country';
-import { exportProjectMeta } from '@/utils/dataset';
-import { fileExists, flushPendingJsonSaves, readJson, writeJsonAsync } from '@/utils/fs';
+import { COMTRADE_API_KEY } from '@/utils/env';
+import { ensurePipelineL1, fileExists, flushPendingJsonSaves, getRawDataDir, readJson, writeJsonAsyncToR2, writeJsonAsyncToSite } from '@/utils/fs';
 import { fetchWithRetry, HttpError } from '@/utils/http';
 import { getPipelineLogger, isUpdate, isVerbose, runWithLogger } from '@/utils/logger';
 import { range, round } from '@/utils/math';
 import { updateMetadata } from '@/utils/metadata';
-import { loadEnv } from '@/utils/paths';
 import { resolveRegionCode } from '@/utils/region';
 import { COUNTRY_CATEGORIES_META, EBOPS_NORMALIZATION_MAP, EBOPS_TO_SERVICES_MAP, HS_TO_MACRO_MAP, HS2_CHAPTERS } from './classification';
 import { COUNTRIES, COUNTRY_BY_CODE, COUNTRY_BY_ID, COUNTRY_BY_ISO3, type CountryEntry, SUPPORTED_COUNTRIES } from './countries';
 
-loadEnv();
-
-const DATA_DIR = path.resolve(import.meta.dir, 'data');
+const DATA_DIR = getRawDataDir('country');
 
 /** Returns the absolute path to a Tier 1 raw country snapshot. */
 export function getCountryDataPath(code: string): string {
-  return path.join(DATA_DIR, `${code.toLowerCase()}.json.br`);
+  return path.join(DATA_DIR, `${code.toLowerCase()}.json`);
 }
 
 /** Saves an individual country profile asynchronously to Tier 1 snapshot storage. */
 export function saveCountryProfile(profile: RawCountryProfile): Promise<void> {
-  return writeJsonAsync(getCountryDataPath(profile.code), profile);
+  return writeJsonAsyncToR2(getCountryDataPath(profile.code), profile);
 }
 
 export { COUNTRIES, SUPPORTED_COUNTRIES };
@@ -36,7 +33,7 @@ export const CHUNK_SIZE_SERVICES = 12;
 export const BATCH_SIZE_SERVICES_COUNTRIES = 40;
 export const CHUNK_SIZE = 12;
 
-const comtradeKey = process.env.COMTRADE_API_KEY || '';
+const comtradeKey = COMTRADE_API_KEY;
 const comtradeHeaders: Record<string, string> = comtradeKey ? { 'Ocp-Apim-Subscription-Key': comtradeKey } : {};
 
 /** UN Comtrade statistical, accounting, and unspecified non-country area aggregates mapped to Others. */
@@ -769,7 +766,7 @@ export async function fetchRawCountryProfile(
   return fakeCache.countries[meta.code] || null;
 }
 
-/** Loads existing Tier 1 raw country snapshots from pipelines/src/country/data/{code}.json.br. */
+/** Loads existing Tier 1 raw country snapshots from pipelines/raw/country/{code}.json. */
 export async function loadCountryCache(): Promise<CountryPipelineCache> {
   const cache: CountryPipelineCache = { countries: {} };
   if (!(await fileExists(DATA_DIR))) {
@@ -777,9 +774,9 @@ export async function loadCountryCache(): Promise<CountryPipelineCache> {
   }
   try {
     const entries = await fs.readdir(DATA_DIR);
-    const brFiles = entries.filter((f) => f.endsWith('.json.br'));
+    const jsonFiles = entries.filter((f) => f.endsWith('.json'));
     await Promise.all(
-      brFiles.map(async (f) => {
+      jsonFiles.map(async (f) => {
         try {
           const profile = await readJson<RawCountryProfile>(path.join(DATA_DIR, f));
           if (profile?.code) {
@@ -1342,7 +1339,7 @@ export async function exportCountryDatasets(countries: Record<string, RawCountry
 
   for (const [code, rawData] of completeCountries) {
     const profile = buildProductionProfile(rawData, countries);
-    await exportProjectMeta('country', profile, `${code.toLowerCase()}.json`);
+    await writeJsonAsyncToSite(`country/${code.toLowerCase()}.json`, profile);
 
     let latestGdp: number | undefined;
     for (let i = profile.timeline.length - 1; i >= 0; i--) {
@@ -1383,8 +1380,8 @@ export async function exportCountryDatasets(countries: Record<string, RawCountry
   };
 
   const deflator = buildUsdDeflator2021(countries.us, minYear, maxYear);
-  await exportProjectMeta('country', deflator, 'deflator.json');
-  await exportProjectMeta('country', toolbarMeta, 'toolbar-meta.json');
+  await writeJsonAsyncToSite('country/deflator.json', deflator);
+  await writeJsonAsyncToSite('country/toolbar-meta.json', toolbarMeta);
   await updateMetadata('country');
 
   const exportLogger = getPipelineLogger('country');
@@ -1399,6 +1396,7 @@ export async function runCountryPipeline(forceUpdate = false, verbose?: boolean)
       const logger = getPipelineLogger('country');
       logger.start('Country');
 
+      await ensurePipelineL1('country');
       const cache = await loadCountryCache();
       const force = forceUpdate || isUpdate();
       if (force) {

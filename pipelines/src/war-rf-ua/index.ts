@@ -1,8 +1,9 @@
 import type { FrontlineDynamicsMonthly, FrontlineDynamicsSectionData, FrontlineTimelinePoint, WarFrontlineDataset } from '@graphs/shared/types/war-rf-ua/frontline';
 import type { WarFrontlineToolbarMeta, WarLossModelMeta, WarRfUaToolbarMeta } from '@graphs/shared/types/war-rf-ua/toolbar-meta';
-import { exportDataset } from '@/utils/dataset';
+import { ensurePipelineL1, writeJsonAsyncToSite } from '@/utils/fs';
 import { getPipelineLogger, isUpdate, isVerbose, runWithLogger } from '@/utils/logger';
 import { round } from '@/utils/math';
+import { updateMetadata } from '@/utils/metadata';
 import { parseRfAttacks } from './parse-attacks-rf';
 import { parseUaAttacks } from './parse-attacks-ua';
 import { parseFrontline } from './parse-frontline';
@@ -194,6 +195,8 @@ export async function runWarRfUaPipeline(forceUpdate = false, verbose?: boolean)
       const logger = getPipelineLogger('war-rf-ua');
       logger.start('War RF-UA');
 
+      await ensurePipelineL1('war-rf-ua');
+
       logger.debug('Processing military equipment losses...');
       const losses = await parseLosses(forceUpdate);
 
@@ -319,7 +322,7 @@ export async function runWarRfUaPipeline(forceUpdate = false, verbose?: boolean)
         },
       };
 
-      await exportDataset('war-rf-ua', toolbarMeta, 'toolbar-meta.json');
+      await writeJsonAsyncToSite('war-rf-ua/toolbar-meta.json', toolbarMeta);
 
       const totalStrikes =
         rfData.summary.uavs.total + rfData.summary.ballistic.total + rfData.summary.cruise.total + uaData.summary.uavs.total + uaData.summary.ballistic.total + uaData.summary.cruise.total;
@@ -328,35 +331,24 @@ export async function runWarRfUaPipeline(forceUpdate = false, verbose?: boolean)
         logger.unchanged(`${losses.summary.totalRecords.toLocaleString()} losses, ${totalStrikes.toLocaleString()} strikes, ${frontline.timeline.length.toLocaleString()} days cached`);
       }
 
-      await exportDataset(
-        'war-rf-ua',
-        {
-          summary: frontline.summary,
-          timeline: frontline.timeline,
-        },
-        'frontline-map.json',
-      );
-      await exportDataset('war-rf-ua', frontlineDynamics, 'frontline-dynamics.json');
-      await exportDataset('war-rf-ua', losses.map, 'losses-map.json');
-      await exportDataset(
-        'war-rf-ua',
-        {
-          periods: losses.periods,
-          summary: losses.summary,
-          overallTimeline: losses.overallTimeline,
-          byCategory: losses.byCategory,
-        },
-        'losses.json',
-      );
-      await exportDataset(
-        'war-rf-ua',
-        {
-          rfAttacks: attacks.rfAttacks,
-          uaAttacks: attacks.uaAttacks,
-          unifiedTimeline: attacks.unifiedTimeline,
-        },
-        'strikes.json',
-      );
+      await writeJsonAsyncToSite('war-rf-ua/frontline-map.json', {
+        summary: frontline.summary,
+        timeline: frontline.timeline,
+      });
+      await writeJsonAsyncToSite('war-rf-ua/frontline-dynamics.json', frontlineDynamics);
+      await writeJsonAsyncToSite('war-rf-ua/losses-map.json', losses.map);
+      await writeJsonAsyncToSite('war-rf-ua/losses.json', {
+        periods: losses.periods,
+        summary: losses.summary,
+        overallTimeline: losses.overallTimeline,
+        byCategory: losses.byCategory,
+      });
+      await writeJsonAsyncToSite('war-rf-ua/strikes.json', {
+        rfAttacks: attacks.rfAttacks,
+        uaAttacks: attacks.uaAttacks,
+        unifiedTimeline: attacks.unifiedTimeline,
+      });
+      await updateMetadata('war-rf-ua');
 
       if (forceUpdate) {
         logger.complete(`${losses.summary.totalRecords.toLocaleString()} losses, ${totalStrikes.toLocaleString()} strikes, ${frontline.timeline.length.toLocaleString()} frontline days`);

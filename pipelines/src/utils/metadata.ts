@@ -1,13 +1,13 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { getMetadataPath } from '@/utils/fs';
 import { getLogger } from '@/utils/logger';
-import { getMetadataPath } from '@/utils/paths';
 
 export { getMetadataPath };
 
 let writeQueue: Promise<unknown> = Promise.resolve();
 
-/** Updates the last_updated date for project_id in site/public/data/metadata.json safely across concurrent pipelines. */
+/** Updates the last_updated date for project_id in site/public/data/metadata.json and R2 safely across concurrent pipelines. */
 export async function updateMetadata(projectId: string, dateStr?: string): Promise<string> {
   const finalDate = dateStr || new Date().toISOString().split('T')[0];
   const metaPath = getMetadataPath();
@@ -30,8 +30,10 @@ export async function updateMetadata(projectId: string, dateStr?: string): Promi
           sortedMeta[key] = meta[key];
         }
 
+        const jsonStr = `${JSON.stringify(sortedMeta)}\n`;
         await fs.mkdir(path.dirname(metaPath), { recursive: true });
-        await fs.writeFile(metaPath, `${JSON.stringify(sortedMeta)}\n`, 'utf-8');
+        await fs.writeFile(metaPath, jsonStr, 'utf-8');
+
         getLogger(projectId).debug(`Updated metadata.json: '${finalDate}'`);
         resolve(finalDate);
       } catch (err) {

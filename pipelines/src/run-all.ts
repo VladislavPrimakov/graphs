@@ -1,6 +1,5 @@
-import { fileExists, readJson } from '@/utils/fs';
+import { fileExists, getMetadataPath, readJson } from '@/utils/fs';
 import { getPipelineLogger, isUpdate, isVerbose } from '@/utils/logger';
-import { getMetadataPath } from '@/utils/paths';
 
 import { runAiTokensPipeline } from './ai-tokens/index';
 import { runCountryPipeline } from './country/index';

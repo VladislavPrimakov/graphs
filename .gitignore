@@ -28,4 +28,7 @@ Thumbs.db
 site/public/data/
 site/public/og/
 
+# L1 Raw Snapshots (R2 mirror)
+pipelines/raw/
+
 .env

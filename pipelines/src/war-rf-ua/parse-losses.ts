@@ -1,3 +1,4 @@
+import path from 'node:path';
 import {
   type LossCategoryChartData,
   type LossCategoryDetailData,
@@ -12,7 +13,7 @@ import {
   type WarLossCategory,
 } from '@graphs/shared/types/war-rf-ua/losses';
 import { XMLParser } from 'fast-xml-parser';
-import { fileExists, readJson, writeJsonAsync } from '@/utils/fs';
+import { fileExists, getRawDataPath, readJson, writeJsonAsyncToR2 } from '@/utils/fs';
 import { fetchWithRetry } from '@/utils/http';
 import { getLogger } from '@/utils/logger';
 import { ratio } from '@/utils/math';
@@ -26,8 +27,8 @@ export interface ParsedLossesResult {
   map: LossesMapSectionData;
 }
 
-const DATA_FILE = `${import.meta.dir}/data-losses.json.br`;
-const CLASSIFICATION_FILE = `${import.meta.dir}/classification.json.br`;
+const DATA_FILE = getRawDataPath('war-rf-ua', 'data-losses.json');
+const CLASSIFICATION_FILE = path.resolve(import.meta.dir, 'classification.json');
 
 const GOOGLE_MAPS_KML_URL = 'https://www.google.com/maps/d/kml?mid=1dRn8TRMDLRkaaIBJad0YZvTt3dmiuxo&forcekml=1';
 
@@ -661,7 +662,7 @@ export async function parseLosses(forceUpdate = false): Promise<ParsedLossesResu
     placemarks = extracted.placemarks;
     totalPlacemarks = extracted.totalPlacemarks;
 
-    await writeJsonAsync(DATA_FILE, {
+    await writeJsonAsyncToR2(DATA_FILE, {
       meta: {
         lastUpdated: new Date().toISOString(),
         totalPlacemarks,
