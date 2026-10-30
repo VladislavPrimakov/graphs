@@ -2,7 +2,7 @@ import { type GeoJSONSource, Map as MapLibreMap, NavigationControl } from 'mapli
 import type React from 'react';
 import { useEffect, useRef } from 'react';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import type { DayFrontlineEntry, FrontlineMapLayers, FrontlineMapSectionData } from '@graphs/shared/types/war-rf-ua/frontline';
+import type { DayFrontlineEntry, FrontlineMapLayers, FrontlineMapSectionData, FrontlineTimelinePoint } from '@graphs/shared/types/war-rf-ua/frontline';
 import { useSectionResize } from '@/components/sections/Section';
 import { createFillLayer, createLineLayer, decodeMultiPolygon, getMapTileStyle, multiPolygonToGeoJson, registerFallbackDot, UKRAINE_MAP_PRESETS } from '@/utils/map-builder';
 import { useFormat, useTheme } from '@/utils/provider';
@@ -43,7 +43,7 @@ function resolveHistoryDayLayers(days: Record<string, DayFrontlineEntry>, target
 
 /** Updates MapLibre vector GeoJSON sources with the decoded frontline layers. */
 function applyFrontlineLayers(map: MapLibreMap | null, layers: FrontlineMapLayers): void {
-  if (!map?.isStyleLoaded()) return;
+  if (!map?.getSource('consensus-rf')) return;
 
   const consensusSource = map.getSource('consensus-rf') as GeoJSONSource | undefined;
   if (consensusSource) {
@@ -67,22 +67,26 @@ const decodedCache = new Map<string, FrontlineMapLayers>();
 
 /** Resolves and memoizes decoded map layers for a date across scrubbing interactions. */
 function getDecodedLayers(history: Record<string, DayFrontlineEntry>, date: string): FrontlineMapLayers {
-  let cached = decodedCache.get(date);
-  if (!cached) {
-    cached = resolveHistoryDayLayers(history, date);
-    decodedCache.set(date, cached);
+  const cached = decodedCache.get(date);
+  if (cached) return cached;
+  const resolved = resolveHistoryDayLayers(history, date);
+  if (resolved !== EMPTY_LAYERS) {
+    decodedCache.set(date, resolved);
   }
-  return cached;
+  return resolved;
 }
 
-const timelineDatesCache = new WeakMap<FrontlineMapSectionData, string[]>();
+const timelineDatesCache = new WeakMap<FrontlineTimelinePoint[], string[]>();
 
 /** Caches immutable timeline dates per dataset to avoid GC allocations during scrubbing. */
 function getTimelineDates(data: FrontlineMapSectionData): string[] {
-  let cached = timelineDatesCache.get(data);
+  if (!data.timeline || data.timeline.length === 0) {
+    return [data.summary.latestDate];
+  }
+  let cached = timelineDatesCache.get(data.timeline);
   if (!cached) {
-    cached = data.timeline && data.timeline.length > 0 ? data.timeline.map((p) => p.date) : [data.summary.latestDate];
-    timelineDatesCache.set(data, cached);
+    cached = data.timeline.map((p) => p.date);
+    timelineDatesCache.set(data.timeline, cached);
   }
   return cached;
 }

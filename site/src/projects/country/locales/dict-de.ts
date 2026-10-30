@@ -1,8 +1,7 @@
-export const dict = {
+import type { dict as dictEn } from './dict-en';
+
+export const dict: typeof dictEn = {
   country: 'Land',
-  countries: 'Länder',
-  searchCountry: 'Land suchen...',
-  noCountriesFound: 'Keine Länder gefunden',
   inConstant2021: 'In konst. 2021 $',
   macro: {
     title: 'Staatshaushalt & Staatsverschuldung',
@@ -32,15 +31,10 @@ export const dict = {
     imports: 'Importe',
     goods: 'Waren',
     services: 'Dienste',
-    goodsExports: 'Warenexporte',
-    goodsImports: 'Warenimporte',
-    servicesExports: 'Dienstleistungsexporte',
-    servicesImports: 'Dienstleistungsimporte',
   },
   tradePartners: {
     title: 'Führende bilaterale Handelspartner',
     partners: 'Handelspartner',
-    searchPartners: 'Partner suchen...',
     noPartnersFound: 'Keine Partner gefunden',
   },
   tradeCategories: {
@@ -50,7 +44,6 @@ export const dict = {
     detailedLevel: 'Detailliert',
     macroCategories: 'Hauptkategorien',
     detailedCategories: 'Detaillierte Kategorien',
-    searchCategories: 'Kategorien suchen...',
     noCategoriesFound: 'Keine Kategorien gefunden',
     categories: {
       ag: 'Agrar',
@@ -159,6 +152,7 @@ export const dict = {
       '95': 'Spielzeug, Spiele, Sportgeräte',
       '96': 'Verschiedene Waren',
       '97': 'Kunstgegenstände, Antiquitäten',
+      '98': 'Besondere Warenverkehrsvorschriften',
       '99': 'Sonstige unklassifizierte Waren',
       '205': 'Transportdienstleistungen',
       '236': 'Reisedienstleistungen',
@@ -182,4 +176,4 @@ export const dict = {
       '09': 'Kaffee, Tee und Gewürze',
     },
   },
-} as const;
+};

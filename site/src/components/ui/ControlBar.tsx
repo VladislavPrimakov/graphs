@@ -1,5 +1,5 @@
 import type React from 'react';
-import { startTransition, useEffect, useRef, useState } from 'react';
+import { startTransition, useEffect, useId, useRef, useState } from 'react';
 import { Checkbox } from '@/components/ui/Checkbox';
 import { SearchSelect } from '@/components/ui/SearchSelect';
 import { Slider } from '@/components/ui/Slider';
@@ -205,6 +205,7 @@ interface ControlFieldProps {
 /** Individual polymorphic interactive field renderer for sliders, toggles, checkboxes, and search selectors. */
 function ControlField({ spec, value, state, onChange, disabled: overrideDisabled, className, onReset, hasActiveFilters }: ControlFieldProps) {
   const { t } = useTranslation();
+  const uid = useId();
   const isDisabled = overrideDisabled ?? (typeof spec.disabled === 'function' ? (state ? spec.disabled(state) : false) : Boolean(spec.disabled));
 
   switch (spec.type) {
@@ -234,7 +235,7 @@ function ControlField({ spec, value, state, onChange, disabled: overrideDisabled
     }
     case 'checkbox': {
       const isChecked = Boolean(value ?? spec.defaultValue);
-      const controlId = `ctrl-${spec.id}`;
+      const controlId = `${uid}-ctrl-${spec.id}`;
       return (
         <div className={cn('control-panel inline-flex items-center gap-2 px-2.5 h-7 text-xs select-none', isDisabled && 'opacity-50 pointer-events-none', className)}>
           <Checkbox id={controlId} checked={isChecked} onCheckedChange={(c) => onChange(Boolean(c))} disabled={isDisabled} />
@@ -247,7 +248,8 @@ function ControlField({ spec, value, state, onChange, disabled: overrideDisabled
       );
     }
     case 'single-search-select': {
-      const items = typeof spec.items === 'function' ? spec.items(state || {}) : spec.items;
+      const specItems = spec.items;
+      const items = typeof specItems === 'function' ? () => specItems(state || {}) : specItems;
       const placeholder = typeof spec.placeholder === 'function' ? spec.placeholder(state || {}) : spec.placeholder;
       const selectedVal = (value ?? spec.defaultValue ?? '') as string | number;
       return (
@@ -267,7 +269,8 @@ function ControlField({ spec, value, state, onChange, disabled: overrideDisabled
       );
     }
     case 'multi-search-select': {
-      const items = typeof spec.items === 'function' ? spec.items(state || {}) : spec.items;
+      const specItems = spec.items;
+      const items = typeof specItems === 'function' ? () => specItems(state || {}) : specItems;
       const placeholder = typeof spec.placeholder === 'function' ? spec.placeholder(state || {}) : spec.placeholder;
       const allCount = typeof spec.allCount === 'function' ? spec.allCount(state || {}) : spec.allCount;
       const selected = (Array.isArray(value) ? value : (spec.defaultValue ?? [])) as (string | number)[];

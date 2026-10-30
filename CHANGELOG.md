@@ -5,6 +5,66 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.9] - 2026-10-30
+
+### Tooling
+
+#### Added
+- Added `FrontlineDayMeta` interface and `meta.revisions` mapping in `@graphs/shared/types/war-rf-ua/frontline` tracking per-day upstream fingerprints (`updatedAt` for DeepState, HTTP `ETag` for LostArmour) for automated incremental cache invalidation.
+- Added `FrontlineMapSectionData` domain schema in `@graphs/shared/types/war-rf-ua/frontline` standardizing daily territorial control time series and latest summary metrics for the interactive map section.
+
+#### Changed
+- Compacted `CountryPartnerTradeRecord` in `@graphs/shared/types/country/profile` with single-letter keys (`t`, `m`, `d`), eliminating zero-value commodity categories and empty bilateral partner records.
+- Hardened mathematical utility functions (`round`, `percentage`, `percentageNullable`, `ratio`, `range`) in `@graphs/shared/math` with strict `Number.isFinite` checks and `-0` normalization.
+- Aligned `WarFrontlineToolbarMeta` in `@graphs/shared/types/war-rf-ua/toolbar-meta` to contain strictly scrubber period bounds and event density, stripping redundant summary metrics and historical point series.
+
+---
+
+### Pipelines (@graphs/pipelines)
+
+#### Added
+- Added per-day upstream fingerprint verification and incremental cache invalidation in `pipelines/src/war-rf-ua/parse-frontline.ts`, querying DeepState `updatedAt` and LostArmour KML HTTP `ETag` headers to detect and re-process strictly modified calendar dates without full history re-computations.
+- Added bounding box geographic filtering (`lon` 22.0..41.0, `lat` 44.0..53.5) in `pipelines/src/war-rf-ua/parse-frontline.ts`, eliminating non-Ukrainian territorial polygons (Pechenga, Abrene, Kaliningrad) from DeepState snapshots and preventing territorial distortion (+10,112 km²).
+- Added MD5 hash verification for remote KML source files in `parse-losses.ts`, automatically invalidating Tier 1 cache and re-parsing loss records when upstream data updates.
+- Added inverted bilateral import index $O(E)$ in `pipelines/src/country/index.ts`, replacing quadratic partner scans with linear trade reconstruction.
+
+#### Changed
+- Renamed territorial map dataset export from `frontline.json` to `frontline-map.json` to align with the `#frontline-map` section ID.
+- Separated daily territorial history and discrepancy points (`frontline-map.json`, ~286 KB daily series for map legend lookups) from precomputed monthly territorial control aggregates (`frontline-dynamics.json`, ~5.2 KB for monthly ECharts bars and areas).
+- Restored Taiwan (`tw` / `490` / `S19`) as a sovereign trade partner across UN Comtrade pipelines, removing `S19` from forbidden statistical lists and backfilling bilateral trade flows across 177 nations.
+- Optimized `country` bilateral trade pipeline with pre-filtered partner lookups, skipping redundant queries for countries and years with pre-existing data.
+- Standardized decade aggregation in `space-launches/index.ts` to compute decade mass and payload averages from raw sums, eliminating intermediate country rounding errors.
+
+#### Fixed
+- Fixed that single-day territorial changes exceeding 1,000 km² were artificially zeroed out in `parse-frontline.ts`, restoring Kharkiv and Kherson counter-offensive dynamics.
+- Fixed that `syncServicesStage` in `country/index.ts` duplicated commercial service trade values during partial batch refreshes by skipping already cached countries and years.
+- Fixed that undated KML markers in `parse-losses.ts` adopted arbitrary publication dates from Telegram posts, leaving dates uninitialized when absent.
+- Fixed regex matching for Ukrainian DD.MM.YYYY loss dates in `parse-losses.ts` and deduplicated military equipment models in `classification.json`.
+- Fixed sub-model regex in `parse-attacks-ua.ts` with negative lookahead protecting missile types from regex swallowing, extended numeral parsing to 99, and handled escaped CSV quotes in `parse-attacks-rf.ts`.
+- Fixed that nations with exclusively failed orbital attempts (`BR`, `Others`) were excluded from failure rate metrics in `space-launches/index.ts`.
+
+---
+
+### Site (@graphs/site)
+
+#### Added
+- Added build-time Markdown changelog pre-rendering via Vite virtual module (`virtual:changelog`), generating static HTML during SSG build, watching `CHANGELOG.md` for hot module replacement in development, and eliminating client-side markdown parsing runtime.
+
+#### Changed
+- Migrated `frontlineMapSection` to load `frontline-map.json` and partitioned yearly frontline history datasets (`frontline-history-${year}.json`) on demand within the section rather than at project root, memoizing decoded vector polygon layers across timeline scrubbing in `FrontlineMap.tsx`.
+- Aligned `ukraine` project trade sections (`trade-structure`, `trade-partners`, `trade-categories`) and macro sections to match modern `country` slice architecture, utilizing shared trade helpers from `@/projects/country/trade`.
+- Preserved undated loss markers in `LossesMap.tsx` when the full date range is selected (`isAllPeriods`), ensured fallback dots use theme text color, and mapped mixed-side clusters strictly to `unk`.
+- Optimized `SearchSelect` multi-mode item ordering with an $O(N)$ linear partition prioritizing active selections at the top while preserving natural frequency ranking, eliminating $O(N \log N)$ `localeCompare` overhead.
+- Restricted `tradePartnersSection` category filters strictly to physical merchandise via canonical `GOODS_CATEGORY_IDS`, preventing zero-volume services from populating bilateral partner dropdowns.
+
+#### Fixed
+- Fixed that charts without an active legend accumulated unbounded top grid clearance in `adjustChartLayout` across repeated window resize events.
+- Fixed that selecting the unknown side filter (`unk`) in `losses-timeline.ts` incorrectly rendered Russian and Ukrainian timeline curves.
+- Fixed reactive store hydration by quietly syncing URL query parameters during snapshot evaluation in `store.ts`, eliminating render-phase state mutations and hydration mismatches.
+- Fixed navigation jump loops in `viewport.ts` by checking a 2px scroll delta threshold and dynamically resolving fixed header height.
+
+---
+
 ## [1.3.8] - 2026-10-29
 
 ### Pipelines (@graphs/pipelines)

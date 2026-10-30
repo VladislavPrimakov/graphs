@@ -72,8 +72,6 @@ export interface UaMacroData {
 
 /** Section dataset for macro. */
 export type MacroSectionData = UaMacroData;
-/** @deprecated Use MacroSectionData instead. */
-export type BudgetDebtSectionData = MacroSectionData;
 
 /** Section dataset for Ukraine Macroeconomic Growth Dynamics (YoY in USD). */
 export interface MacroGrowthSectionData {

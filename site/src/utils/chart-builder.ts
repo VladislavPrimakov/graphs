@@ -298,6 +298,7 @@ function getCanvasInvariants(tokens: ThemeColors, lineFontSize: number = CHART_C
       },
       axisLabel: {
         color: tokens.text.muted,
+        fontSize: lineFontSize,
       },
     },
     toolbox: {
@@ -337,16 +338,18 @@ function getOptInTemplates(tokens: ThemeColors, lineFontSize: number = CHART_CON
 export interface SeriesLabelStyle {
   fontFamily: string;
   fontWeight: string;
+  fontSize: number;
   color: string;
   textBorderColor: string;
   textBorderWidth: number;
 }
 
 /** Resolves default contrast outline stroke and bold typography applied to data labels across charts. */
-function getDefaultLabelStyle(tokens: ThemeColors): SeriesLabelStyle {
+function getDefaultLabelStyle(tokens: ThemeColors, lineFontSize: number = CHART_CONFIG.typography.line.baseFontSize): SeriesLabelStyle {
   return {
     fontFamily: themeFonts.sansFamily,
     fontWeight: 'bold',
+    fontSize: lineFontSize,
     color: tokens.text.primary,
     textBorderColor: tokens.surface.card,
     textBorderWidth: CHART_CONFIG.geometry.textBorderWidth,
@@ -511,7 +514,7 @@ function enhanceSingleSeries(series: SeriesOption, labelStyle: SeriesLabelStyle)
   }
 
   if ('endLabel' in enhanced && enhanced.endLabel) {
-    enhanced.endLabel = smartMerge(DEFAULT_END_LABEL_STYLE, enhanced.endLabel);
+    enhanced.endLabel = smartMerge({ ...DEFAULT_END_LABEL_STYLE, fontSize: labelStyle.fontSize }, enhanced.endLabel);
     if (!enhanced.labelLayout && (enhanced.endLabel as { show?: boolean }).show !== false) {
       enhanced.labelLayout = { moveOverlap: 'shiftY' };
     }
@@ -1013,7 +1016,7 @@ export function enhanceOption(option: EChartsOption, labels: ToolboxLabels, _exp
   const lineFontSize = computeFluidLineFontSize(canvasWidth);
   const invariants = getCanvasInvariants(tokens, lineFontSize, hasDataZoom);
   const optInTemplates = getOptInTemplates(tokens, lineFontSize);
-  const defaultLabelStyle = getDefaultLabelStyle(tokens);
+  const defaultLabelStyle = getDefaultLabelStyle(tokens, lineFontSize);
   const showLegend = isLegendEnabled(option);
 
   const optTooltip = Array.isArray(option.tooltip) ? option.tooltip[0] : option.tooltip;
@@ -1102,10 +1105,18 @@ export function adjustChartLayout(chart: ECharts, hasEndLabel?: boolean): void {
     const toolboxItemSize = lineFontSize;
 
     // 3. Baseline vertical alignment established in enhanceOption (all elements share baseTop)
-    const baseTop = Number(legendModel?.get('top') ?? currentGrid.top ?? CHART_CONFIG.layout.topClearance);
+    const rawLegendTop = legendModel?.get('top');
+    const rawToolboxTop = toolboxModel?.get('top');
+    const baseTop =
+      typeof rawLegendTop === 'number' && Number.isFinite(rawLegendTop)
+        ? rawLegendTop
+        : typeof rawToolboxTop === 'number' && Number.isFinite(rawToolboxTop)
+          ? rawToolboxTop
+          : CHART_CONFIG.layout.topClearance;
     let legendHeight = itemHeight;
 
     // 4. Resolve horizontal boundaries and multi-line wrapping clearance for legend
+    let legendPatch: Record<string, unknown> | undefined;
     if (isLegendActive && legendModel) {
       const legendGroup = chart['getViewOfComponentModel']?.(legendModel)?.group;
       if (legendGroup) {
@@ -1126,7 +1137,6 @@ export function adjustChartLayout(chart: ECharts, hasEndLabel?: boolean): void {
         const curPadL = Array.isArray(curPad) ? curPad[3] : 0;
         const curPadR = Array.isArray(curPad) ? curPad[1] : 0;
 
-        // Apply horizontal padding clearance & dynamic marker dimensions first so multi-row legend wraps accurately
         if (
           currentLegend?.left !== 'center' ||
           currentLegend?.width !== undefined ||
@@ -1137,34 +1147,49 @@ export function adjustChartLayout(chart: ECharts, hasEndLabel?: boolean): void {
           curPadL !== minLegendLeft ||
           curPadR !== toolboxPaddingRight
         ) {
-          chart.setOption(
-            {
-              legend: {
-                top: baseTop,
-                left: 'center',
-                width: undefined,
-                padding: targetPadding,
-                itemHeight,
-                itemWidth,
-                textStyle: {
-                  fontSize: lineFontSize,
-                  lineHeight: lineFontSize,
-                },
-              },
+          legendPatch = {
+            top: baseTop,
+            left: 'center',
+            width: undefined,
+            padding: targetPadding,
+            itemHeight,
+            itemWidth,
+            textStyle: {
+              fontSize: lineFontSize,
+              lineHeight: lineFontSize,
             },
-            false,
-          );
+          };
         }
 
-        const settledGroup = chart['getViewOfComponentModel']?.(legendModel)?.group || legendGroup;
-        legendHeight = settledGroup.getBoundingRect?.()?.height || itemHeight;
+        const rect = legendGroup.getBoundingRect?.();
+        const rawHeight = rect?.height || itemHeight;
+        const rawWidth = rect?.width || 0;
+        const availableWidth = Math.max(1, canvasWidth - minLegendLeft - toolboxPaddingRight);
+        if (rawHeight <= itemHeight && rawWidth > availableWidth && canvasWidth > 0) {
+          const itemGap = Number(legendModel.get('itemGap') ?? CHART_CONFIG.typography.legend.itemGap);
+          const rows = Math.ceil(rawWidth / availableWidth);
+          legendHeight = rows * itemHeight + (rows - 1) * itemGap;
+        } else {
+          legendHeight = rawHeight;
+        }
       }
     }
 
-    const rowOffset = isLegendActive && legendHeight > itemHeight ? legendHeight - itemHeight : 0;
-    const targetLineTop = baseTop + rowOffset;
-    const targetLineBottom = targetLineTop + itemHeight;
-    const outerTop = targetLineBottom + componentGap;
+    let outerTop: number;
+    let targetToolboxTop = baseTop;
+
+    if (isLegendActive) {
+      const rowOffset = legendHeight > itemHeight ? legendHeight - itemHeight : 0;
+      targetToolboxTop = baseTop + rowOffset;
+      const targetLineBottom = baseTop + legendHeight;
+      outerTop = targetLineBottom + componentGap;
+    } else if (isToolboxActive) {
+      targetToolboxTop = baseTop;
+      const targetLineBottom = baseTop + toolboxItemSize;
+      outerTop = targetLineBottom + componentGap;
+    } else {
+      outerTop = baseTop + componentGap;
+    }
 
     // 5. Single-pass series classification & bar sizing
     const seriesModels = model.getSeries?.();
@@ -1251,10 +1276,8 @@ export function adjustChartLayout(chart: ECharts, hasEndLabel?: boolean): void {
       }
     }
 
-    let targetToolboxTop: number | undefined;
     let needsToolboxUpdate = false;
     if (isToolboxActive && toolboxModel) {
-      targetToolboxTop = targetLineTop;
       needsToolboxUpdate = toolboxModel.option?.top !== targetToolboxTop || toolboxModel.option?.itemSize !== toolboxItemSize;
     }
 
@@ -1263,7 +1286,7 @@ export function adjustChartLayout(chart: ECharts, hasEndLabel?: boolean): void {
     const needsTypographyUpdate = hasXAxisFontChange || hasYAxisFontChange || hasLegendFontChange || hasDataZoomFontChange || hasSeriesFontChange;
 
     // 6. Atomically apply layout updates only when coordinates have drifted
-    if (needsTopUpdate || needsRightUpdate || needsTypographyUpdate) {
+    if (legendPatch || needsTopUpdate || needsRightUpdate || needsTypographyUpdate) {
       const targetRight = needsRightUpdate ? dynamicRight : currentRight;
 
       const xAxisPatch = xAxisModels.length > 1 ? xAxisModels.map(() => ({ axisLabel: { fontSize: lineFontSize } })) : { axisLabel: { fontSize: lineFontSize } };
@@ -1281,7 +1304,7 @@ export function adjustChartLayout(chart: ECharts, hasEndLabel?: boolean): void {
 
       chart.setOption(
         {
-          ...(hasLegendFontChange ? { legend: { itemHeight, itemWidth, textStyle: { fontSize: lineFontSize, lineHeight: lineFontSize } } } : {}),
+          ...(legendPatch ? { legend: legendPatch } : hasLegendFontChange ? { legend: { itemHeight, itemWidth, textStyle: { fontSize: lineFontSize, lineHeight: lineFontSize } } } : {}),
           ...(needsToolboxUpdate && targetToolboxTop !== undefined ? { toolbox: { top: targetToolboxTop, itemSize: toolboxItemSize } } : {}),
           grid: {
             top: outerTop,

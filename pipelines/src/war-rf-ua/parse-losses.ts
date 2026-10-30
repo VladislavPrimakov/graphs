@@ -13,7 +13,7 @@ import {
   type WarLossCategory,
 } from '@graphs/shared/types/war-rf-ua/losses';
 import { XMLParser } from 'fast-xml-parser';
-import { fileExists, getRawDataPath, readJson, writeJsonAsyncToR2 } from '@/utils/fs';
+import { calculateMd5, fileExists, getRawDataPath, readJson, writeJsonAsyncToR2 } from '@/utils/fs';
 import { fetchWithRetry } from '@/utils/http';
 import { getLogger } from '@/utils/logger';
 import { ratio } from '@/utils/math';
@@ -49,6 +49,8 @@ interface WarLossesPipelineCache {
   meta?: {
     lastUpdated?: string;
     totalPlacemarks?: number;
+    /** MD5 hash of the last ingested upstream KML document used to detect upstream map changes. */
+    kmlMd5?: string | null;
   };
   placemarks: RawPlacemark[];
 }
@@ -81,6 +83,7 @@ async function fetchKmlText(): Promise<string> {
 function cleanName(name: string): string {
   if (!name) return '';
   let n = name.toLowerCase().replace(/[\u00a0\u202f]/g, ' ');
+  n = n.replace(/,,/g, ' ');
   n = n.replace(/["«»'„“”]/g, '');
   n = n.replace(/^(?:поражение|уничтожение|подбитый|захваченный|брошенный|поражеение)\s+/i, '');
   n = n.replace(/\s*№?\s*(?:rf|ra|рф|ра|rа)[-\s]*\d+/g, '');
@@ -205,31 +208,37 @@ function parseDate(dateStr?: string): { period: string | null; formatted: string
   }
 
   const sLower = s.toLowerCase();
+  const year4Match = sLower.match(/\b(20\d{2})\b/);
+
+  /** Resolves the 4-digit year from an explicit `20XX` token or a 2-digit token positioned after the month/season stem. */
+  const resolveYear = (stemIdx: number, stemLen: number): string | null => {
+    if (year4Match) return year4Match[1];
+    const yyMatch = sLower.slice(stemIdx + stemLen).match(/\b(\d{2})\b/);
+    return yyMatch ? `20${yyMatch[1]}` : null;
+  };
+
   for (const [stem, mm] of Object.entries(RU_MONTHS)) {
-    if (sLower.includes(stem)) {
-      const yMatch = sLower.match(/\b(202[2-6]|2[2-6])\b/);
-      if (yMatch) {
-        const year = yMatch[1].length === 2 ? `20${yMatch[1]}` : yMatch[1];
-        const period = `${year}-${mm}`;
-        if (period >= START_PERIOD && period <= CURRENT_PERIOD) {
-          const dMatch = sLower.match(/\b(\d{1,2})\b/);
-          const dd = dMatch && Number(dMatch[1]) >= 1 && Number(dMatch[1]) <= 31 ? dMatch[1].padStart(2, '0') : '01';
-          return { period, formatted: `${year}-${mm}-${dd}` };
-        }
-      }
+    const stemIdx = sLower.indexOf(stem);
+    if (stemIdx === -1) continue;
+    const year = resolveYear(stemIdx, stem.length);
+    if (!year) continue;
+    const period = `${year}-${mm}`;
+    if (period >= START_PERIOD && period <= CURRENT_PERIOD) {
+      const dMatch = sLower.slice(0, stemIdx).match(/\b(\d{1,2})\b/);
+      const dNum = dMatch ? Number(dMatch[1]) : 0;
+      const dd = dNum >= 1 && dNum <= 31 ? String(dNum).padStart(2, '0') : '01';
+      return { period, formatted: `${year}-${mm}-${dd}` };
     }
   }
 
   for (const [stem, mm] of Object.entries(SEASONS)) {
-    if (sLower.includes(stem)) {
-      const yMatch = sLower.match(/\b(202[2-6]|2[2-6])\b/);
-      if (yMatch) {
-        const year = yMatch[1].length === 2 ? `20${yMatch[1]}` : yMatch[1];
-        const period = `${year}-${mm}`;
-        if (period >= START_PERIOD && period <= CURRENT_PERIOD) {
-          return { period, formatted: `${year}-${mm}-01` };
-        }
-      }
+    const stemIdx = sLower.indexOf(stem);
+    if (stemIdx === -1) continue;
+    const year = resolveYear(stemIdx, stem.length);
+    if (!year) continue;
+    const period = `${year}-${mm}`;
+    if (period >= START_PERIOD && period <= CURRENT_PERIOD) {
+      return { period, formatted: `${year}-${mm}-01` };
     }
   }
 
@@ -644,20 +653,30 @@ function aggregateLossesData(records: ParsedRecord[], totalPlacemarks: number): 
   };
 }
 
-/** Parses military equipment losses from Google My Maps or committed minimal data-losses.json snapshot. */
+/** Parses military equipment losses, re-extracting L1 placemarks only when the upstream KML content hash changes. */
 export async function parseLosses(forceUpdate = false): Promise<ParsedLossesResult> {
   const logger = getLogger();
   let placemarks: RawPlacemark[] = [];
   let totalPlacemarks = 0;
 
-  const hasDataFile = await fileExists(DATA_FILE);
-  if (!forceUpdate && hasDataFile) {
-    logger.debug('Loading cached placemarks from data-losses.json...');
-    const cache = await readJson<WarLossesPipelineCache>(DATA_FILE);
+  const cache = (await fileExists(DATA_FILE)) ? await readJson<WarLossesPipelineCache>(DATA_FILE).catch(() => null) : null;
+
+  let kmlText: string | null = null;
+  try {
+    kmlText = await fetchKmlText();
+  } catch (err) {
+    if (!cache || forceUpdate) throw err;
+    logger.warn(`Failed to download upstream KML, falling back to cached placemarks: ${err}`);
+  }
+
+  const kmlMd5 = kmlText != null ? calculateMd5(kmlText) : null;
+  const isUnchanged = !forceUpdate && cache != null && (kmlMd5 == null || cache.meta?.kmlMd5 === kmlMd5);
+
+  if (isUnchanged && cache) {
+    logger.debug('Upstream KML unchanged, loading cached placemarks from data-losses.json...');
     placemarks = cache.placemarks;
     totalPlacemarks = cache.meta?.totalPlacemarks ?? placemarks.length;
-  } else {
-    const kmlText = await fetchKmlText();
+  } else if (kmlText != null) {
     const extracted = extractPlacemarksFromKml(kmlText);
     placemarks = extracted.placemarks;
     totalPlacemarks = extracted.totalPlacemarks;
@@ -666,10 +685,11 @@ export async function parseLosses(forceUpdate = false): Promise<ParsedLossesResu
       meta: {
         lastUpdated: new Date().toISOString(),
         totalPlacemarks,
+        kmlMd5,
       },
       placemarks,
     });
-    logger.debug(`Saved ${placemarks.length.toLocaleString()} minimal placemarks to data-losses.json`);
+    logger.debug(`Upstream KML changed, saved ${placemarks.length.toLocaleString()} minimal placemarks to data-losses.json`);
   }
 
   const rules = await readJson<ClassificationRules>(CLASSIFICATION_FILE);

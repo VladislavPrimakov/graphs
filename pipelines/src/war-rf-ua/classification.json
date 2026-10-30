@@ -299,10 +299,6 @@
     "BMR-64 Mine-Clearing Vehicle": [
       "бмр-64"
     ],
-    "BREM-1 Armoured Recovery Vehicle": [
-      "брем-1",
-      "brem-1"
-    ],
     "BREM VT-72B Armoured Recovery Vehicle": [
       "брэм vt-72b"
     ],
@@ -492,6 +488,7 @@
     ],
     "BREM-1 Armored Recovery Vehicle": [
       "брэм-1",
+      "брем-1",
       "brem-1"
     ],
     "BREM-1M Armored Recovery Vehicle": [
@@ -1593,8 +1590,7 @@
       "камаз-53949 тайфун-к",
       "камаз-63968 \"тайфун-к\"",
       "камаз-63968 ,,тайфун-к\"",
-      "камаз-63968 тайфун-к",
-      "камаз-63501ат ,,медведь\""
+      "камаз-63968 тайфун-к"
     ],
     "KamAZ-53949 'Feniks'": [
       "камаз-53949 «тайфун-4х4»",
@@ -1946,7 +1942,6 @@
       "kamaz 4x4 kung",
       "kamaz-5350 with mm-501 armoured module",
       "kamaz-63501 with pp-2005 pontoon bridge",
-      "kamaz-53501",
       "kamaz water tanker",
       "kamaz kmv-10v boom crane truck",
       "kamaz 6x6 (rosgvardia)",

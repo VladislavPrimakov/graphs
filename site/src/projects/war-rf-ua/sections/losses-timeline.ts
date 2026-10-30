@@ -80,7 +80,7 @@ export const lossesTimelineSection = defineSection(({ t, fmt }: ProjectContext<t
       });
 
       const seriesList = [];
-      if (selectedSide === 'all' || selectedSide === 'rf' || selectedSide === 'unk') {
+      if (selectedSide === 'all' || selectedSide === 'rf') {
         seriesList.push({
           id: 'rf',
           name: rfName,
@@ -92,7 +92,7 @@ export const lossesTimelineSection = defineSection(({ t, fmt }: ProjectContext<t
           }),
         });
       }
-      if (selectedSide === 'all' || selectedSide === 'ua' || selectedSide === 'unk') {
+      if (selectedSide === 'all' || selectedSide === 'ua') {
         seriesList.push({
           id: 'ua',
           name: uaName,

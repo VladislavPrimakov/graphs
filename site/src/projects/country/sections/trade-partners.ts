@@ -1,4 +1,5 @@
 import { percentage, round } from '@graphs/shared/math';
+import { GOODS_CATEGORY_IDS } from '@graphs/shared/types/country';
 import { createElement } from 'react';
 import { createChart } from '@/components/sections/SectionChart';
 import { CONTROL_DELAYS } from '@/projects/constants';
@@ -9,6 +10,8 @@ import { DEFAULT_TOP_COUNT, MAX_PERCENT_AXIS_BOUND, MAX_TOP_COUNT, MIN_PERCENT_A
 import type { Section } from '../project';
 import { getDetailedCategoryColor, tradeCategoryColors, tradeColors } from '../tokens';
 import { getFlowVolume, getYearPartnerBreakdown, resolveFlowScale } from '../trade';
+
+const GOODS_MACRO_IDS = new Set<string>(GOODS_CATEGORY_IDS);
 
 /** Section builder for Country Foreign Trade Leading Bilateral Trading Partners chart. */
 export const tradePartnersSection: Section = ({ t, fmt }) => {
@@ -23,8 +26,8 @@ export const tradePartnersSection: Section = ({ t, fmt }) => {
     ],
     toolbars: ({ countryData }) => {
       const activePartners = countryData.activePartners;
-      const activeMacro = countryData.activeMacro;
-      const activeDetailed = countryData.activeDetailed;
+      const activeMacro = countryData.activeMacro.filter(([id]) => GOODS_MACRO_IDS.has(id));
+      const activeDetailed = countryData.activeDetailed.filter(([code]) => code.length === 2);
 
       const macroCodesSet = new Set(activeMacro.map(([id]) => id as string));
       const detailedCodesSet = new Set(activeDetailed.map(([code]) => code));
@@ -137,7 +140,9 @@ export const tradePartnersSection: Section = ({ t, fmt }) => {
       const rawSelectedCategories = (partnersStore.categories as string[]) || [];
       const selectedCategories =
         rawSelectedCategories.length > 0
-          ? rawSelectedCategories.filter((c) => (isDetailed ? countryData.activeDetailed.some(([code]) => code === c) : countryData.activeMacro.some(([id]) => id === c)))
+          ? rawSelectedCategories.filter((c) =>
+              isDetailed ? c.length === 2 && countryData.activeDetailed.some(([code]) => code === c) : GOODS_MACRO_IDS.has(c) && countryData.activeMacro.some(([id]) => id === c),
+            )
           : [];
       const hasSelectedCategories = selectedCategories.length > 0;
 

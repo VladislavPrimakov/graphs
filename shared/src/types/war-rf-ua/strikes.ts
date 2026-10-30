@@ -57,7 +57,11 @@ export interface AttackDataGroup {
 
 /** Time-series arrays of launched strike systems aligned by timestamp labels. */
 export interface AttackTimelineSeries {
-  /** Sequential timeline category labels (e.g., `YYYY-MM` for monthly, `YYYY-MM-DD` for daily). */
+  /** Sequential monthly period identifiers in `YYYY-MM` format (present on monthly series). */
+  periods?: string[];
+  /** Sequential daily date identifiers in `YYYY-MM-DD` format (present on daily series). */
+  dates?: string[];
+  /** Sequential timeline category labels (e.g., `MM.YY` for monthly, `DD.MM.YY` for daily). */
   labels: string[];
   /** Russian strike UAV launch counts per period. */
   rfUavs: number[];

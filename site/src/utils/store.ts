@@ -21,6 +21,8 @@ export interface ControlStore {
   getState: () => State;
   /** Subscribes a listener callback to state changes. */
   subscribe: (listener: () => void) => () => void;
+  /** Synchronously hydrates store state from URL query parameters on the client if not yet hydrated. */
+  syncFromUrl: (options?: { silent?: boolean }) => void;
   /** Disposes active timers and clears subscriber listeners. */
   dispose?: () => void;
 }
@@ -183,15 +185,14 @@ function createControlStore(controls?: readonly Control[] | Control[], options?:
         }
         case 'timeline-scrubber': {
           const items = Array.isArray(rawVal) ? rawVal : typeof rawVal === 'string' ? rawVal.split(',') : [rawVal];
-          const dates = items.map(String).filter((s) => s.length > 0);
+          const dates = items.map((s) => String(s).trim()).filter((s) => /^\d{4}(?:-\d{2}(?:-\d{2})?)?$/.test(s));
           if (dates.length === 2 && ctrl.periods.length > 0) {
-            const first = ctrl.periods[0];
-            const last = ctrl.periods[ctrl.periods.length - 1];
-            const d1 = dates[0] < first ? first : dates[0] > last ? last : dates[0];
-            const d2 = dates[1] < first ? first : dates[1] > last ? last : dates[1];
-            const low = d1 <= d2 ? d1 : d2;
-            const high = d1 <= d2 ? d2 : d1;
-            partial[ctrl.id] = [low, high];
+            const [rawLow, rawHigh] = dates[0] <= dates[1] ? [dates[0], dates[1]] : [dates[1], dates[0]];
+            const lowIdx = ctrl.periods.findIndex((p) => p >= rawLow);
+            const resolvedLowIdx = lowIdx === -1 ? ctrl.periods.length - 1 : lowIdx;
+            const highIdx = ctrl.periods.findLastIndex((p) => p <= rawHigh || p.startsWith(rawHigh));
+            const resolvedHighIdx = highIdx === -1 ? 0 : highIdx;
+            partial[ctrl.id] = [ctrl.periods[resolvedLowIdx], ctrl.periods[Math.max(resolvedLowIdx, resolvedHighIdx)]];
           }
           break;
         }
@@ -223,12 +224,21 @@ function createControlStore(controls?: readonly Control[] | Control[], options?:
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
   let hasHydratedUrl = false;
 
-  function syncFromUrl(): void {
+  function syncFromUrl(options?: { silent?: boolean }): void {
     if (hasHydratedUrl || typeof window === 'undefined' || list.length === 0) return;
     hasHydratedUrl = true;
     const urlValues = readFromUrl();
     if (Object.keys(urlValues).length > 0) {
-      setState(urlValues);
+      if (options?.silent) {
+        const nextState: State = {
+          ...state,
+          ...urlValues,
+        };
+        nextState.hasActiveFilters = checkHasActive(nextState);
+        state = Object.freeze(nextState);
+      } else {
+        setState(urlValues);
+      }
     }
   }
 
@@ -341,6 +351,7 @@ function createControlStore(controls?: readonly Control[] | Control[], options?:
     setState,
     resetState,
     subscribe,
+    syncFromUrl,
     useStore,
     dispose,
   };
@@ -376,6 +387,7 @@ export function getStoreSnapshots(stores?: Record<string, ControlStore>): Record
   if (!stores) return {};
   const snapshots: Record<string, State> = {};
   for (const key in stores) {
+    stores[key].syncFromUrl({ silent: true });
     snapshots[key] = stores[key].getState();
   }
   return snapshots;

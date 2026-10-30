@@ -1,22 +1,29 @@
+import { round } from '@graphs/shared/math';
 import { createElement } from 'react';
 import { createChart } from '@/components/sections/SectionChart';
 import { CONTROL_DELAYS } from '@/projects/constants';
 import { chartOption, createRankedBarSeries, createStaticLegend, createStaticLegendSeries, resolveVisiblePeriod } from '@/utils/chart-builder';
+import type { ControlSearchItem } from '@/utils/project';
 import type { Section } from '../project';
 import { tradeColors } from '../tokens';
 
-const partnerItemsCache = new WeakMap<object, readonly { value: string; label: string; icon: React.ReactNode }[]>();
+const partnerItemsCache = new WeakMap<object, Map<string, readonly ControlSearchItem[]>>();
 
 /** Section builder for Ukraine Foreign Trade Sovereign Partners chart. */
-export const tradePartnersSection: Section = ({ t, fmt }) => {
+export const tradePartnersSection: Section = ({ lang, t, fmt }) => {
   return {
     id: 'trade-partners',
     title: t.proj.tradePartners.title,
     sources: [{ name: 'NBU — Merchandise Trade by Partner Nation (xlsx)', url: 'https://bank.gov.ua/files/ES/Trade_y.xlsx' }],
     toolbars: ({ ukraineData }) => {
       const data = ukraineData['trade-partners'];
-      let partnerItems = partnerItemsCache.get(data);
+      let langMap = partnerItemsCache.get(data);
+      if (!langMap) {
+        langMap = new Map();
+        partnerItemsCache.set(data, langMap);
+      }
 
+      let partnerItems = langMap.get(lang);
       if (!partnerItems) {
         const volumeByCountry: Record<string, number> = {};
         for (const yearExports of data.exports) {
@@ -36,7 +43,7 @@ export const tradePartnersSection: Section = ({ t, fmt }) => {
           label: fmt.region(code),
           icon: createElement('span', { className: 'font-mono text-3xs opacity-75' }, code),
         }));
-        partnerItemsCache.set(data, partnerItems);
+        langMap.set(lang, partnerItems);
       }
 
       const totalPartners = partnerItems.length;
@@ -66,7 +73,7 @@ export const tradePartnersSection: Section = ({ t, fmt }) => {
               max: maxPartners,
               defaultValue: defaultPartners,
               label: t.common.top,
-              disabled: (state) => ((state.countries as string[])?.length ?? 0) > 0,
+              disabled: (state: Record<string, unknown>) => ((state.countries as string[])?.length ?? 0) > 0,
               debounceMs: CONTROL_DELAYS.slider,
             },
             {
@@ -97,11 +104,26 @@ export const tradePartnersSection: Section = ({ t, fmt }) => {
       });
       const visibleExports = data.exports.slice(startIdx, endIdx);
       const visibleImports = data.imports.slice(startIdx, endIdx);
-      const visibleTotalExports = data.totalExports.slice(startIdx, endIdx);
-      const visibleTotalImports = data.totalImports.slice(startIdx, endIdx);
-      const visibleTradeBalance = visibleTotalExports.map((exp, i) => exp - (visibleTotalImports[i] || 0));
+      const scaledTotalExports = hasSelectedCountries
+        ? visibleExports.map((tuples) =>
+            round(
+              tuples.reduce((sum, [code, val]) => (selectedCountries.includes(code) ? sum + val : sum), 0),
+              2,
+            ),
+          )
+        : data.totalExports.slice(startIdx, endIdx);
+      const scaledTotalImports = hasSelectedCountries
+        ? visibleImports.map((tuples) =>
+            round(
+              tuples.reduce((sum, [code, val]) => (selectedCountries.includes(code) ? sum + val : sum), 0),
+              2,
+            ),
+          )
+        : data.totalImports.slice(startIdx, endIdx);
+      const scaledBalance = scaledTotalExports.map((exp, i) => round(exp - (scaledTotalImports[i] || 0), 2));
 
       const activeCodesSet = new Set<string>();
+      let maxStack = 0;
 
       const buildTradeSeries = (type: 'exp' | 'imp') => {
         const isExp = type === 'exp';
@@ -116,9 +138,12 @@ export const tradePartnersSection: Section = ({ t, fmt }) => {
           const yearTop = hasSelectedCountries ? rawYearList.filter(([code]) => selectedCountries.includes(code)) : rawYearList.slice(0, top);
 
           filteredYearsData.push(yearTop);
-          for (const [code] of yearTop) {
+          let yearShareSum = 0;
+          for (const [code, , share] of yearTop) {
             activeCodesSet.add(code);
+            yearShareSum += share;
           }
+          if (yearShareSum > maxStack) maxStack = yearShareSum;
         }
 
         return createRankedBarSeries<[string, number, number]>({
@@ -148,29 +173,7 @@ export const tradePartnersSection: Section = ({ t, fmt }) => {
         color: fmt.regionColor(code),
       }));
 
-      let maxExpStack = 0;
-      let maxImpStack = 0;
-      if (isPercent) {
-        for (let i = 0; i < visibleYears.length; i++) {
-          let expSum = 0;
-          for (const s of expSeries) {
-            const raw = s.data?.[i];
-            const v = typeof raw === 'number' ? raw : typeof raw === 'object' && raw !== null && 'value' in raw ? Number(raw.value) : 0;
-            if (v) expSum += Math.abs(v);
-          }
-          if (expSum > maxExpStack) maxExpStack = expSum;
-
-          let impSum = 0;
-          for (const s of impSeries) {
-            const raw = s.data?.[i];
-            const v = typeof raw === 'number' ? raw : typeof raw === 'object' && raw !== null && 'value' in raw ? Number(raw.value) : 0;
-            if (v) impSum += Math.abs(v);
-          }
-          if (impSum > maxImpStack) maxImpStack = impSum;
-        }
-      }
-      const peakPercentStack = Math.max(maxExpStack, maxImpStack);
-      const effectivePercentBound = peakPercentStack > 0 ? Math.min(100, Math.ceil((peakPercentStack * 1.15) / 5) * 5 || 10) : 100;
+      const effectivePercentBound = maxStack > 0 ? Math.min(100, Math.ceil((maxStack * 1.15) / 5) * 5 || 10) : 100;
 
       return {
         title: hasSelectedCountries ? t.proj.tradePartners.title : `${t.proj.tradePartners.title} (${t.common.top} ${top})`,
@@ -182,12 +185,12 @@ export const tradePartnersSection: Section = ({ t, fmt }) => {
               positive: {
                 title: t.common.exports,
                 color: tradeColors.exportTotal,
-                total: ({ dataIndex }) => fmt.number(visibleTotalExports[dataIndex] || 0),
+                total: ({ dataIndex }) => fmt.number(scaledTotalExports[dataIndex] || 0),
               },
               negative: {
                 title: t.common.imports,
                 color: tradeColors.importTotal,
-                total: ({ dataIndex }) => fmt.number(visibleTotalImports[dataIndex] || 0),
+                total: ({ dataIndex }) => fmt.number(scaledTotalImports[dataIndex] || 0),
               },
               row: ({ data: rowData }) => {
                 const { val, share } = rowData as { val: number; share: number };
@@ -197,7 +200,7 @@ export const tradePartnersSection: Section = ({ t, fmt }) => {
                 };
               },
               footer: ({ dataIndex }) => {
-                const balance = visibleTradeBalance[dataIndex] || 0;
+                const balance = scaledBalance[dataIndex] || 0;
                 const sign = balance > 0 ? '+' : '';
                 return {
                   label: t.common.balance,

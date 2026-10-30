@@ -28,26 +28,26 @@ export interface HsChapterItem {
 /** Bilateral trading partner record containing total volume and category breakdowns in USD. */
 export interface CountryPartnerTradeRecord {
   /** Total bilateral trade volume with partner in USD. */
-  total: number;
+  t: number;
   /** Trade breakdown by 10 physical goods macro categories in USD: { [macroId]: valueUsd }. */
-  macro: Record<string, number>;
+  m: Record<string, number>;
   /** Detailed trade breakdown by 2-digit HS chapters in USD: { [chapterCode]: valueUsd }. */
-  detailed: Record<string, number>;
+  d: Record<string, number>;
 }
 
 /** Complete trade flow breakdown (Exports or Imports) for a single calendar year in USD. */
 export interface CountryTradeFlow {
   /** Total volume with the world in USD. */
-  total: number;
+  t: number;
   /** Total merchandise physical goods in USD. */
   goods: number | null;
   /** Total commercial services in USD. */
   services: number | null;
   /** 17 aggregated macro categories breakdown in USD: { [catId]: valueUsd }. */
-  macro: Record<string, number>;
+  m: Record<string, number>;
   /** Detailed breakdown in USD: 97 HS-2 chapters + 11 EBOPS service codes: { [code]: valueUsd }. */
-  detailed: Record<string, number>;
-  /** Bilateral trading partners keyed by uppercase ISO-2 / ISO-3 code. */
+  d: Record<string, number>;
+  /** Bilateral trading partners keyed by lowercase ISO-2 / ISO-3 code. */
   partners: Record<string, CountryPartnerTradeRecord>;
 }
 

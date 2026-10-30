@@ -9,7 +9,7 @@ const logger = getLogger();
 
 const WAR_START_DATE = '2022-02-24';
 
-const WORD_TO_NUM: Record<string, number> = {
+const BASE_WORDS: Record<string, number> = {
   one: 1,
   two: 2,
   three: 3,
@@ -30,11 +30,6 @@ const WORD_TO_NUM: Record<string, number> = {
   eighteen: 18,
   nineteen: 19,
   twenty: 20,
-  'twenty-one': 21,
-  'twenty-two': 22,
-  'twenty-three': 23,
-  'twenty-four': 24,
-  'twenty-five': 25,
   thirty: 30,
   forty: 40,
   fifty: 50,
@@ -45,6 +40,38 @@ const WORD_TO_NUM: Record<string, number> = {
   hundred: 100,
   another: 1,
 };
+
+const WORD_TO_NUM: Record<string, number> = { ...BASE_WORDS };
+
+const TENS_WORDS: Record<string, number> = {
+  twenty: 20,
+  thirty: 30,
+  forty: 40,
+  fifty: 50,
+  sixty: 60,
+  seventy: 70,
+  eighty: 80,
+  ninety: 90,
+};
+
+const DIGIT_WORDS: Record<string, number> = {
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+  six: 6,
+  seven: 7,
+  eight: 8,
+  nine: 9,
+};
+
+for (const [tWord, tVal] of Object.entries(TENS_WORDS)) {
+  for (const [dWord, dVal] of Object.entries(DIGIT_WORDS)) {
+    WORD_TO_NUM[`${tWord}-${dWord}`] = tVal + dVal;
+    WORD_TO_NUM[`${tWord} ${dWord}`] = tVal + dVal;
+  }
+}
 
 const MONTH_MAP: Record<string, number> = {
   january: 1,
@@ -96,7 +123,7 @@ function extractReportDate(text: string, fallbackDt: string = ''): string {
     }
   }
 
-  const m2 = prefix.match(/\b(?:as\s+of\s+)?(\d{1,2})\s+([a-zA-Z]+)\s+(202\d)\b/i);
+  const m2 = prefix.match(/\b(?:as\s+of\s+)?(\d{1,2})\s+([a-zA-Z]+)\s+(20\d{2})\b/i);
   if (m2) {
     const d = parseInt(m2[1], 10);
     const monStr = m2[2].toLowerCase();
@@ -106,7 +133,7 @@ function extractReportDate(text: string, fallbackDt: string = ''): string {
     }
   }
 
-  const m3 = prefix.match(/\b([a-zA-Z]+)\s+(\d{1,2}),?\s+(202\d)\b/i);
+  const m3 = prefix.match(/\b([a-zA-Z]+)\s+(\d{1,2}),?\s+(20\d{2})\b/i);
   if (m3) {
     const monStr = m3[1].toLowerCase();
     const d = parseInt(m3[2], 10);
@@ -120,13 +147,15 @@ function extractReportDate(text: string, fallbackDt: string = ''): string {
 }
 
 const WEEKLY_RE =
-  /(?:during\s+the\s+week|over\s+the\s+past\s+week|Top\s+News\s+Today|from\s+\d+.*?\bto\s+\d+\s+[a-z]+|\(\s*(?:from\s+)?\d+.*?[-–—].*?202\d\s*\)|\b\d+\s*[-–—]\s*\d+\s+[a-z]+\s+202\d\b|as\s+of\s+\d+\s*[-–—]\s*\d+\s+[a-z]+|weekly\s+report|over\s+the\s+past\s+\d+\s+days|during\s+the\s+past\s+\d+\s+days|last\s+month\s+alone|over\s+the\s+past\s+month|teleconference\s+with\s+leadership|board\s+session\s+discusses|this\s+year\s+alone)/i;
+  /(?:during\s+the\s+week|over\s+the\s+past\s+week|Top\s+News\s+Today|from\s+\d+.*?\bto\s+\d+\s+[a-z]+|\(\s*(?:from\s+)?\d+.*?[-–—].*?20\d{2}\s*\)|\b\d+\s*[-–—]\s*\d+\s+[a-z]+\s+20\d{2}\b|as\s+of\s+\d+\s*[-–—]\s*\d+\s+[a-z]+|weekly\s+report|over\s+the\s+past\s+\d+\s+days|during\s+the\s+past\s+\d+\s+days|last\s+month\s+alone|over\s+the\s+past\s+month|teleconference\s+with\s+leadership|board\s+session\s+discusses|this\s+year\s+alone)/i;
 
 function isWeeklyReport(text: string): boolean {
   return WEEKLY_RE.test(text.slice(0, 2500));
 }
 
-const COUNT_WORDS = Object.keys(WORD_TO_NUM).join('|');
+const COUNT_WORDS = Object.keys(WORD_TO_NUM)
+  .sort((a, b) => b.length - a.length)
+  .join('|');
 const COUNT_PATTERN = `(?:${COUNT_WORDS}|\\d[\\d,]*)`;
 const COUNT_PREFIX = `(?<![\\w-])(?<count>${COUNT_PATTERN})(?![\\w-])`;
 const OPT_WORDS = `(?:\\s+(?!and\\b|${COUNT_PATTERN}\\b)[a-zA-Z\\.\\-]+){0,3}\\s+`;
@@ -156,7 +185,10 @@ const CUMULATIVE_STOP_RE =
   /(?:\bIn\s+total\b.*?\b(?:airplanes?|aircraft|helicopters?)\b|\bIn\s+total\b.*?\b(?:operation|since\s+the\s+beginning|disabled)\b|\b(?:since\s+the\s+beginning\s+of|during)\s+the\s+special\s+military\s+operation\b)/i;
 const PARAGRAPH_SPLIT_RE = /\n\s*\n/;
 const SENTENCE_SPLIT_RE = /(?<!\bU\.S\.)(?<!\b[A-Z]\.[A-Z]\.)(?<=[.;])\s+|\n+/;
-const SUB_SPEC_RE = new RegExp(`(?:,\\s*|^|\\.\\s*)including\\s+.*?(?=,\\s*as well as|,\\s*and|\\s+as\\s+well\\s+as\\s+(?:${COUNT_PATTERN})\\b|\\s+and\\s+(?:${COUNT_PATTERN})\\b|$)`, 'gi');
+const SUB_SPEC_RE = new RegExp(
+  `(?:,\\s*|^|\\.\\s*)including\\s+.*?(?=,\\s*as well as|,\\s*and|\\s+as\\s+well\\s+as\\s+(?:${COUNT_PATTERN})\\b|\\s+and\\s+(?:${COUNT_PATTERN})\\s+(?:[a-zA-Z\\.\\-]+\\s+){0,3}(?:${MLRS_BALLISTIC_NAMES}|${CRUISE_NAMES})|$)`,
+  'gi',
+);
 const PARENS_RE = /\([^)]*\)/g;
 
 export interface ParsedShotDown {
@@ -428,7 +460,7 @@ async function crawlChunk(chunkIdx: number, chunkStart: number, chunkEnd: number
   return chunkReports;
 }
 
-export async function crawlTelegram(dataFile: string, _fullUpdate: boolean = false, threads: number = 16): Promise<UaInterceptionReport[]> {
+export async function crawlTelegram(dataFile: string, fullUpdate: boolean = false, threads: number = 16): Promise<UaInterceptionReport[]> {
   let snapshot: UaAttacksSnapshot = {
     meta: { lastPostId: 0, lastCrawledAt: '', count: 0 },
     reports: [],
@@ -445,12 +477,12 @@ export async function crawlTelegram(dataFile: string, _fullUpdate: boolean = fal
 
   const existingReports = snapshot.reports || [];
   const latestId = await getLatestPostId();
-  if (latestId <= 0 || (snapshot.meta.lastPostId > 0 && snapshot.meta.lastPostId >= latestId)) {
+  if (!fullUpdate && (latestId <= 0 || (snapshot.meta.lastPostId > 0 && snapshot.meta.lastPostId >= latestId))) {
     logger.debug(`Telegram reports up to date (latest post ID: ${latestId})`);
     return existingReports;
   }
 
-  const startId = snapshot.meta.lastPostId > 0 ? snapshot.meta.lastPostId + 1 : 1;
+  const startId = fullUpdate ? 1 : snapshot.meta.lastPostId > 0 ? snapshot.meta.lastPostId + 1 : 1;
   logger.debug(`Crawling new posts ${startId} to ${latestId}...`);
 
   const chunks = generateChunks(startId, latestId, threads);
@@ -458,13 +490,16 @@ export async function crawlTelegram(dataFile: string, _fullUpdate: boolean = fal
   logger.debug(`Splitting ${totalPosts} posts into ${chunks.length} chunks...`);
 
   const reportMap = new Map<number, UaInterceptionReport>();
-  for (const r of existingReports) {
-    reportMap.set(r.id, r);
+  if (!fullUpdate) {
+    for (const r of existingReports) {
+      reportMap.set(r.id, r);
+    }
   }
 
+  const chunkResults = await Promise.all(chunks.map((chunk) => crawlChunk(chunk[0], chunk[1], chunk[2], (msg) => logger.debug(msg))));
+
   let newFound = 0;
-  for (const chunk of chunks) {
-    const chunkReports = await crawlChunk(chunk[0], chunk[1], chunk[2], (msg) => logger.debug(msg));
+  for (const chunkReports of chunkResults) {
     for (const r of chunkReports) {
       if (!reportMap.has(r.id)) {
         newFound++;

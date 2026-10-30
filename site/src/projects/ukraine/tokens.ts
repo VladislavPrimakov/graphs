@@ -6,8 +6,6 @@ export const budgetColors = {
   domesticRev: '#16a34a',
   grants: '#d97706',
   loans: '#facc15',
-  externalFin: '#d97706',
-  debt: '#64748b',
   govDebt: '#4f46e5',
   privateDebt: '#94a3b8',
   gdp: '#2563eb',
@@ -15,9 +13,6 @@ export const budgetColors = {
 
 /** Ukraine international trade overview series colors. */
 export const tradeColors = {
-  export: '#3b82f6',
-  import: '#f97316',
-  balance: '#38bdf8',
   exportTotal: '#3b82f6',
   importTotal: '#f97316',
   balanceLine: '#38bdf8',

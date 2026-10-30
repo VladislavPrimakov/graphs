@@ -1,15 +1,13 @@
-import type { WorldFilterState, WorldToolbarMeta } from '@graphs/shared/types/world';
+import type { WorldToolbarMeta } from '@graphs/shared/types/world';
 import { createElement } from 'react';
 import { CONTROL_DELAYS } from '@/projects/constants';
-import { defineProject, loadDataset, type ProjectSection } from '@/utils/project';
+import { defineProject, loadDataset } from '@/utils/project';
 import type { dict } from './locales/dict-en';
 import { meta } from './meta';
 
 const data = {
   toolbarMeta: () => loadDataset<WorldToolbarMeta>('world', 'toolbar-meta.json'),
 };
-
-export type Section = ProjectSection<typeof data, typeof dict, { worldStore: WorldFilterState }>;
 
 /** Project specification for World Economic & Energy Indicators dashboard. */
 export const project = defineProject<typeof dict, typeof data>({
@@ -55,12 +53,14 @@ export const project = defineProject<typeof dict, typeof data>({
           type: 'multi-search-select',
           placeholder: t.proj.countries,
           emptyLabel: t.proj.noCountriesFound,
-          items: toolbarMeta.entities.map((code) => ({
-            value: code,
-            label: fmt.region(code),
-            count: toolbarMeta.gdp?.[code],
-            icon: createElement('span', { className: 'font-mono text-3xs opacity-75' }, code),
-          })),
+          formatCount: (val: number) => fmt.currency(val * 1e9),
+          items: () =>
+            toolbarMeta.entities.map((code) => ({
+              value: code,
+              label: fmt.region(code),
+              count: toolbarMeta.gdp?.[code],
+              icon: createElement('span', { className: 'font-mono text-3xs opacity-75' }, code),
+            })),
         },
       ],
     },

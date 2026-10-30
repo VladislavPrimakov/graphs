@@ -91,7 +91,7 @@ function ProjectDashboard({ slug, section, lang }: ProjectDashboardProps) {
     if (toolbars.length === 0) {
       return sections.map((sec, index) => {
         const isInitial = section ? sec.id === section : index === 0;
-        return <Section key={sec.id} section={sec} projectSlug={project.id} projectData={projectData} initialInView={isInitial} />;
+        return <Section key={sec.id} section={sec} projectSlug={project.id} projectData={projectData} sectionLoaders={project.sectionData} initialInView={isInitial} />;
       });
     }
 

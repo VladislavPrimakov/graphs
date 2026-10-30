@@ -9,7 +9,7 @@ export type ScalableData = number | ScalableSeries | readonly ScalableSeries[];
 export interface AdaptiveScaleResult<T> {
   /** The numerical scale divisor (1e12 for trillions, 1e9 for billions, 1e6 for millions, 1e3 for thousands, or 1 for base USD). */
   divisor: number;
-  /** Localized scale abbreviation (e.g. "трлн" / "T" / "Bio.", "млрд" / "B" / "Mrd.", "млн" / "M" / "Mio.", "тыс." / "K" / "Tsd."). */
+  /** Localized scale abbreviation (e.g. "T" / "Bio.", "B" / "Mrd.", "M" / "Mio.", "K" / "Tsd."). */
   scaleLabel: string;
   /** The scaled input data in the exact same structure and dimensions as passed in. */
   data: T;

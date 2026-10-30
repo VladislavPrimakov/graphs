@@ -42,7 +42,7 @@ interface UkrainePipelineCache {
 function computeMacroGrowthData(macro: MacroSectionData): MacroGrowthSectionData {
   const fullYearIndices = macro.years
     .map((y, idx) => ({ y, idx }))
-    .filter(({ y }) => y < 2026)
+    .filter((_, idx) => !macro.yearLabels[idx]?.includes('('))
     .map(({ idx }) => idx);
 
   const growthIndices = fullYearIndices.slice(1);
@@ -58,7 +58,7 @@ function computeMacroGrowthData(macro: MacroSectionData): MacroGrowthSectionData
   const calcDiff = (vals: (number | null)[], prevI: number, currI: number): number | null => {
     const prev = vals[prevI];
     const curr = vals[currI];
-    if (prev == null || curr == null || prev <= 0) return null;
+    if (prev == null || curr == null || prev < 0) return null;
     return round(curr - prev, 1);
   };
 
@@ -567,8 +567,8 @@ function loadTradeData(
   const servExp2010 = get2010Services(s21, 8);
   const servImp2010 = get2010Services(s22, 8);
 
-  const tExp = tradeYears.map((y) => round(sheet31Exp[y] ?? (expData.totals[y] || 0) + servExp2010, 1));
-  const tImp = tradeYears.map((y) => round(sheet31Imp[y] ?? (impData.totals[y] || 0) + servImp2010, 1));
+  const tExp = tradeYears.map((y) => round(sheet31Exp[y] ?? (expData.totals[y] || 0) + (y === 2010 ? servExp2010 : 0), 1));
+  const tImp = tradeYears.map((y) => round(sheet31Imp[y] ?? (impData.totals[y] || 0) + (y === 2010 ? servImp2010 : 0), 1));
   const saldo = tradeYears.map((_, i) => round(tExp[i] - tImp[i], 1));
 
   // Collect all unique sovereign partner country codes across goods and IT services
@@ -673,6 +673,12 @@ function loadTradeData(
   const expBusinessRow = resolveExactServiceRow(s21Rows, 'інші ділові послуги', 'other business services');
   const impBusinessRow = resolveExactServiceRow(s22Rows, 'інші ділові послуги', 'other business services');
 
+  const COMMODITY_ITEMS: { id: TradeCategoryId; expRow: number; impRow: number }[] = COMMODITY_GROUPS.map(({ id, pattern }) => ({
+    id,
+    expRow: resolveCategoryRow(expCatRows, pattern),
+    impRow: resolveCategoryRow(impCatRows, pattern),
+  }));
+
   const SERVICE_ITEMS: { id: TradeCategoryId; expRow: number; impRow: number }[] = [
     { id: 'it_services', expRow: expItRow, impRow: impItRow },
     { id: 'transport_services', expRow: expTransportRow, impRow: impTransportRow },
@@ -696,10 +702,8 @@ function loadTradeData(
     let sumKnownExp = 0;
     let sumKnownImp = 0;
 
-    // 1. 7 Goods categories
-    for (const { id, pattern } of COMMODITY_GROUPS) {
-      const expRow = resolveCategoryRow(expCatRows, pattern);
-      const impRow = resolveCategoryRow(impCatRows, pattern);
+    // 1. 8 Goods categories
+    for (const { id, expRow, impRow } of COMMODITY_ITEMS) {
       const expVal = catCol != null && expRow !== -1 ? (Number(expCatRows[expRow]?.[catCol]) || 0) / 1000.0 : 0;
       const impVal = catCol != null && impRow !== -1 ? (Number(impCatRows[impRow]?.[catCol]) || 0) / 1000.0 : 0;
       const roundedExp = round(expVal, 1);
@@ -793,6 +797,8 @@ export async function runUkrainePipeline(forceUpdate = false, verbose?: boolean)
 
       await ensurePipelineL1('ukraine');
 
+      const force = forceUpdate || isUpdate();
+
       let existingCache: UkrainePipelineCache | null = null;
       if (await fileExists(DATA_FILE)) {
         try {
@@ -807,7 +813,7 @@ export async function runUkrainePipeline(forceUpdate = false, verbose?: boolean)
       const allUrls = [URL_BUDGET, URL_TRADE, URL_TRADE_M, URL_DEBT_Q, URL_DEBT_Y, URL_GDP];
 
       // Fast check: verify if remote files are unchanged via HTTP HEAD
-      if (!forceUpdate && hasValidDataset && existingCache?.meta) {
+      if (!force && hasValidDataset && existingCache?.meta) {
         logger.debug('Checking NBU file metadata via HTTP HEAD...');
         const remoteMetas = await Promise.all(allUrls.map((url) => fetchHeadMeta(url)));
         const networkFailed = remoteMetas.every((m) => m === null);
@@ -904,7 +910,7 @@ export async function runUkrainePipeline(forceUpdate = false, verbose?: boolean)
         .map(Number)
         .sort((a, b) => a - b);
 
-      const { ratesByMonth: rates, updatedCache: ratesCache } = await getMonthlyExchangeRates(yearsMonths, existingCache?.rates, forceUpdate);
+      const { ratesByMonth: rates, updatedCache: ratesCache } = await getMonthlyExchangeRates(yearsMonths, existingCache?.rates, force);
 
       const debtUahByYear = loadDebtData(debtWb, budgetYears, debtAnnualWb);
       const { nominal: gdpUahByYear, realGrowth: realGdpGrowthByYear } = loadGdpData(gdpWb, budgetYears);

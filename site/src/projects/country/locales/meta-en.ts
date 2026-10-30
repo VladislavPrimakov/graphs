@@ -1,6 +1,6 @@
 import type { ProjectLocaleMeta } from '@/utils/project';
 
-export const meta: ProjectLocaleMeta = {
+export const meta = {
   title: 'Country',
   description: 'Sovereign macroeconomic profiles, government budget, debt, foreign trade balance, and partner nations based on UN Comtrade and IMF WEO.',
   sections: {
@@ -10,4 +10,4 @@ export const meta: ProjectLocaleMeta = {
     'trade-categories': 'Trade Categories',
     'trade-partners': 'Trade Partners',
   },
-};
+} satisfies ProjectLocaleMeta;

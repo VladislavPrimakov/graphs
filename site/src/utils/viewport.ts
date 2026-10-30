@@ -40,7 +40,7 @@ export function getHeaderHeight(target?: HTMLElement | null): number {
   if (typeof document === 'undefined') return 64;
 
   if (!cachedHeader?.isConnected) {
-    cachedHeader = document.querySelector<HTMLElement>('header');
+    cachedHeader = document.getElementById('site-header');
   }
   const base = cachedHeader?.isConnected ? cachedHeader.offsetHeight : 64;
   const toolbar = target?.closest('.section-group')?.querySelector<HTMLElement>(STICKY_TOOLBAR_SELECTOR)?.offsetHeight ?? 0;
@@ -59,9 +59,14 @@ export function scrollToSection(target: HTMLElement | string, behavior: ScrollBe
 
   if (!targetEl) return;
 
-  const margin = `${getHeaderHeight(targetEl)}px`;
+  const headerHeight = getHeaderHeight(targetEl);
+  const margin = `${headerHeight}px`;
   if (targetEl.style.scrollMarginTop !== margin) {
     targetEl.style.scrollMarginTop = margin;
+  }
+
+  if (Math.abs(targetEl.getBoundingClientRect().top - headerHeight) < 2) {
+    return;
   }
 
   if (behavior === 'smooth') {

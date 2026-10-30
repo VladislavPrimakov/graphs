@@ -5,6 +5,7 @@ import { useEffect, useEffectEvent, useRef } from 'react';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { LossesMapSectionData, LossMapPoint, WarLossCategory, WarLossesFilterState } from '@graphs/shared/types/war-rf-ua/losses';
 import { useSectionResize } from '@/components/sections/Section';
+import { getThemeColors } from '@/styles/tokens';
 import { getMapTileStyle, registerFallbackDot } from '@/utils/map-builder';
 import { useFormat, useTheme, useTranslation } from '@/utils/provider';
 import { renderTooltipTablePopup } from '@/utils/tooltip-builder';
@@ -122,10 +123,12 @@ export interface LossesMapProps {
   data: LossesMapSectionData;
   t: WarLossesDict;
   filters?: WarLossesFilterState;
+  periods?: string[];
 }
 
-export const LossesMap: React.FC<LossesMapProps> = ({ data, t, filters }) => {
+export const LossesMap: React.FC<LossesMapProps> = ({ data, t, filters, periods }) => {
   const { resolvedTheme } = useTheme();
+  const tokens = getThemeColors(resolvedTheme);
   const {
     t: { common: tCommon },
   } = useTranslation();
@@ -144,6 +147,7 @@ export const LossesMap: React.FC<LossesMapProps> = ({ data, t, filters }) => {
   const selectedCategories = filters?.categories ?? [];
   const selectedModels = filters?.models ?? [];
   const [dateFrom, dateTo] = filters?.period ?? [];
+  const isAllPeriods = !dateFrom || !dateTo || Boolean(periods && periods.length > 0 && dateFrom <= periods[0] && dateTo >= periods[periods.length - 1]);
 
   const hasSide = selectedSide !== 'all';
   const sideIdx = selectedSide === 'rf' ? 0 : selectedSide === 'ua' ? 1 : selectedSide === 'unk' ? 2 : -1;
@@ -158,7 +162,7 @@ export const LossesMap: React.FC<LossesMapProps> = ({ data, t, filters }) => {
     if (allowedCatIndices && !allowedCatIndices.has(p[3])) return false;
     if (allowedModelIndices && !allowedModelIndices.has(p[4])) return false;
 
-    if (dateFrom || dateTo) {
+    if (!isAllPeriods && (dateFrom || dateTo)) {
       if (!p[5]) return false;
       const pointDate = p[5];
       if (dateFrom) {
@@ -263,7 +267,7 @@ export const LossesMap: React.FC<LossesMapProps> = ({ data, t, filters }) => {
 
     map.on('load', async () => {
       await registerCategoryMarkers(map, data.categories);
-      registerFallbackDot(map, 'marker-dot');
+      registerFallbackDot(map, tokens.text.dim);
 
       map.addSource('losses', {
         type: 'geojson',
@@ -313,7 +317,7 @@ export const LossesMap: React.FC<LossesMapProps> = ({ data, t, filters }) => {
       mapRef.current = null;
       mapSourceLoadedRef.current = false;
     };
-  }, [data, resolvedTheme]);
+  }, [data, resolvedTheme, tokens.text.dim]);
 
   useSectionResize(() => {
     mapRef.current?.resize();

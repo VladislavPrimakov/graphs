@@ -175,12 +175,12 @@ interface DensityBar {
   centerPercent: number;
 }
 
-const densityBarsCache = new WeakMap<string[], DensityBar[]>();
+const densityBarsCache = new WeakMap<number[], DensityBar[]>();
 
-/** Normalizes and samples density bars down to max 100 bars, cached per periods array. */
+/** Normalizes and samples density bars down to max 100 bars, cached per density array. */
 function getDensityBars(periods: string[], density?: number[]): DensityBar[] {
   if (!density || density.length === 0) return [];
-  let bars = densityBarsCache.get(periods);
+  let bars = densityBarsCache.get(density);
   if (bars) return bars;
 
   const n = density.length;
@@ -218,7 +218,7 @@ function getDensityBars(periods: string[], density?: number[]): DensityBar[] {
     }));
   }
 
-  densityBarsCache.set(periods, bars);
+  densityBarsCache.set(density, bars);
   return bars;
 }
 
@@ -437,7 +437,7 @@ export function TimelineScrubber({ granularity, periods, density, dateFrom, date
 
     const distToStart = Math.abs(clickedIdx - effectiveStartIdx);
     const distToEnd = Math.abs(clickedIdx - effectiveEndIdx);
-    const targetThumb: 'left' | 'right' = distToStart < distToEnd ? 'left' : 'right';
+    const targetThumb: 'left' | 'right' = clickedIdx < effectiveStartIdx ? 'left' : clickedIdx > effectiveEndIdx ? 'right' : distToStart <= distToEnd ? 'left' : 'right';
 
     const nextStart = targetThumb === 'left' ? clickedIdx : effectiveStartIdx;
     const nextEnd = targetThumb === 'right' ? clickedIdx : effectiveEndIdx;

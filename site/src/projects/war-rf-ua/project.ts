@@ -1,4 +1,3 @@
-import type { DayFrontlineEntry } from '@graphs/shared/types/war-rf-ua/frontline';
 import { WAR_LOSS_CATEGORIES } from '@graphs/shared/types/war-rf-ua/losses';
 import type { WarRfUaToolbarMeta } from '@graphs/shared/types/war-rf-ua/toolbar-meta';
 import { createElement } from 'react';
@@ -38,29 +37,8 @@ function getPeriodIndices(periods: string[], periodState?: unknown): [number, nu
   return [Math.max(0, startIdx), Math.min(periods.length - 1, endIdx)];
 }
 
-const START_YEAR = 2022;
-const CURRENT_YEAR = new Date().getFullYear();
-const FRONTLINE_YEARS = Array.from({ length: CURRENT_YEAR - START_YEAR + 1 }, (_, i) => String(START_YEAR + i));
-
-let frontlineHistoryPromise: Promise<Record<string, DayFrontlineEntry>> | null = null;
-
-/** Loads and merges partitioned yearly frontline history datasets with singleton promise caching. */
-function loadFrontlineHistory(): Promise<Record<string, DayFrontlineEntry>> {
-  if (!frontlineHistoryPromise) {
-    frontlineHistoryPromise = Promise.all(FRONTLINE_YEARS.map((year) => loadDataset<Record<string, DayFrontlineEntry>>('war-rf-ua', `frontline-history-${year}.json`))).then((datasets) => {
-      const merged: Record<string, DayFrontlineEntry> = {};
-      for (const dataset of datasets) {
-        Object.assign(merged, dataset);
-      }
-      return merged;
-    });
-  }
-  return frontlineHistoryPromise;
-}
-
 const data = {
   toolbarMeta: () => loadDataset<WarRfUaToolbarMeta>('war-rf-ua', 'toolbar-meta.json'),
-  frontlineHistory: loadFrontlineHistory,
 };
 
 export type Section = ProjectSection<typeof data, typeof dict>;
@@ -168,17 +146,44 @@ export const project = defineProject<typeof dict, typeof data>({
             items: (state) => {
               const [startIdx, endIdx] = getPeriodIndices(toolbarMeta.losses.periods, state.period);
               const side = (state.side as string) ?? 'all';
+              const selectedModels = Array.isArray(state.models) && state.models.length > 0 ? new Set(state.models as string[]) : null;
               const matrix = toolbarMeta.losses.matrix;
               const catCounts = new Int32Array(WAR_LOSS_CATEGORIES.length);
 
-              for (let p = startIdx; p <= endIdx; p++) {
-                const pMatrix = matrix[p];
-                if (!pMatrix) continue;
-                for (let c = 0; c < WAR_LOSS_CATEGORIES.length; c++) {
-                  if (side === 'rf') catCounts[c] += pMatrix[0][c] || 0;
-                  else if (side === 'ua') catCounts[c] += pMatrix[1][c] || 0;
-                  else if (side === 'unk') catCounts[c] += pMatrix[2][c] || 0;
-                  else catCounts[c] += (pMatrix[0][c] || 0) + (pMatrix[1][c] || 0) + (pMatrix[2][c] || 0);
+              if (selectedModels) {
+                const isAllPeriods = startIdx === 0 && endIdx === toolbarMeta.losses.periods.length - 1;
+                for (const m of toolbarMeta.losses.models) {
+                  if (!selectedModels.has(m.name)) continue;
+                  const c = m.cat;
+                  if (c < 0 || c >= WAR_LOSS_CATEGORIES.length) continue;
+                  if (isAllPeriods) {
+                    if (side === 'rf') catCounts[c] += m.rf;
+                    else if (side === 'ua') catCounts[c] += m.ua;
+                    else if (side === 'unk') catCounts[c] += m.unk ?? 0;
+                    else catCounts[c] += m.count;
+                  } else if (m.timeline) {
+                    const tl = m.timeline;
+                    for (let i = 0; i < tl.length; i += 4) {
+                      const p = tl[i];
+                      if (p >= startIdx && p <= endIdx) {
+                        if (side === 'rf') catCounts[c] += tl[i + 1];
+                        else if (side === 'ua') catCounts[c] += tl[i + 2];
+                        else if (side === 'unk') catCounts[c] += tl[i + 3];
+                        else catCounts[c] += tl[i + 1] + tl[i + 2] + tl[i + 3];
+                      }
+                    }
+                  }
+                }
+              } else {
+                for (let p = startIdx; p <= endIdx; p++) {
+                  const pMatrix = matrix[p];
+                  if (!pMatrix) continue;
+                  for (let c = 0; c < WAR_LOSS_CATEGORIES.length; c++) {
+                    if (side === 'rf') catCounts[c] += pMatrix[0][c] || 0;
+                    else if (side === 'ua') catCounts[c] += pMatrix[1][c] || 0;
+                    else if (side === 'unk') catCounts[c] += pMatrix[2][c] || 0;
+                    else catCounts[c] += (pMatrix[0][c] || 0) + (pMatrix[1][c] || 0) + (pMatrix[2][c] || 0);
+                  }
                 }
               }
 

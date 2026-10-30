@@ -59,6 +59,7 @@ export const tradeStructureSection: Section = ({ t, fmt }) => {
                 color: tradeColors.exportTotal,
                 data: data.totalExports.slice(startIdx, endIdx),
                 label: {
+                  show: true,
                   color: tradeColors.exportTotal,
                 },
                 formatLabel: ({ value }) => fmt.number(value),
@@ -69,6 +70,7 @@ export const tradeStructureSection: Section = ({ t, fmt }) => {
                 color: tradeColors.importTotal,
                 data: data.totalImports.slice(startIdx, endIdx),
                 label: {
+                  show: true,
                   color: tradeColors.importTotal,
                 },
                 formatLabel: ({ value }) => fmt.number(value),

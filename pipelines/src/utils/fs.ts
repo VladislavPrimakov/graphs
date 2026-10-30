@@ -1,15 +1,10 @@
 import { readFileSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { R2_ACCESS_KEY_ID, R2_BUCKET, R2_ENDPOINT, R2_SECRET_ACCESS_KEY } from '@/utils/env';
+import { R2_ACCESS_KEY_ID, R2_BUCKET, R2_ENDPOINT, R2_SECRET_ACCESS_KEY, REPO_ROOT } from '@/utils/env';
 import { getPipelineLogger } from '@/utils/logger';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-/** Absolute path to the repository root directory. */
-export const REPO_ROOT = path.resolve(__dirname, '../../..');
+export { REPO_ROOT };
 
 /** Absolute path to the pipelines/raw directory (L1 snapshot mirror). */
 export const PIPELINES_RAW_DIR = path.resolve(REPO_ROOT, 'pipelines/raw');
@@ -133,24 +128,28 @@ export async function flushPendingJsonSaves(filePath?: string): Promise<void> {
   await Promise.all(Array.from(fileWriteQueues.values()));
 }
 
+/** Metadata descriptor for an object stored in Cloudflare R2. */
 export interface R2ObjectInfo {
   key: string;
   etag: string;
   size: number;
 }
 
+/** Result of an R2 conditional object upload operation. */
 export interface UploadResult {
   uploaded: boolean;
   md5: string;
   skipped?: boolean;
 }
 
+/** Result of an R2 conditional object download operation. */
 export interface DownloadResult {
   downloaded: boolean;
   md5?: string;
   skipped?: boolean;
 }
 
+/** Summary counts for a Tier 1 L1 cache synchronization pass. */
 export interface SyncL1Result {
   downloaded: number;
   skipped: number;
@@ -318,7 +317,7 @@ export async function uploadToR2IfChanged(
     }
   }
 
-  if (remoteEtag && cleanEtag(remoteEtag) === localMd5) {
+  if (remoteEtag && cleanEtag(remoteEtag).toLowerCase() === localMd5.toLowerCase()) {
     return { uploaded: false, md5: localMd5, skipped: true };
   }
 

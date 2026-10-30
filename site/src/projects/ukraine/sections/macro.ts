@@ -38,11 +38,13 @@ export const macroSection: Section = ({ t, fmt, tokens }) => {
 
       const showLabels = ukraineStore.labels;
       const { startIdx, endIdx } = resolveVisiblePeriod(data.years, ukraineStore.years, {
-        seriesData: [data.defense, data.otherExp, data.totalExp, data.domesticRev, data.grants, data.loans, data.balances],
+        seriesData: [data.defense, data.otherExp, data.totalExp, data.domesticRev, data.grants, data.loans, data.totalRevFin, data.govDebt, data.privateDebt, data.debt, data.gdp, data.balances],
       });
 
       const visibleYearLabels = data.yearLabels.slice(startIdx, endIdx);
       const visibleBalances = data.balances.slice(startIdx, endIdx);
+      const visibleLoans = data.loans.slice(startIdx, endIdx).map((v) => (v > 0 ? v : null));
+      const visibleLoansPct = data.loansPct.slice(startIdx, endIdx).map((v, idx) => (visibleLoans[idx] != null ? Math.max(0, v) : null));
 
       return {
         content: createChart(
@@ -150,8 +152,8 @@ export const macroSection: Section = ({ t, fmt, tokens }) => {
                 name: t.proj.macro.loans,
                 stack: 'revenues',
                 data: zipRecords({
-                  value: data.loans.slice(startIdx, endIdx).map((v) => Math.max(0, v)),
-                  share: data.loansPct.slice(startIdx, endIdx).map((v) => Math.max(0, v)),
+                  value: visibleLoans,
+                  share: visibleLoansPct,
                 }),
                 color: budgetColors.loans,
                 label: { show: showLabels },

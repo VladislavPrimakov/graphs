@@ -83,6 +83,22 @@ export interface EncodedFrontlineLayers {
 /** Historical day entry: ready map layers, compact encoded layers, or a reference date if unchanged. */
 export type DayFrontlineEntry = FrontlineMapLayers | EncodedFrontlineLayers | { ref: string };
 
+/** Metadata fingerprints tracking upstream revisions for incremental invalidation. */
+export interface FrontlineDayMeta {
+  /** DeepState revision updatedAt ISO timestamp. */
+  ds?: string;
+  /** LostArmour KML HTTP ETag. */
+  la?: string;
+}
+
+/** Frontline section dataset containing summary metrics and daily territorial history. */
+export interface FrontlineSectionData {
+  /** High-level summary metrics for the latest date. */
+  summary: FrontlineSummary;
+  /** Daily time series of territorial claims and discrepancies spanning full history. */
+  timeline: FrontlineTimelinePoint[];
+}
+
 /** Frontline territorial control comparison dataset. */
 export interface WarFrontlineDataset {
   /** High-level summary metrics for the latest date. */
@@ -93,10 +109,14 @@ export interface WarFrontlineDataset {
   layers?: FrontlineMapLayers;
   /** Daily historical map layers indexed by YYYY-MM-DD date. */
   days?: Record<string, DayFrontlineEntry>;
+  /** Metadata tracking upstream revision fingerprints per day for incremental cache invalidation. */
+  meta?: {
+    revisions?: Record<string, FrontlineDayMeta>;
+  };
 }
 
 /** Section dataset for frontline-map. */
-export type FrontlineMapSectionData = WarFrontlineDataset;
+export type FrontlineMapSectionData = FrontlineSectionData;
 
 /** Precomputed monthly time series for territorial control and net changes. */
 export interface FrontlineDynamicsMonthly {

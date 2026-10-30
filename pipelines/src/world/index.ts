@@ -23,7 +23,9 @@ const WDI_SOURCE_URL = 'https://api.worldbank.org/v2/sources/2?format=json';
 const ITF_TRANSPORT_URL = 'https://sdmx.oecd.org/public/rest/data/OECD.ITF,DSD_INDICATORS@DF_TRANSPORTINDICATORS/.A.VEHICLES...CARS..';
 const UNECE_TRANSPORT_URL = 'https://w3.unece.org/PXWeb2015/api/v1/en/STAT/40-TRTRANS/03-TRRoadFleet/01_en_TRRoadTypVehR_r.px';
 
+/** Earliest calendar year included in the World indicators timeline. @default 1990 */
 export const START_YEAR = 1990;
+/** Latest complete calendar year targeted by the World indicators pipeline. */
 export const CURRENT_YEAR = new Date().getFullYear() - 1;
 const DEFAULT_TOP = 7;
 const MIN_TOP = 3;
@@ -73,6 +75,7 @@ interface PhysicalData {
   elec_per_capita_kwh: Record<string, Record<number | string, number>>;
 }
 
+/** Tier 1 L1 cache snapshot schema for the World indicators pipeline. */
 export interface WorldPipelineCache {
   meta?: {
     wdiLastUpdated?: string | null;
@@ -324,8 +327,8 @@ async function fetchManufacturingData(existingMfg?: Record<string, Record<number
     const [unRes, deflRes, wbEuMfgRes, wbEuPopRes] = await Promise.all([
       fetchWithRetry('https://unstats.un.org/SDGAPI/v1/sdg/Series/Data?seriesCode=NV_IND_MANFPC&pageSize=10000', { retries: 2, timeoutMs: 45000 }),
       fetchWithRetry('https://api.worldbank.org/v2/country/USA/indicator/NY.GDP.DEFL.ZS?date=2015:2021&format=json', { retries: 2, timeoutMs: 30000 }),
-      fetchWithRetry('https://api.worldbank.org/v2/country/EUU/indicator/NV.IND.MANF.KD?date=2000:2025&format=json', { retries: 2, timeoutMs: 30000 }),
-      fetchWithRetry('https://api.worldbank.org/v2/country/EUU/indicator/SP.POP.TOTL?date=2000:2025&format=json', { retries: 2, timeoutMs: 30000 }),
+      fetchWithRetry(`https://api.worldbank.org/v2/country/EUU/indicator/NV.IND.MANF.KD?date=${START_YEAR}:${CURRENT_YEAR}&format=json`, { retries: 2, timeoutMs: 30000 }),
+      fetchWithRetry(`https://api.worldbank.org/v2/country/EUU/indicator/SP.POP.TOTL?date=${START_YEAR}:${CURRENT_YEAR}&format=json`, { retries: 2, timeoutMs: 30000 }),
     ]);
 
     // Parse US GDP deflator
@@ -387,6 +390,32 @@ async function fetchManufacturingData(existingMfg?: Record<string, Record<number
   }
 }
 
+/** Splits a single CSV row into columns while respecting RFC 4180 double-quoted fields. */
+function splitCsvLine(line: string): string[] {
+  if (!line.includes('"')) return line.split(',');
+  const cols: string[] = [];
+  let cur = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        cur += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (ch === ',' && !inQuotes) {
+      cols.push(cur);
+      cur = '';
+    } else {
+      cur += ch;
+    }
+  }
+  cols.push(cur);
+  return cols;
+}
+
 /** Parses OWID Energy CSV text across all sovereign countries and regional aggregates. */
 function parseOwidCsvGlobal(csvText: string): {
   electricity_twh: Record<string, Record<number, number>>;
@@ -400,7 +429,7 @@ function parseOwidCsvGlobal(csvText: string): {
   const lines = csvText.split('\n');
   if (lines.length === 0) return { electricity_twh, solar_wind_twh, elec_per_capita_kwh };
 
-  const header = lines[0].split(',').map((h) => h.trim());
+  const header = splitCsvLine(lines[0]).map((h) => h.trim());
   const cIdx = header.indexOf('country');
   const isoIdx = header.indexOf('iso_code');
   const yIdx = header.indexOf('year');
@@ -412,7 +441,7 @@ function parseOwidCsvGlobal(csvText: string): {
   for (let i = 1; i < lines.length; i++) {
     const line = lines[i].trim();
     if (!line) continue;
-    const cols = line.split(',');
+    const cols = splitCsvLine(line);
     const countryName = cols[cIdx]?.trim();
     const iso = cols[isoIdx]?.trim();
     const year = parseInt(cols[yIdx]?.trim(), 10);
@@ -777,44 +806,42 @@ export async function runWorldPipeline(forceUpdate = false, verbose?: boolean): 
         Boolean(cache?.manufacturing) &&
         Boolean(cache?.sections?.['passenger-cars']);
 
-      let remoteWdiDate: string | null = null;
-      let remoteOwidMeta: RemoteFileMeta | null = null;
-      let remoteItfMeta: RemoteFileMeta | null = null;
-      let remoteUneceDate: string | null = null;
+      logger.debug('Checking World Bank, OWID, ITF and UNECE metadata...');
+      const [remoteWdiDate, remoteOwidMeta, remoteItfMeta, remoteUneceDate] = await Promise.all([
+        fetchWdiLastUpdated(),
+        fetchHeadMeta(OWID_ENERGY_URL),
+        fetchHeadMeta(ITF_TRANSPORT_URL),
+        fetchUneceLastUpdated(),
+      ]);
+
       let wdiChanged = true;
       let owidChanged = true;
       let motorizationChanged = true;
 
       // Fast check: verify if remote files/databases are unchanged via HTTP metadata
       if (!force && hasValidDataset && cache?.meta) {
-        logger.debug('Checking World Bank, OWID, ITF and UNECE metadata...');
-        [remoteWdiDate, remoteOwidMeta, remoteItfMeta, remoteUneceDate] = await Promise.all([
-          fetchWdiLastUpdated(),
-          fetchHeadMeta(OWID_ENERGY_URL),
-          fetchHeadMeta(ITF_TRANSPORT_URL),
-          fetchUneceLastUpdated(),
-        ]);
-
         const networkFailed = remoteWdiDate === null && remoteOwidMeta === null && remoteItfMeta === null;
         if (networkFailed) {
           logger.warn('Remote data sources unreachable (offline). Using cached dataset.');
-          await exportWorld(cache.sections);
-          return;
+          wdiChanged = false;
+          owidChanged = false;
+          motorizationChanged = false;
+        } else {
+          wdiChanged = remoteWdiDate == null || remoteWdiDate !== cache.meta.wdiLastUpdated;
+          owidChanged = !isRemoteMetaEqual(cache.meta.owid, remoteOwidMeta);
+          const hasItfValidators = Boolean(remoteItfMeta?.etag || remoteItfMeta?.lastModified);
+          const itfChanged = hasItfValidators ? !isRemoteMetaEqual(cache.meta.itf, remoteItfMeta) : !cache.motorization || Object.keys(cache.motorization).length === 0;
+          const uneceChanged = remoteUneceDate != null && remoteUneceDate !== cache.meta.uneceLastUpdated;
+          motorizationChanged = itfChanged || uneceChanged;
+
+          const isUpToDate = !wdiChanged && !owidChanged && !motorizationChanged;
+
+          if (isUpToDate) {
+            logger.unchanged('WDI, OWID, ITF & UNECE match');
+          } else {
+            logger.detected('Refreshing dataset');
+          }
         }
-
-        wdiChanged = remoteWdiDate == null || remoteWdiDate !== cache.meta.wdiLastUpdated;
-        owidChanged = !isRemoteMetaEqual(cache.meta.owid, remoteOwidMeta);
-        motorizationChanged = !isRemoteMetaEqual(cache.meta.itf, remoteItfMeta) || (remoteUneceDate != null && remoteUneceDate !== cache.meta.uneceLastUpdated);
-
-        const isUpToDate = !wdiChanged && !owidChanged && !motorizationChanged;
-
-        if (isUpToDate) {
-          logger.unchanged('WDI, OWID, ITF & UNECE match');
-          await exportWorld(cache.sections);
-          return;
-        }
-
-        logger.detected('Refreshing dataset');
       }
 
       const macroRaw = await fetchMacroDataWorldBank(cache?.macro, force || wdiChanged);
@@ -903,10 +930,9 @@ export async function runWorldPipeline(forceUpdate = false, verbose?: boolean): 
               values.push(roundedVal);
 
               const prevY = y - 1;
-              const prevValRaw = i === 0 ? (cDict[prevY] ?? cDict[String(prevY)]) : values[i - 1];
+              const prevValRaw = cDict[prevY] ?? cDict[String(prevY)];
               if (prevValRaw != null && prevValRaw > 0) {
-                const scaledPrev = i === 0 ? prevValRaw * scale : prevValRaw;
-                growth.push(round(((roundedVal - scaledPrev) / scaledPrev) * 100, 1));
+                growth.push(round(((val - prevValRaw) / prevValRaw) * 100, 1));
               } else {
                 growth.push(null);
               }

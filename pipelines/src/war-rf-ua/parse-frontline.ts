@@ -1,6 +1,7 @@
 import type {
   DayFrontlineEntry,
   EncodedFrontlineLayers,
+  FrontlineDayMeta,
   FrontlineMapLayers,
   FrontlineMultiPolygonCoords,
   FrontlineSummary,
@@ -26,9 +27,9 @@ type Ring = Pair[];
 type Polygon = Ring[];
 type MultiPolygon = Polygon[];
 
-/** Computes geodesic area of a polygon ring on the WGS-84 sphere in km². */
+/** Computes geodesic area of a polygon ring using the WGS-84 authalic radius in km². */
 function ringAreaKm2(ring: Pair[]): number {
-  const R = 6378.137;
+  const R = 6371.0072;
   let total = 0;
   const len = ring.length;
   if (len < 3) return 0;
@@ -42,6 +43,34 @@ function ringAreaKm2(ring: Pair[]): number {
     total += (lon2 - lon1) * (2 + Math.sin(lat1) + Math.sin(lat2));
   }
   return Math.abs((total * R * R) / 2);
+}
+
+/** Checks if a polygon ring lies within the Ukraine + Kursk/Belgorod theater bounding box. */
+function isRingInTheaterBounds(ring: Pair[]): boolean {
+  if (ring.length === 0) return false;
+  for (const [lon, lat] of ring) {
+    if (lon < 22.0 || lon > 41.0 || lat < 44.0 || lat > 53.5) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/** Deduplicates consecutive identical vertices in a ring while preserving closure with at least 4 points. */
+function deduplicateRing(ring: Pair[]): Pair[] {
+  if (ring.length < 4) return [];
+  const deduped: Pair[] = [];
+  for (const [lon, lat] of ring) {
+    if (deduped.length === 0 || deduped[deduped.length - 1][0] !== lon || deduped[deduped.length - 1][1] !== lat) {
+      deduped.push([lon, lat]);
+    }
+  }
+  if (deduped.length > 1 && deduped[0][0] === deduped[deduped.length - 1][0] && deduped[0][1] === deduped[deduped.length - 1][1]) {
+    deduped.pop();
+  }
+  if (deduped.length < 3) return [];
+  deduped.push([deduped[0][0], deduped[0][1]]);
+  return deduped;
 }
 
 /** Computes total area of a MultiPolygon in km² subtracting inner holes. */
@@ -118,7 +147,7 @@ const rdp = (points: Pair[], epsilon: number): Pair[] => {
 
 /** Simplifies a closed polygon ring while preserving ring closure and precision. */
 const simplifyRing = (ring: Pair[], epsilon: number, precision = 4): Pair[] => {
-  if (ring.length < 4) return ring;
+  if (ring.length < 4) return [];
   const isClosed = ring[0][0] === ring[ring.length - 1][0] && ring[0][1] === ring[ring.length - 1][1];
   const pts = isClosed ? ring.slice(0, -1) : ring;
   const midIdx = Math.floor(pts.length / 2);
@@ -129,14 +158,24 @@ const simplifyRing = (ring: Pair[], epsilon: number, precision = 4): Pair[] => {
     simplified.push([simplified[0][0], simplified[0][1]]);
   }
   const factor = 10 ** precision;
-  return simplified.map((p) => [Math.round(p[0] * factor) / factor, Math.round(p[1] * factor) / factor]);
+  const rounded: Pair[] = simplified.map((p) => [Math.round(p[0] * factor) / factor, Math.round(p[1] * factor) / factor]);
+  return deduplicateRing(rounded);
 };
 
-/** Simplifies MultiPolygon rings and filters out sub-pixel slivers. */
+/** Simplifies MultiPolygon rings and filters out out-of-bounds rings and sub-pixel slivers (including inner holes). */
 const simplifyMultiPolygon = (mp: MultiPolygon, epsilon = RDP_EPSILON, minAreaKm2 = 0.05, precision = 4): MultiPolygon => {
   return mp
-    .filter((poly) => poly && poly.length > 0 && ringAreaKm2(poly[0]) >= minAreaKm2)
-    .map((poly) => poly.map((ring) => simplifyRing(ring, epsilon, precision)).filter((ring) => ring.length >= 4))
+    .filter((poly) => poly && poly.length > 0 && isRingInTheaterBounds(poly[0]) && ringAreaKm2(poly[0]) >= minAreaKm2)
+    .map((poly) => {
+      const outer = simplifyRing(poly[0], epsilon, precision);
+      if (outer.length < 4 || ringAreaKm2(outer) < minAreaKm2) return [];
+      const holes = poly
+        .slice(1)
+        .filter((hole) => isRingInTheaterBounds(hole) && ringAreaKm2(hole) >= minAreaKm2)
+        .map((hole) => simplifyRing(hole, epsilon, precision))
+        .filter((hole) => hole.length >= 4 && ringAreaKm2(hole) >= minAreaKm2);
+      return [outer, ...holes];
+    })
     .filter((poly) => poly.length > 0);
 };
 
@@ -344,13 +383,13 @@ function geometryToPolygons(g?: GeoJsonGeometry): MultiPolygon {
     return polys;
   }
   if (g.type === 'Polygon' && Array.isArray(g.coordinates)) {
-    const rings = (g.coordinates as Pair[][]).map(cleanRing).filter((r) => r.length >= 4);
+    const rings = (g.coordinates as Pair[][]).map(cleanRing).filter((r) => r.length >= 4 && isRingInTheaterBounds(r));
     return rings.length > 0 ? [rings] : [];
   }
   if (g.type === 'MultiPolygon' && Array.isArray(g.coordinates)) {
     const polys: Polygon[] = [];
     for (const p of g.coordinates as Pair[][][]) {
-      const rings = p.map(cleanRing).filter((r) => r.length >= 4);
+      const rings = p.map(cleanRing).filter((r) => r.length >= 4 && isRingInTheaterBounds(r));
       if (rings.length > 0) polys.push(rings);
     }
     return polys;
@@ -376,16 +415,262 @@ function generateDateRange(startStr: string, endStr: string): string[] {
   return dates;
 }
 
-/** Enriches timeline points with day-over-day consensus territorial change, filtering out upstream glitch artifacts. */
+/** Enriches timeline points with day-over-day consensus territorial change. */
 function enrichTimelineWithDeltas(timeline: FrontlineTimelinePoint[]): FrontlineTimelinePoint[] {
   const sorted = [...timeline].sort((a, b) => a.date.localeCompare(b.date));
   return sorted.map((point, i, arr) => {
     if (i === 0) return { ...point, deltaKm2: 0 };
     const prev = arr[i - 1];
     const rawDelta = round(point.consensusRfKm2 - prev.consensusRfKm2, 1);
-    const deltaKm2 = Math.abs(rawDelta) > 1000 ? 0 : rawDelta;
+    const deltaKm2 = rawDelta;
     return { ...point, deltaKm2 };
   });
+}
+
+/** Normalizes daily frontline history so the first day of every year is a full layer object and identical days within the same year reference the prior anchor date. */
+function normalizeDaysWithYearRefs(days: Record<string, DayFrontlineEntry>): Record<string, DayFrontlineEntry> {
+  const sortedDates = Object.keys(days).sort();
+  const resolvedByDate = new Map<string, EncodedFrontlineLayers>();
+
+  for (const date of sortedDates) {
+    let entry: DayFrontlineEntry | undefined = days[date];
+    let depth = 0;
+    while (entry && 'ref' in entry && depth < 50) {
+      entry = days[entry.ref];
+      depth++;
+    }
+    if (entry && 'c' in entry) {
+      resolvedByDate.set(date, entry);
+    }
+  }
+
+  const normalized: Record<string, DayFrontlineEntry> = {};
+  let prevSerialized = '';
+  let prevAnchorDate = '';
+
+  for (const date of sortedDates) {
+    const layers = resolvedByDate.get(date);
+    if (!layers) continue;
+    const serialized = JSON.stringify(layers);
+    if (serialized === prevSerialized && prevAnchorDate && date.slice(0, 4) === prevAnchorDate.slice(0, 4)) {
+      normalized[date] = { ref: prevAnchorDate };
+    } else {
+      normalized[date] = layers;
+      prevSerialized = serialized;
+      prevAnchorDate = date;
+    }
+  }
+
+  return normalized;
+}
+
+/** Repairs existing daily frontline layers and timeline metrics by stripping out-of-bounds rings, inner hole slivers, and consecutive duplicate vertices. */
+function repairExistingFrontlineDataset(days: Record<string, DayFrontlineEntry>, timelineMap: Record<string, FrontlineTimelinePoint>): boolean {
+  const sortedDates = Object.keys(days).sort();
+  if (sortedDates.length === 0) return false;
+
+  interface InspectedRing {
+    inBounds: boolean;
+    valid: boolean;
+    encoded: string;
+    areaKm2: number;
+    changed: boolean;
+  }
+
+  interface CleanedLayersResult {
+    layers: EncodedFrontlineLayers;
+    cAreaKm2: number;
+    dAreaKm2: number;
+    dsAreaKm2: number;
+    laAreaKm2: number;
+    removedOutOfBoundsDsAreaKm2: number;
+    changed: boolean;
+  }
+
+  const ringCache = new Map<string, InspectedRing>();
+  const layerCache = new Map<EncodedFrontlineLayers, CleanedLayersResult>();
+
+  const inspectRing = (str: string): InspectedRing => {
+    const cached = ringCache.get(str);
+    if (cached) return cached;
+    const raw = decodePolylineRing(str);
+    const inBounds = isRingInTheaterBounds(raw);
+    const deduped = deduplicateRing(raw);
+    const valid = deduped.length >= 4;
+    const changed = !inBounds || !valid || deduped.length !== raw.length;
+    const encoded = valid ? (deduped.length === raw.length ? str : encodeRing(deduped)) : '';
+    const areaKm2 = valid ? ringAreaKm2(deduped) : 0;
+    const res: InspectedRing = { inBounds, valid, encoded, areaKm2, changed };
+    ringCache.set(str, res);
+    return res;
+  };
+
+  const cleanEncodedMultiPolygon = (encodedPolys: string[][], minAreaKm2: number): { encoded: string[][]; areaKm2: number; removedOutOfBoundsAreaKm2: number; changed: boolean } => {
+    const out: string[][] = [];
+    let totalAreaKm2 = 0;
+    let removedOutOfBoundsAreaKm2 = 0;
+    let changed = false;
+
+    for (const poly of encodedPolys || []) {
+      if (!poly || poly.length === 0) {
+        changed = true;
+        continue;
+      }
+      const outer = inspectRing(poly[0]);
+      if (!outer.inBounds) {
+        let outArea = outer.areaKm2;
+        for (let i = 1; i < poly.length; i++) {
+          outArea -= inspectRing(poly[i]).areaKm2;
+        }
+        removedOutOfBoundsAreaKm2 += Math.max(0, outArea);
+        changed = true;
+        continue;
+      }
+      if (!outer.valid || outer.areaKm2 < minAreaKm2) {
+        changed = true;
+        continue;
+      }
+      if (outer.changed) changed = true;
+
+      const cleanedPoly: string[] = [outer.encoded];
+      let polyArea = outer.areaKm2;
+      for (let i = 1; i < poly.length; i++) {
+        const hole = inspectRing(poly[i]);
+        if (!hole.inBounds || !hole.valid || hole.areaKm2 < minAreaKm2) {
+          changed = true;
+          continue;
+        }
+        if (hole.changed) changed = true;
+        cleanedPoly.push(hole.encoded);
+        polyArea -= hole.areaKm2;
+      }
+      totalAreaKm2 += Math.max(0, polyArea);
+      out.push(cleanedPoly);
+    }
+
+    return { encoded: out, areaKm2: totalAreaKm2, removedOutOfBoundsAreaKm2, changed };
+  };
+
+  const cleanLayers = (entry: EncodedFrontlineLayers): CleanedLayersResult => {
+    const cached = layerCache.get(entry);
+    if (cached) return cached;
+    const cRes = cleanEncodedMultiPolygon(entry.c, 0.05);
+    const dRes = cleanEncodedMultiPolygon(entry.d, 0.3);
+    const dsRes = cleanEncodedMultiPolygon(entry.ds, 0.05);
+    const laRes = cleanEncodedMultiPolygon(entry.la, 0.05);
+    const changed = cRes.changed || dRes.changed || dsRes.changed || laRes.changed;
+    const res: CleanedLayersResult = {
+      layers: changed ? { c: cRes.encoded, d: dRes.encoded, ds: dsRes.encoded, la: laRes.encoded } : entry,
+      cAreaKm2: cRes.areaKm2,
+      dAreaKm2: dRes.areaKm2,
+      dsAreaKm2: dsRes.areaKm2,
+      laAreaKm2: laRes.areaKm2,
+      removedOutOfBoundsDsAreaKm2: dsRes.removedOutOfBoundsAreaKm2,
+      changed,
+    };
+    layerCache.set(entry, res);
+    return res;
+  };
+
+  let anyChanged = false;
+  const resolvedCleanedByDate = new Map<string, CleanedLayersResult>();
+
+  for (const date of sortedDates) {
+    let entry: DayFrontlineEntry | undefined = days[date];
+    let depth = 0;
+    while (entry && 'ref' in entry && depth < 50) {
+      if (entry.ref.slice(0, 4) !== date.slice(0, 4)) {
+        anyChanged = true;
+      }
+      entry = days[entry.ref];
+      depth++;
+    }
+    if (!entry || !('c' in entry)) continue;
+    const cleaned = cleanLayers(entry);
+    if (cleaned.changed) anyChanged = true;
+    resolvedCleanedByDate.set(date, cleaned);
+
+    const pt = timelineMap[date];
+    if (pt) {
+      const consensusRfKm2 = round(cleaned.cAreaKm2, 1);
+      const disputedKm2 = round(cleaned.dAreaKm2, 1);
+      const laClaimedKm2 = date >= LA_START_DATE ? round(cleaned.laAreaKm2, 1) : 0;
+      const consensusUaKm2 = round(Math.max(0, UKRAINE_TOTAL_KM2 - consensusRfKm2 - disputedKm2), 1);
+      let dsOccupiedKm2 = pt.dsOccupiedKm2;
+      if (cleaned.removedOutOfBoundsDsAreaKm2 > 0 && dsOccupiedKm2 > round(cleaned.dsAreaKm2, 1)) {
+        dsOccupiedKm2 = round(Math.max(0, dsOccupiedKm2 - cleaned.removedOutOfBoundsDsAreaKm2), 1);
+      }
+
+      if (pt.consensusRfKm2 !== consensusRfKm2 || pt.disputedKm2 !== disputedKm2 || pt.laClaimedKm2 !== laClaimedKm2 || pt.consensusUaKm2 !== consensusUaKm2 || pt.dsOccupiedKm2 !== dsOccupiedKm2) {
+        anyChanged = true;
+        timelineMap[date] = {
+          ...pt,
+          consensusRfKm2,
+          consensusUaKm2,
+          disputedKm2,
+          laClaimedKm2,
+          dsOccupiedKm2,
+        };
+      }
+    }
+  }
+
+  let prevSerialized = '';
+  let prevAnchorDate = '';
+  for (const date of sortedDates) {
+    const cleaned = resolvedCleanedByDate.get(date);
+    if (!cleaned) continue;
+    const serialized = JSON.stringify(cleaned.layers);
+    if (serialized === prevSerialized && prevAnchorDate && date.slice(0, 4) === prevAnchorDate.slice(0, 4)) {
+      const cur = days[date];
+      if (!('ref' in cur) || cur.ref !== prevAnchorDate) anyChanged = true;
+      days[date] = { ref: prevAnchorDate };
+    } else {
+      if ('ref' in days[date]) anyChanged = true;
+      days[date] = cleaned.layers;
+      prevSerialized = serialized;
+      prevAnchorDate = date;
+    }
+  }
+
+  return anyChanged;
+}
+
+/** Concurrently fetches HTTP ETags for all historical LostArmour KML files. */
+async function fetchLostArmourEtags(dates: string[], concurrency = 32): Promise<Map<string, string>> {
+  const etagMap = new Map<string, string>();
+  const laDates = dates.filter((d) => d >= LA_START_DATE);
+  if (laDates.length === 0) return etagMap;
+
+  let index = 0;
+  async function worker() {
+    while (index < laDates.length) {
+      const idx = index++;
+      const date = laDates[idx];
+      try {
+        const res = await fetch(`https://lostarmour.info/mapinfo/kml/${date}.kml`, {
+          method: 'HEAD',
+          headers: {
+            'User-Agent': 'Mozilla/5.0',
+            Referer: 'https://lostarmour.info/map',
+          },
+          signal: AbortSignal.timeout(6000),
+        });
+        if (res.ok) {
+          const raw = res.headers.get('etag');
+          if (raw) {
+            etagMap.set(date, raw.replace(/["']/g, '').trim());
+          }
+        }
+      } catch {
+        // Individual HEAD failure ignored; cached status preserved
+      }
+    }
+  }
+
+  const workers = Array.from({ length: Math.min(concurrency, laDates.length) }, () => worker());
+  await Promise.all(workers);
+  return etagMap;
 }
 
 /** Parses and maintains comprehensive daily frontline territorial dataset. */
@@ -421,23 +706,53 @@ export async function parseFrontline(forceUpdate = false): Promise<WarFrontlineD
     logger.warn('Failed to fetch LostArmour metadata, defaulting to current date:', err);
   }
 
-  // 2. Fetch DeepState public history revisions
-  logger.debug('Fetching DeepState public revision history...');
-  const dsHistRes = await fetchWithRetry('https://deepstatemap.live/api/history/public', {
-    headers: { 'User-Agent': 'Mozilla/5.0' },
-    retries: 2,
-    timeoutMs: 15000,
-  });
-  if (!dsHistRes.ok) throw new Error(`Failed to fetch DeepState revisions: HTTP ${dsHistRes.status}`);
-  const dsRevisions = (await dsHistRes.json()) as { id: number; createdAt: string }[];
+  const allDates = [BASELINE_DATE, ...generateDateRange(START_DATE, latestDate)];
 
-  const revByDate = new Map<string, number>();
+  // 2. Concurrently fetch DeepState public history and LostArmour ETags for all dates
+  logger.debug(`Fetching upstream metadata (DeepState revisions and ${allDates.length} LostArmour ETags)...`);
+  const [dsHistRes, laEtagMap] = await Promise.all([
+    fetchWithRetry('https://deepstatemap.live/api/history/public', {
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+      retries: 2,
+      timeoutMs: 15000,
+    }),
+    fetchLostArmourEtags(allDates),
+  ]);
+  if (!dsHistRes.ok) throw new Error(`Failed to fetch DeepState revisions: HTTP ${dsHistRes.status}`);
+  const dsRevisions = (await dsHistRes.json()) as { id: number; createdAt: string; updatedAt: string }[];
+
+  const directDsByDate = new Map<string, { id: number; updatedAt: string }>();
   for (const r of dsRevisions) {
     const dateStr = r.createdAt.slice(0, 10);
-    revByDate.set(dateStr, r.id);
+    directDsByDate.set(dateStr, { id: r.id, updatedAt: r.updatedAt });
   }
+  const sortedDsDates = Array.from(directDsByDate.keys()).sort();
 
-  const allDates = [BASELINE_DATE, ...generateDateRange(START_DATE, latestDate)];
+  const resolveDsInfo = (date: string): { id: number; updatedAt: string } | undefined => {
+    const direct = directDsByDate.get(date);
+    if (direct) return direct;
+    if (date === BASELINE_DATE) {
+      const first = dsRevisions[0];
+      return first ? { id: first.id, updatedAt: first.updatedAt } : undefined;
+    }
+    let low = 0;
+    let high = sortedDsDates.length - 1;
+    let bestIdx = -1;
+    while (low <= high) {
+      const mid = (low + high) >> 1;
+      if (sortedDsDates[mid] <= date) {
+        bestIdx = mid;
+        low = mid + 1;
+      } else {
+        high = mid - 1;
+      }
+    }
+    if (bestIdx >= 0) {
+      return directDsByDate.get(sortedDsDates[bestIdx]);
+    }
+    return undefined;
+  };
+
   const existingDays: Record<string, DayFrontlineEntry> = forceUpdate ? {} : existing?.days || {};
   const existingTimeline: Record<string, FrontlineTimelinePoint> = {};
   if (!forceUpdate && existing?.timeline) {
@@ -446,24 +761,120 @@ export async function parseFrontline(forceUpdate = false): Promise<WarFrontlineD
     }
   }
 
-  // Determine missing dates (all dates when forceUpdate is active, otherwise only genuinely missing dates)
-  const missingDates = forceUpdate
-    ? allDates
-    : allDates.filter((d) => {
-        const day = existingDays[d];
-        const pt = existingTimeline[d];
-        if (!day || !pt) return true;
-        if (d >= LA_START_DATE) {
-          return (pt.laClaimedKm2 ?? 0) < 100000;
-        }
-        return (pt.dsOccupiedKm2 ?? 0) < 40000;
-      });
+  const savedRevisions: Record<string, FrontlineDayMeta> = existing?.meta?.revisions || {};
+  const isInitialMetaMigration = !forceUpdate && (!existing?.meta?.revisions || Object.keys(savedRevisions).length === 0);
+  const revisions: Record<string, FrontlineDayMeta> = { ...savedRevisions };
+
+  const wasRepaired = !forceUpdate ? repairExistingFrontlineDataset(existingDays, existingTimeline) : false;
+
+  // Determine missing or invalidated dates
+  const invalidatedDates: string[] = [];
+  const genuinelyMissingDates: string[] = [];
+
+  for (const d of allDates) {
+    const day = existingDays[d];
+    const pt = existingTimeline[d];
+    const isMissing = !day || !pt;
+    const isCorrupted =
+      !isMissing &&
+      (d >= LA_START_DATE
+        ? (pt.laClaimedKm2 ?? 0) < 100000 || (pt.consensusRfKm2 ?? 0) < 100000
+        : (pt.dsOccupiedKm2 ?? 0) < 40000);
+
+    if (isMissing || isCorrupted) {
+      genuinelyMissingDates.push(d);
+      continue;
+    }
+
+    if (forceUpdate) {
+      genuinelyMissingDates.push(d);
+      continue;
+    }
+
+    if (isInitialMetaMigration) {
+      const dsInfo = resolveDsInfo(d);
+      const laEtag = laEtagMap.get(d);
+      revisions[d] = {
+        ds: dsInfo?.updatedAt,
+        la: d >= LA_START_DATE ? laEtag : undefined,
+      };
+      continue;
+    }
+
+    const saved = savedRevisions[d];
+    if (!saved) {
+      invalidatedDates.push(d);
+      continue;
+    }
+
+    const dsInfo = resolveDsInfo(d);
+    if (dsInfo && saved.ds !== dsInfo.updatedAt) {
+      invalidatedDates.push(d);
+      continue;
+    }
+
+    const laEtag = laEtagMap.get(d);
+    if (d >= LA_START_DATE && laEtag && saved.la !== laEtag) {
+      invalidatedDates.push(d);
+      continue;
+    }
+  }
+
+  const missingDates = [...genuinelyMissingDates, ...invalidatedDates].sort();
+
+  if (invalidatedDates.length > 0) {
+    logger.info(`Detected ${invalidatedDates.length} frontline dates with changed upstream revisions (DS updatedAt or LA ETag).`);
+  }
+  if (genuinelyMissingDates.length > 0 && !forceUpdate) {
+    logger.info(`Detected ${genuinelyMissingDates.length} new or incomplete frontline dates.`);
+  }
 
   if (missingDates.length === 0 && existing && existing.summary && existing.layers) {
-    logger.debug(`Frontline daily history is complete and up to date (${allDates.length} days cached).`);
-    const needsDeltaEnrichment = existing.timeline.length > 1 && typeof existing.timeline[1].deltaKm2 !== 'number';
-    if (needsDeltaEnrichment) {
-      existing.timeline = enrichTimelineWithDeltas(existing.timeline);
+    logger.debug(`Frontline daily history is complete and up to date (${allDates.length} days cached, 0 invalidated).`);
+    const enrichedTimeline = enrichTimelineWithDeltas(Object.values(existingTimeline));
+    const prevTimeline = existing.timeline;
+    const hasDeltaMismatch = enrichedTimeline.some((pt, idx) => pt.deltaKm2 !== prevTimeline[idx]?.deltaKm2);
+    const hasMetaUpdate = isInitialMetaMigration || !existing.meta?.revisions;
+    if (wasRepaired || hasDeltaMismatch || hasMetaUpdate) {
+      const normalizedDays = normalizeDaysWithYearRefs(existingDays);
+      const latestPt = enrichedTimeline[enrichedTimeline.length - 1];
+      const latestDateKey = latestPt?.date || existing.summary.latestDate;
+      let latestLayers = existing.layers;
+      const latestEntry = normalizedDays[latestDateKey];
+      if (latestEntry) {
+        let resolved: DayFrontlineEntry | undefined = latestEntry;
+        let depth = 0;
+        while (resolved && 'ref' in resolved && depth < 50) {
+          resolved = normalizedDays[resolved.ref];
+          depth++;
+        }
+        if (resolved && 'c' in resolved) {
+          latestLayers = {
+            consensusRf: decodeMultiPolygon(resolved.c),
+            disputed: decodeMultiPolygon(resolved.d),
+            deepstate: decodeMultiPolygon(resolved.ds),
+            lostarmour: decodeMultiPolygon(resolved.la),
+          };
+        }
+      }
+      existing = {
+        summary: {
+          ...existing.summary,
+          latestDate: latestDateKey,
+          consensusRfKm2: latestPt?.consensusRfKm2 ?? existing.summary.consensusRfKm2,
+          consensusUaKm2: latestPt?.consensusUaKm2 ?? existing.summary.consensusUaKm2,
+          disputedKm2: latestPt?.disputedKm2 ?? existing.summary.disputedKm2,
+          dsOccupiedKm2: latestPt?.dsOccupiedKm2 ?? existing.summary.dsOccupiedKm2,
+          dsGreyKm2: latestPt?.dsGreyKm2 ?? existing.summary.dsGreyKm2,
+          laClaimedKm2: latestPt?.laClaimedKm2 ?? existing.summary.laClaimedKm2,
+        },
+        timeline: enrichedTimeline,
+        layers: latestLayers,
+        days: normalizedDays,
+        meta: {
+          revisions,
+        },
+      };
       await writeJsonAsyncToR2(DATA_FRONTLINE_PATH, existing);
     }
     await exportFrontlineHistory(existing.days || {});
@@ -473,7 +884,7 @@ export async function parseFrontline(forceUpdate = false): Promise<WarFrontlineD
   if (forceUpdate) {
     logger.info(`Force update (-u) active: re-processing all ${missingDates.length} daily frontline entries from ${BASELINE_DATE}...`);
   } else {
-    logger.info(`Processing ${missingDates.length} missing daily frontline entries (${allDates.length} total from ${BASELINE_DATE})...`);
+    logger.info(`Processing ${missingDates.length} missing/updated daily frontline entries (${allDates.length} total from ${BASELINE_DATE})...`);
   }
 
   const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_' });
@@ -498,16 +909,8 @@ export async function parseFrontline(forceUpdate = false): Promise<WarFrontlineD
       }
 
       // 2. Resolve DS revision via LOCF (or earliest revision for baseline)
-      let revId = revByDate.get(date);
-      if (!revId) {
-        const pDates = Array.from(revByDate.keys())
-          .filter((x) => x <= date)
-          .sort();
-        revId = revByDate.get(pDates[pDates.length - 1]);
-      }
-      if (!revId && isBaseline) {
-        revId = dsRevisions[0]?.id;
-      }
+      const dsInfo = resolveDsInfo(date);
+      const revId = dsInfo?.id;
       if (!revId) return null;
 
       let dsGeo = dsGeoCache.get(revId);
@@ -585,7 +988,7 @@ export async function parseFrontline(forceUpdate = false): Promise<WarFrontlineD
             })
             .filter((pt) => !Number.isNaN(pt[0]) && !Number.isNaN(pt[1]));
           const cleaned = cleanRing(ring);
-          if (cleaned.length >= 4) laMultiPoly.push([cleaned]);
+          if (cleaned.length >= 4 && isRingInTheaterBounds(cleaned)) laMultiPoly.push([cleaned]);
         }
 
         if (dsCrimeaPolys.length > 0) {
@@ -686,13 +1089,21 @@ export async function parseFrontline(forceUpdate = false): Promise<WarFrontlineD
       existingTimeline[date] = point;
 
       const serialized = JSON.stringify(encLayers);
-      if (serialized === prevSerialized && prevDate) {
+      if (serialized === prevSerialized && prevDate && date.slice(0, 4) === prevDate.slice(0, 4)) {
         existingDays[date] = { ref: prevDate };
       } else {
         existingDays[date] = encLayers;
         prevSerialized = serialized;
         prevDate = date;
       }
+
+      // Record fresh metadata fingerprint for processed date
+      const dsInfo = resolveDsInfo(date);
+      const laEtag = laEtagMap.get(date);
+      revisions[date] = {
+        ds: dsInfo?.updatedAt,
+        la: date >= LA_START_DATE ? laEtag : undefined,
+      };
     }
 
     processedCount += chunk.length;
@@ -724,6 +1135,9 @@ export async function parseFrontline(forceUpdate = false): Promise<WarFrontlineD
           timeline: intermediateTimeline,
           layers: existing?.layers || lastRawLayers!,
           days: existingDays,
+          meta: {
+            revisions,
+          },
         });
       }
     }
@@ -734,14 +1148,17 @@ export async function parseFrontline(forceUpdate = false): Promise<WarFrontlineD
   const finalLatestDate = finalTimeline.length > 0 ? finalTimeline[finalTimeline.length - 1].date : latestDate;
   const latestPoint = finalTimeline[finalTimeline.length - 1];
 
-  // If latest raw layers are not in memory, use existing or decode
-  let finalLayers = (lastProcessedDate === finalLatestDate ? lastRawLayers : null) || (existing?.summary?.latestDate === finalLatestDate ? existing.layers : null);
+  // Sort and normalize daily layer entries chronologically with year-scoped refs
+  const sortedDays = normalizeDaysWithYearRefs(existingDays);
 
-  if (!finalLayers && existingDays[finalLatestDate]) {
-    let entry: DayFrontlineEntry = existingDays[finalLatestDate];
+  // Decode latest raw layers from normalized sortedDays (or use lastRawLayers if just processed)
+  let finalLayers = lastProcessedDate === finalLatestDate ? lastRawLayers : null;
+
+  if (!finalLayers && sortedDays[finalLatestDate]) {
+    let entry: DayFrontlineEntry = sortedDays[finalLatestDate];
     let depth = 0;
-    while (entry && 'ref' in entry && depth < 20) {
-      entry = existingDays[entry.ref];
+    while (entry && 'ref' in entry && depth < 50) {
+      entry = sortedDays[entry.ref];
       depth++;
     }
     if (entry) {
@@ -760,12 +1177,6 @@ export async function parseFrontline(forceUpdate = false): Promise<WarFrontlineD
 
   if (!finalLayers) {
     finalLayers = existing?.layers || lastRawLayers!;
-  }
-
-  // Sort daily layer entries chronologically
-  const sortedDays: Record<string, DayFrontlineEntry> = {};
-  for (const date of Object.keys(existingDays).sort()) {
-    sortedDays[date] = existingDays[date];
   }
 
   const summary: FrontlineSummary = {
@@ -792,6 +1203,9 @@ export async function parseFrontline(forceUpdate = false): Promise<WarFrontlineD
     timeline: finalTimeline,
     layers: finalLayers,
     days: sortedDays,
+    meta: {
+      revisions,
+    },
   };
 
   logger.info(`Saving complete daily frontline dataset (${finalTimeline.length} days, latest: ${finalLatestDate})...`);
@@ -805,8 +1219,9 @@ export async function parseFrontline(forceUpdate = false): Promise<WarFrontlineD
 
 /** Exports daily frontline layers partitioned by year directly to site/public/data/war-rf-ua/frontline-history-*.json. */
 async function exportFrontlineHistory(days: Record<string, DayFrontlineEntry>): Promise<void> {
+  const normalizedDays = normalizeDaysWithYearRefs(days);
   const byYear: Record<string, Record<string, DayFrontlineEntry>> = {};
-  for (const [date, entry] of Object.entries(days)) {
+  for (const [date, entry] of Object.entries(normalizedDays)) {
     const year = date.slice(0, 4);
     if (!byYear[year]) byYear[year] = {};
     byYear[year][date] = entry;

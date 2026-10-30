@@ -41,12 +41,22 @@ export const tradeCategoriesSection: Section = ({ t, fmt }) => {
       const visibleTotalImports = data.totalImports.slice(startIdx, endIdx);
       const visibleTradeBalance = visibleTotalExports.map((exp, i) => exp - (visibleTotalImports[i] || 0));
       const categoryColors = tradeCategoryColors;
+      let maxStack = 0;
 
       const buildCategorySeries = (type: 'exp' | 'imp') => {
         const isExp = type === 'exp';
         const dataset = isExp ? visibleCategoryExports : visibleCategoryImports;
         const sign = isExp ? 1 : -1;
         const prefix = isExp ? '' : '-';
+
+        for (let i = 0; i < visibleYears.length; i++) {
+          const yearItems = dataset[i] || [];
+          let yearShareSum = 0;
+          for (const [, , share] of yearItems) {
+            yearShareSum += share;
+          }
+          if (yearShareSum > maxStack) maxStack = yearShareSum;
+        }
 
         return createRankedBarSeries<[string, number, number]>({
           idPrefix: type,
@@ -74,29 +84,7 @@ export const tradeCategoriesSection: Section = ({ t, fmt }) => {
         color: categoryColors[id],
       }));
 
-      let maxExpStack = 0;
-      let maxImpStack = 0;
-      if (isPercent) {
-        for (let i = 0; i < visibleYears.length; i++) {
-          let expSum = 0;
-          for (const s of expSeries) {
-            const raw = s.data?.[i];
-            const v = typeof raw === 'number' ? raw : typeof raw === 'object' && raw !== null && 'value' in raw ? Number(raw.value) : 0;
-            if (v) expSum += Math.abs(v);
-          }
-          if (expSum > maxExpStack) maxExpStack = expSum;
-
-          let impSum = 0;
-          for (const s of impSeries) {
-            const raw = s.data?.[i];
-            const v = typeof raw === 'number' ? raw : typeof raw === 'object' && raw !== null && 'value' in raw ? Number(raw.value) : 0;
-            if (v) impSum += Math.abs(v);
-          }
-          if (impSum > maxImpStack) maxImpStack = impSum;
-        }
-      }
-      const peakPercentStack = Math.max(maxExpStack, maxImpStack);
-      const effectivePercentBound = peakPercentStack > 0 ? Math.min(100, Math.ceil((peakPercentStack * 1.15) / 5) * 5 || 10) : 100;
+      const effectivePercentBound = maxStack > 0 ? Math.min(100, Math.ceil((maxStack * 1.15) / 5) * 5 || 10) : 100;
 
       return {
         content: createChart(

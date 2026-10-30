@@ -1,52 +1,12 @@
-import { use, useEffect } from 'react';
+import { changelogData } from 'virtual:changelog';
+import { useEffect } from 'react';
 import { useParams } from 'react-router';
 import { dismissInitialLoader } from '@/components/ui/LoadingSpinner';
 import NotFoundPage from '@/pages/NotFoundPage';
 import { cn } from '@/utils/cn';
 import { usePath, useTranslation } from '@/utils/provider';
-import { type ChangelogRelease, parseChangelogReleases, SITE_VERSION } from '@/utils/version';
-import { SECTION_DATA_ATTR, scrollToSection, useScrollSpy } from '@/utils/viewport';
-
-interface ChangelogData {
-  html: string;
-  releases: ChangelogRelease[];
-}
-
-let changelogPromise: Promise<ChangelogData> | null = null;
-
-function loadChangelog(): Promise<ChangelogData> {
-  if (!changelogPromise) {
-    changelogPromise = Promise.all([import('../../../CHANGELOG.md?raw'), import('marked')]).then(async ([rawMod, markedMod]) => {
-      const changelogRaw = rawMod.default;
-      const releases = parseChangelogReleases(changelogRaw);
-
-      const marked = new markedMod.Marked({ gfm: true });
-      marked.use({
-        renderer: {
-          heading({ text, depth }) {
-            if (depth === 2) {
-              const match = text.match(/\[(\d+\.\d+\.\d+)\]/);
-              if (match) {
-                const id = `v${match[1]}`;
-                return `<h2 id="${id}" ${SECTION_DATA_ATTR}="${id}">${text}</h2>\n`;
-              }
-              const slug = text
-                .toLowerCase()
-                .replace(/[^\w]+/g, '-')
-                .replace(/^-|-$/g, '');
-              return `<h2 id="${slug}">${text}</h2>\n`;
-            }
-            return `<h${depth}>${text}</h${depth}>\n`;
-          },
-        },
-      });
-
-      const html = await marked.parse(changelogRaw);
-      return { html, releases };
-    });
-  }
-  return changelogPromise;
-}
+import { type ChangelogRelease, SITE_VERSION } from '@/utils/version';
+import { scrollToSection, useScrollSpy } from '@/utils/viewport';
 
 interface ChangelogContentProps {
   html: string;
@@ -143,7 +103,7 @@ function ChangelogContent({ html, releases, normalizedVersion }: ChangelogConten
 
 /** Standalone Changelog page rendering continuous release notes with a sticky right outline and scroll-spy active highlights. */
 export default function ChangelogPage() {
-  const { html, releases } = use(loadChangelog());
+  const { html, releases } = changelogData;
   const { version } = useParams<{ version?: string }>();
 
   const normalizedVersion = version ? (version.startsWith('v') ? version : `v${version}`) : undefined;

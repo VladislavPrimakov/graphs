@@ -83,7 +83,8 @@ export const SectionChart: React.FC<SectionChartProps> = ({ option: rawOption, e
     }
   });
 
-  // 1. Initialize ECharts instance on mount / theme switch and observe container resizing
+  // 1. Initialize ECharts instance on mount and observe container resizing
+  // biome-ignore lint/correctness/useExhaustiveDependencies: theme updates are applied in-place via enhanceOption without disposing the canvas
   useEffect(() => {
     if (!chartRef.current) return;
 
@@ -100,7 +101,7 @@ export const SectionChart: React.FC<SectionChartProps> = ({ option: rawOption, e
       chartInstance.current = null;
       setIsReady(false);
     };
-  }, [resolvedTheme]);
+  }, []);
 
   useSectionResize(() => {
     if (chartInstance.current) {

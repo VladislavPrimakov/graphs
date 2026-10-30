@@ -26,11 +26,17 @@ export function saveCountryProfile(profile: RawCountryProfile): Promise<void> {
 
 export { COUNTRIES, SUPPORTED_COUNTRIES };
 
+/** Earliest calendar year included in historical country trade and macroeconomic series. @default 1990 */
 export const START_YEAR = 1990;
+/** Latest completed calendar year queried from upstream trade and macroeconomic sources. */
 export const CURRENT_YEAR = new Date().getFullYear() - 1;
+/** Number of calendar years batched per UN Comtrade bilateral goods request. @default 4 */
 export const CHUNK_SIZE_GOODS = 4;
+/** Number of calendar years batched per UN Comtrade commercial services request. @default 12 */
 export const CHUNK_SIZE_SERVICES = 12;
+/** Maximum number of reporter countries batched per UN Comtrade commercial services request. @default 40 */
 export const BATCH_SIZE_SERVICES_COUNTRIES = 40;
+/** Default period chunk size for UN Comtrade queries. @default 12 */
 export const CHUNK_SIZE = 12;
 
 const comtradeKey = COMTRADE_API_KEY;
@@ -53,7 +59,6 @@ export const STATISTICAL_PARTNER_CODES = new Set([
   'F49',
   'R91',
   'R20',
-  'S19',
   'NTZ',
   '_AC',
   '_CI',
@@ -63,6 +68,7 @@ export const STATISTICAL_PARTNER_CODES = new Set([
   '_ZP',
 ]);
 
+/** Raw annual trade and macroeconomic streams for a single country and calendar year in Tier 1 storage. */
 export interface RawYearData {
   /** Raw merchandise goods exports by 2-digit HS chapter in USD: { "01": 1250000, ... } or null if no trade reported */
   goodsExports?: Record<string, number> | null;
@@ -102,6 +108,7 @@ export interface RawYearData {
   bca?: number | null;
 }
 
+/** Raw Tier 1 country snapshot containing multi-decade trade and macroeconomic series. */
 export interface RawCountryProfile {
   code: string;
   imfLastModified?: string;
@@ -109,10 +116,12 @@ export interface RawCountryProfile {
   years: Record<string, RawYearData>;
 }
 
+/** In-memory dictionary of Tier 1 country snapshots keyed by lowercase ISO-2 code. */
 export interface CountryPipelineCache {
   countries: Record<string, RawCountryProfile>;
 }
 
+/** Upstream dataset checksums and modification metadata for smart incremental sync. */
 export interface AvailabilityCatalog {
   goodsChecksums: Map<string, number>;
   servicesChecksums: Map<string, number>;
@@ -363,6 +372,7 @@ export async function fetchAvailabilityCatalog(): Promise<AvailabilityCatalog> {
   return availabilityCatalogCache;
 }
 
+/** Raw UN Comtrade 2-digit HS chapter export row. */
 export interface UnifiedAg2Row {
   reporterCode: number;
   partnerCode: number;
@@ -372,6 +382,7 @@ export interface UnifiedAg2Row {
   primaryValue: number;
 }
 
+/** Aggregated annual goods exports and bilateral partner breakdown for a single period. */
 export interface IngestedAg2Data {
   goodsExports: Record<string, number>;
   partnerGoodsExports: Record<string, Record<string, number>>;
@@ -546,16 +557,16 @@ export async function syncGoodsStage(cache: CountryPipelineCache, catalog: Avail
           for (const y of chunk) {
             const yStr = String(y);
             if (!profile.years[yStr]) profile.years[yStr] = {};
-            if (profile.years[yStr].goodsExports === undefined) profile.years[yStr].goodsExports = null;
-            if (profile.years[yStr].partnerGoodsExports === undefined) profile.years[yStr].partnerGoodsExports = null;
+            profile.years[yStr].goodsExports = null;
+            profile.years[yStr].partnerGoodsExports = null;
           }
 
-          // Ingest rows (sparse dictionary of active trading partners only)
+          // Ingest rows (sparse dictionary of active trading partners only; empty objects default to null)
           const ingested = ingestUnifiedAg2Rows(rows, country.id, (id) => partnersMap[id]);
           for (const [yStr, ingData] of Object.entries(ingested)) {
             if (!profile.years[yStr]) profile.years[yStr] = {};
-            profile.years[yStr].goodsExports = ingData.goodsExports;
-            profile.years[yStr].partnerGoodsExports = ingData.partnerGoodsExports;
+            profile.years[yStr].goodsExports = Object.keys(ingData.goodsExports).length > 0 ? ingData.goodsExports : null;
+            profile.years[yStr].partnerGoodsExports = Object.keys(ingData.partnerGoodsExports).length > 0 ? ingData.partnerGoodsExports : null;
           }
 
           // Update checksums for successful years
@@ -688,6 +699,9 @@ export async function syncServicesStage(cache: CountryPipelineCache, catalog: Av
           const country = COUNTRY_BY_ID.get(r.reporterCode);
           if (!country) continue;
 
+          const missing = countryMissingMap.get(country);
+          if (!missing?.includes(Number(r.period))) continue;
+
           const normCmd = EBOPS_NORMALIZATION_MAP[r.cmdCode];
           if (!normCmd) continue;
 
@@ -718,9 +732,14 @@ export async function syncServicesStage(cache: CountryPipelineCache, catalog: Av
           for (const y of chunk) {
             if (missing.includes(y)) {
               const yStr = String(y);
-              const checksum = catalog.servicesChecksums.get(`${country.id}:${y}`);
-              if (checksum !== undefined && profile.years[yStr]) {
-                profile.years[yStr].servicesChecksum = checksum;
+              const yObj = profile.years[yStr];
+              if (yObj) {
+                if (yObj.servicesExports && Object.keys(yObj.servicesExports).length === 0) yObj.servicesExports = null;
+                if (yObj.servicesImports && Object.keys(yObj.servicesImports).length === 0) yObj.servicesImports = null;
+                const checksum = catalog.servicesChecksums.get(`${country.id}:${y}`);
+                if (checksum !== undefined) {
+                  yObj.servicesChecksum = checksum;
+                }
               }
             }
           }
@@ -795,11 +814,11 @@ export async function loadCountryCache(): Promise<CountryPipelineCache> {
 
 /**
  * Computes bilateral trade category breakdowns (10 macro goods categories and 2-digit HS chapters)
- * for a specific trading partner in billion USD.
+ * for a specific trading partner in USD.
  */
 function buildPartnerCategoryBreakdown(chMap: Record<string, number>): {
-  macro: Record<string, number>;
-  detailed: Record<string, number>;
+  m: Record<string, number>;
+  d: Record<string, number>;
 } {
   const detList: [string, number][] = [];
   const macroMap: Record<string, number> = {};
@@ -812,31 +831,93 @@ function buildPartnerCategoryBreakdown(chMap: Record<string, number>): {
         detList.push([code, roundedUsd]);
       }
 
-      const macroId = HS_TO_MACRO_MAP[code] || 'misc_instruments';
+      const macroId = HS_TO_MACRO_MAP[code] || 'mi';
       macroMap[macroId] = (macroMap[macroId] || 0) + valUsd;
     }
   }
 
   detList.sort((a, b) => b[1] - a[1]);
-  const detailed: Record<string, number> = {};
+  const d: Record<string, number> = {};
   for (const [code, val] of detList) {
-    detailed[code] = val;
+    d[code] = val;
   }
 
   const macroList = Object.entries(macroMap)
     .map(([mId, mValUsd]) => [mId, Math.round(mValUsd)] as const)
     .filter(([, val]) => val > 0)
     .sort((a, b) => b[1] - a[1]);
-  const macro: Record<string, number> = {};
+  const m: Record<string, number> = {};
   for (const [mId, val] of macroList) {
-    macro[mId] = val;
+    m[mId] = val;
   }
 
-  return { macro, detailed };
+  return { m, d };
+}
+
+/** Pre-indexed symmetrical import data for a single target country and year. */
+interface BilateralYearImports {
+  categoryImports: Record<string, number>;
+  partnerImports: Record<string, number>;
+  macroImports: Record<string, Record<string, number>>;
+  detImports: Record<string, Record<string, number>>;
+}
+
+/** Pre-indexed map of targetCountryCode -> yearStr -> BilateralYearImports. */
+export type BilateralImportIndex = Record<string, Record<string, BilateralYearImports>>;
+
+/**
+ * Builds a single-pass O(E) inverted index of bilateral goods imports across all reporting countries.
+ * Avoids scanning all countries x all years repeatedly for every country profile export.
+ */
+export function buildBilateralImportIndex(allCountries: Record<string, RawCountryProfile>): BilateralImportIndex {
+  const index: BilateralImportIndex = {};
+
+  for (const [pCode, pProfile] of Object.entries(allCountries)) {
+    const pIsoLower = pCode.toLowerCase();
+    for (const [yStr, pYear] of Object.entries(pProfile.years || {})) {
+      if (!pYear?.partnerGoodsExports) continue;
+
+      for (const [targetCode, pGoods] of Object.entries(pYear.partnerGoodsExports)) {
+        if (!pGoods) continue;
+        const cCode = targetCode.toLowerCase();
+        if (cCode === pIsoLower) continue;
+
+        let pTotUsd = 0;
+        let bucket = index[cCode]?.[yStr];
+
+        for (const [chStr, valUsd] of Object.entries(pGoods)) {
+          if (typeof valUsd === 'number' && valUsd > 0) {
+            if (!bucket) {
+              if (!index[cCode]) index[cCode] = {};
+              bucket = {
+                categoryImports: {},
+                partnerImports: {},
+                macroImports: {},
+                detImports: {},
+              };
+              index[cCode][yStr] = bucket;
+            }
+            const key = chStr.padStart(2, '0');
+            bucket.categoryImports[key] = (bucket.categoryImports[key] || 0) + valUsd;
+            pTotUsd += valUsd;
+          }
+        }
+
+        if (pTotUsd > 0 && bucket) {
+          bucket.partnerImports[pIsoLower] = pTotUsd;
+          const { m, d } = buildPartnerCategoryBreakdown(pGoods);
+          bucket.macroImports[pIsoLower] = m;
+          bucket.detImports[pIsoLower] = d;
+        }
+      }
+    }
+  }
+
+  return index;
 }
 
 /** Converts raw country cache into a fully aggregated and formatted Tier 2 production dataset. */
-export function buildProductionProfile(raw: RawCountryProfile, allCountries?: Record<string, RawCountryProfile>): CountryProfileData {
+export function buildProductionProfile(raw: RawCountryProfile, allCountries?: Record<string, RawCountryProfile>, bilateralIndex?: BilateralImportIndex): CountryProfileData {
   const years = Object.keys(raw.years || {})
     .map(Number)
     .filter((y) => {
@@ -851,6 +932,7 @@ export function buildProductionProfile(raw: RawCountryProfile, allCountries?: Re
     .sort((a, b) => a - b);
 
   const timeline: CountryYearRecord[] = [];
+  const cCode = raw.code.toLowerCase();
 
   for (let i = 0; i < years.length; i++) {
     const yStr = String(years[i]);
@@ -858,8 +940,8 @@ export function buildProductionProfile(raw: RawCountryProfile, allCountries?: Re
     if (!yData) {
       timeline.push({
         year: years[i],
-        exports: { total: 0, goods: null, services: null, macro: {}, detailed: {}, partners: {} },
-        imports: { total: 0, goods: null, services: null, macro: {}, detailed: {}, partners: {} },
+        exports: { t: 0, goods: null, services: null, m: {}, d: {}, partners: {} },
+        imports: { t: 0, goods: null, services: null, m: {}, d: {}, partners: {} },
         netBalanceUsd: null,
         macro: {
           gdpNominalUsd: null,
@@ -893,16 +975,21 @@ export function buildProductionProfile(raw: RawCountryProfile, allCountries?: Re
       continue;
     }
 
-    // Resolve symmetrical partner and category imports from allCountries
+    // Resolve symmetrical partner and category imports from bilateralIndex or allCountries
     let symmetricalCategoryImports: Record<string, number> | null = null;
     let symmetricalPartnerImports: Record<string, number> | null = null;
-    const yearMacroImports: Record<string, Record<string, number>> = {};
-    const yearDetImports: Record<string, Record<string, number>> = {};
+    let yearMacroImports: Record<string, Record<string, number>> = {};
+    let yearDetImports: Record<string, Record<string, number>> = {};
 
-    if (allCountries) {
+    if (bilateralIndex) {
+      const bucket = bilateralIndex[cCode]?.[yStr];
+      symmetricalCategoryImports = bucket?.categoryImports || {};
+      symmetricalPartnerImports = bucket?.partnerImports || {};
+      yearMacroImports = bucket?.macroImports || {};
+      yearDetImports = bucket?.detImports || {};
+    } else if (allCountries) {
       symmetricalCategoryImports = {};
       symmetricalPartnerImports = {};
-      const cCode = raw.code.toLowerCase();
 
       for (const [pCode, pProfile] of Object.entries(allCountries)) {
         if (pCode.toLowerCase() === cCode) continue;
@@ -923,9 +1010,9 @@ export function buildProductionProfile(raw: RawCountryProfile, allCountries?: Re
             const pIsoLower = pCode.toLowerCase();
             symmetricalPartnerImports[pIsoLower] = pTotUsd;
 
-            const { macro, detailed } = buildPartnerCategoryBreakdown(pGoods);
-            yearMacroImports[pIsoLower] = macro;
-            yearDetImports[pIsoLower] = detailed;
+            const { m, d } = buildPartnerCategoryBreakdown(pGoods);
+            yearMacroImports[pIsoLower] = m;
+            yearDetImports[pIsoLower] = d;
           }
         }
       }
@@ -949,7 +1036,7 @@ export function buildProductionProfile(raw: RawCountryProfile, allCountries?: Re
       const xValUsd = rawGoodsX?.[code] ?? null;
       const mValUsd = rawGoodsM?.[code] ?? null;
 
-      const macroId = HS_TO_MACRO_MAP[code] || 'misc_instruments';
+      const macroId = HS_TO_MACRO_MAP[code] || 'mi';
       if (xValUsd != null && xValUsd > 0) {
         yearGoodsX += xValUsd;
         yearMacroX[macroId] = (yearMacroX[macroId] || 0) + xValUsd;
@@ -1080,11 +1167,11 @@ export function buildProductionProfile(raw: RawCountryProfile, allCountries?: Re
           if (roundedVal > 0) {
             pX.push([pIsoLower, roundedVal]);
 
-            const { macro, detailed } = buildPartnerCategoryBreakdown(chMap);
+            const { m, d } = buildPartnerCategoryBreakdown(chMap);
             pXMap[pIsoLower] = {
-              total: roundedVal,
-              macro,
-              detailed,
+              t: roundedVal,
+              m,
+              d,
             };
           }
         }
@@ -1105,9 +1192,9 @@ export function buildProductionProfile(raw: RawCountryProfile, allCountries?: Re
 
     for (const [pIsoLower, roundedVal] of sortedPMList) {
       sortedPMMap[pIsoLower] = {
-        total: roundedVal,
-        macro: yearMacroImports[pIsoLower] || {},
-        detailed: yearDetImports[pIsoLower] || {},
+        t: roundedVal,
+        m: yearMacroImports[pIsoLower] || {},
+        d: yearDetImports[pIsoLower] || {},
       };
     }
 
@@ -1125,7 +1212,8 @@ export function buildProductionProfile(raw: RawCountryProfile, allCountries?: Re
     const govDebtUsd = gdpNominal != null && ggxwdg != null ? Math.round((gdpNominal * ggxwdg) / 100) : null;
     const currAccUsd = gdpNominal != null && bca != null ? Math.round((gdpNominal * bca) / 100) : null;
 
-    const prevMacro = timeline[i - 1]?.macro;
+    const prevRecord = timeline[i - 1];
+    const prevMacro = prevRecord && prevRecord.year === years[i] - 1 ? prevRecord.macro : undefined;
     const calcYoy = (c: number | null, p: number | null) => (c == null || p == null || p === 0 ? null : round(((c - p) / Math.abs(p)) * 100, 1));
     const calcDiff = (c: number | null, p: number | null) => (c == null || p == null ? null : c - p);
 
@@ -1161,19 +1249,19 @@ export function buildProductionProfile(raw: RawCountryProfile, allCountries?: Re
     timeline.push({
       year: years[i],
       exports: {
-        total: totX > 0 ? totX : (gX ?? 0),
+        t: totX > 0 ? totX : (gX ?? 0),
         goods: gX,
         services: sX,
-        macro: catMacroXMap,
-        detailed: catDetXMap,
+        m: catMacroXMap,
+        d: catDetXMap,
         partners: sortedPXMap,
       },
       imports: {
-        total: totM > 0 ? totM : (gM ?? 0),
+        t: totM > 0 ? totM : (gM ?? 0),
         goods: gM,
         services: sM,
-        macro: catMacroMMap,
-        detailed: catDetMMap,
+        m: catMacroMMap,
+        d: catDetMMap,
         partners: sortedPMMap,
       },
       netBalanceUsd,
@@ -1184,8 +1272,8 @@ export function buildProductionProfile(raw: RawCountryProfile, allCountries?: Re
   // 5. Precompute sorted rankings for interactive toolbar selectors
   let latestTradeIdx = timeline.length - 1;
   while (latestTradeIdx >= 0) {
-    const x = timeline[latestTradeIdx].exports.total;
-    const m = timeline[latestTradeIdx].imports.total;
+    const x = timeline[latestTradeIdx].exports.t;
+    const m = timeline[latestTradeIdx].imports.t;
     if (x > 0 || m > 0) break;
     latestTradeIdx--;
   }
@@ -1196,18 +1284,18 @@ export function buildProductionProfile(raw: RawCountryProfile, allCountries?: Re
   const allMacroTotals: Record<string, number> = {};
   const latestMacroMap: Record<string, number> = {};
   if (latestYear) {
-    for (const [id, val] of Object.entries(latestYear.exports.macro)) {
+    for (const [id, val] of Object.entries(latestYear.exports.m)) {
       latestMacroMap[id] = (latestMacroMap[id] || 0) + val;
     }
-    for (const [id, val] of Object.entries(latestYear.imports.macro)) {
+    for (const [id, val] of Object.entries(latestYear.imports.m)) {
       latestMacroMap[id] = (latestMacroMap[id] || 0) + val;
     }
   }
   for (const y of timeline) {
-    for (const [id, val] of Object.entries(y.exports.macro)) {
+    for (const [id, val] of Object.entries(y.exports.m)) {
       allMacroTotals[id] = (allMacroTotals[id] || 0) + val;
     }
-    for (const [id, val] of Object.entries(y.imports.macro)) {
+    for (const [id, val] of Object.entries(y.imports.m)) {
       allMacroTotals[id] = (allMacroTotals[id] || 0) + val;
     }
   }
@@ -1222,18 +1310,18 @@ export function buildProductionProfile(raw: RawCountryProfile, allCountries?: Re
   const allDetailedTotals: Record<string, number> = {};
   const latestDetailedMap: Record<string, number> = {};
   if (latestYear) {
-    for (const [code, val] of Object.entries(latestYear.exports.detailed)) {
+    for (const [code, val] of Object.entries(latestYear.exports.d)) {
       latestDetailedMap[code] = (latestDetailedMap[code] || 0) + val;
     }
-    for (const [code, val] of Object.entries(latestYear.imports.detailed)) {
+    for (const [code, val] of Object.entries(latestYear.imports.d)) {
       latestDetailedMap[code] = (latestDetailedMap[code] || 0) + val;
     }
   }
   for (const y of timeline) {
-    for (const [code, val] of Object.entries(y.exports.detailed)) {
+    for (const [code, val] of Object.entries(y.exports.d)) {
       allDetailedTotals[code] = (allDetailedTotals[code] || 0) + val;
     }
-    for (const [code, val] of Object.entries(y.imports.detailed)) {
+    for (const [code, val] of Object.entries(y.imports.d)) {
       allDetailedTotals[code] = (allDetailedTotals[code] || 0) + val;
     }
   }
@@ -1258,20 +1346,20 @@ export function buildProductionProfile(raw: RawCountryProfile, allCountries?: Re
   const latestPartnerMap: Record<string, number> = {};
   if (latestPartnerYear) {
     for (const [pIso, rec] of Object.entries(latestPartnerYear.exports.partners)) {
-      latestPartnerMap[pIso] = (latestPartnerMap[pIso] || 0) + rec.total;
+      latestPartnerMap[pIso] = (latestPartnerMap[pIso] || 0) + rec.t;
     }
     for (const [pIso, rec] of Object.entries(latestPartnerYear.imports.partners)) {
-      latestPartnerMap[pIso] = (latestPartnerMap[pIso] || 0) + rec.total;
+      latestPartnerMap[pIso] = (latestPartnerMap[pIso] || 0) + rec.t;
     }
   }
 
   const allPartnersTotalMap: Record<string, number> = {};
   for (const y of timeline) {
     for (const [pIso, rec] of Object.entries(y.exports.partners)) {
-      allPartnersTotalMap[pIso] = (allPartnersTotalMap[pIso] || 0) + rec.total;
+      allPartnersTotalMap[pIso] = (allPartnersTotalMap[pIso] || 0) + rec.t;
     }
     for (const [pIso, rec] of Object.entries(y.imports.partners)) {
-      allPartnersTotalMap[pIso] = (allPartnersTotalMap[pIso] || 0) + rec.total;
+      allPartnersTotalMap[pIso] = (allPartnersTotalMap[pIso] || 0) + rec.t;
     }
   }
 
@@ -1332,13 +1420,15 @@ export async function exportCountryDatasets(countries: Record<string, RawCountry
 
   const countryList: string[] = completeCountries.map(([code]) => code).sort((a, b) => (countryRank.get(a) ?? 999) - (countryRank.get(b) ?? 999));
 
+  const bilateralIndex = buildBilateralImportIndex(countries);
+
   const gdpMap: Record<string, number> = {};
   let minYear = CURRENT_YEAR;
   let maxYear = START_YEAR;
   let hasAnyYear = false;
 
   for (const [code, rawData] of completeCountries) {
-    const profile = buildProductionProfile(rawData, countries);
+    const profile = buildProductionProfile(rawData, countries, bilateralIndex);
     await writeJsonAsyncToSite(`country/${code.toLowerCase()}.json`, profile);
 
     let latestGdp: number | undefined;

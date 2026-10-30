@@ -9,14 +9,14 @@ export function getFlowVolume(flow: CountryTradeFlow, isDetailed: boolean, count
     if (countries.length > 0) {
       for (let i = 0; i < countries.length; i++) {
         const p = flow.partners?.[countries[i]];
-        const map = isDetailed ? p?.detailed : p?.macro;
+        const map = isDetailed ? p?.d : p?.m;
         for (let j = 0; j < categories.length; j++) {
           const v = map?.[categories[j]];
           if (v) tot += v;
         }
       }
     } else {
-      const map = isDetailed ? flow.detailed : flow.macro;
+      const map = isDetailed ? flow.d : flow.m;
       for (let j = 0; j < categories.length; j++) {
         const v = map?.[categories[j]];
         if (v) tot += v;
@@ -29,12 +29,12 @@ export function getFlowVolume(flow: CountryTradeFlow, isDetailed: boolean, count
     let tot = 0;
     for (let i = 0; i < countries.length; i++) {
       const p = flow.partners?.[countries[i]];
-      if (p?.total) tot += p.total;
+      if (p?.t) tot += p.t;
     }
     return tot;
   }
 
-  return flow.total ?? 0;
+  return flow.t ?? 0;
 }
 
 /** Determines optimal scale label for toolbar metric toggle based on filtered trade flow peak. */
@@ -53,13 +53,13 @@ export function resolveFlowScale(timeline: readonly CountryYearRecord[], isDetai
 /** Extracts category-to-volume breakdown dictionary for a specific flow and year. */
 export function getYearCategoryBreakdown(flow: CountryTradeFlow, isDetailed: boolean, countries: readonly string[]): Record<string, number> {
   if (countries.length === 0) {
-    return (isDetailed ? flow.detailed : flow.macro) || {};
+    return (isDetailed ? flow.d : flow.m) || {};
   }
   const map: Record<string, number> = {};
   for (let i = 0; i < countries.length; i++) {
     const p = flow.partners?.[countries[i]];
     if (!p) continue;
-    const catMap = isDetailed ? p.detailed : p.macro;
+    const catMap = isDetailed ? p.d : p.m;
     for (const code in catMap) {
       map[code] = (map[code] || 0) + catMap[code];
     }
@@ -75,7 +75,7 @@ export function getYearPartnerBreakdown(flow: CountryTradeFlow, isDetailed: bool
 
   if (catCount === 0) {
     for (const pCode in partners) {
-      const tot = partners[pCode]?.total;
+      const tot = partners[pCode]?.t;
       if (tot && tot > 0) map[pCode] = tot;
     }
     return map;
@@ -86,7 +86,7 @@ export function getYearPartnerBreakdown(flow: CountryTradeFlow, isDetailed: bool
     for (const pCode in partners) {
       const partner = partners[pCode];
       if (!partner) continue;
-      const catMap = isDetailed ? partner.detailed : partner.macro;
+      const catMap = isDetailed ? partner.d : partner.m;
       const v = catMap?.[singleCat];
       if (v && v > 0) map[pCode] = v;
     }
@@ -96,7 +96,7 @@ export function getYearPartnerBreakdown(flow: CountryTradeFlow, isDetailed: bool
   for (const pCode in partners) {
     const partner = partners[pCode];
     if (!partner) continue;
-    const catMap = isDetailed ? partner.detailed : partner.macro;
+    const catMap = isDetailed ? partner.d : partner.m;
     let val = 0;
     for (let i = 0; i < catCount; i++) {
       const v = catMap?.[categories[i]];

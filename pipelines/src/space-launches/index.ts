@@ -51,7 +51,7 @@ function buildSpaceToolbarMeta(launches: StoredLaunch[], sections: SpaceLaunches
   const entityLaunches = new Map<string, number>();
   for (const item of launches) {
     const r = item.region;
-    if (r && r !== 'Others') {
+    if (r) {
       entityLaunches.set(r, (entityLaunches.get(r) || 0) + 1);
     }
   }
@@ -63,8 +63,14 @@ function buildSpaceToolbarMeta(launches: StoredLaunch[], sections: SpaceLaunches
   for (const r of sections['launch-costs']?.decadeCosts?.regions || []) allEntities.add(r);
   for (const r of sections['failure-rates']?.regions || []) allEntities.add(r);
 
-  // Preserve priority ranking order from payload-capacity
-  const orderedRegions = sections['payload-capacity']?.regions || Array.from(allEntities);
+  // Preserve priority ranking order from payload-capacity, followed by any additional entities
+  const orderedRegions = [...(sections['payload-capacity']?.regions || [])];
+  for (const entity of allEntities) {
+    if (!orderedRegions.includes(entity)) {
+      orderedRegions.push(entity);
+    }
+  }
+
   const entities: SpaceEntityMeta[] = orderedRegions
     .filter((code) => allEntities.has(code))
     .map((code) => ({
@@ -405,6 +411,24 @@ export async function runSpaceLaunchesPipeline(forceUpdate = false, verbose?: bo
       // Sort entities descending by total delivered mass: US, RU, CN, EU, JP, IN, NZ, KR, IL, IR, AU
       const sortedRegions = Array.from(entityTotalMass.keys()).sort((a, b) => (entityTotalMass.get(b) || 0) - (entityTotalMass.get(a) || 0));
 
+      // Collect all entities with launch attempts (status 3, 4, 7) including failed-only nations
+      const entityAttempts = new Map<string, number>();
+      for (const item of allLaunches) {
+        const r = item.region;
+        if (r) {
+          entityAttempts.set(r, (entityAttempts.get(r) || 0) + 1);
+        }
+      }
+
+      const additionalFailureRegions = Array.from(entityAttempts.keys())
+        .filter((r) => !sortedRegions.includes(r))
+        .sort((a, b) => {
+          if (a === 'Others') return 1;
+          if (b === 'Others') return -1;
+          return (entityAttempts.get(b) || 0) - (entityAttempts.get(a) || 0);
+        });
+      const failureRegions = [...sortedRegions, ...additionalFailureRegions];
+
       // Yearly payload capacity by region (tons) and annual launch counts (successful only)
       const capacityMatrix: Record<string, Record<number, number>> = {};
       const launchMatrix: Record<string, Record<number, number>> = {};
@@ -428,6 +452,9 @@ export async function runSpaceLaunchesPipeline(forceUpdate = false, verbose?: bo
         decadeCostSums[r] = {};
         decadeLaunchMatrix[r] = {};
         decadeMassMatrix[r] = {};
+      }
+
+      for (const r of failureRegions) {
         decadeAttemptsMatrix[r] = {};
         decadeFailuresMatrix[r] = {};
       }
@@ -561,7 +588,7 @@ export async function runSpaceLaunchesPipeline(forceUpdate = false, verbose?: bo
       const failureAttemptsSeries: Record<string, number[]> = {};
       const failureCountsSeries: Record<string, number[]> = {};
 
-      for (const r of sortedRegions) {
+      for (const r of failureRegions) {
         failureRateSeries[r] = sortedDecades.map((d) => {
           const attempts = decadeAttemptsMatrix[r]?.[d] || 0;
           if (attempts > 0) {
@@ -576,7 +603,7 @@ export async function runSpaceLaunchesPipeline(forceUpdate = false, verbose?: bo
 
       const failureRateTotalAttempts = sortedDecades.map((d) => {
         let count = 0;
-        for (const r of sortedRegions) {
+        for (const r of failureRegions) {
           count += decadeAttemptsMatrix[r]?.[d] || 0;
         }
         return count;
@@ -584,7 +611,7 @@ export async function runSpaceLaunchesPipeline(forceUpdate = false, verbose?: bo
 
       const failureRateTotalFailures = sortedDecades.map((d) => {
         let count = 0;
-        for (const r of sortedRegions) {
+        for (const r of failureRegions) {
           count += decadeFailuresMatrix[r]?.[d] || 0;
         }
         return count;
@@ -593,7 +620,7 @@ export async function runSpaceLaunchesPipeline(forceUpdate = false, verbose?: bo
       const failureRateTotalRate = sortedDecades.map((d) => {
         let attempts = 0;
         let fails = 0;
-        for (const r of sortedRegions) {
+        for (const r of failureRegions) {
           attempts += decadeAttemptsMatrix[r]?.[d] || 0;
           fails += decadeFailuresMatrix[r]?.[d] || 0;
         }
@@ -640,31 +667,31 @@ export async function runSpaceLaunchesPipeline(forceUpdate = false, verbose?: bo
       let worstDecadeAvgCostDecade = '';
 
       decadeLabels.forEach((d, idx) => {
-        let weightedCostSum = 0;
-        let launchSum = 0;
-        for (const r of Object.keys(decadeSeries)) {
-          const cost = decadeSeries[r]?.[idx];
-          const l = decadeLaunchSeries[r]?.[idx] || 0;
-          if (cost != null && l > 0) {
-            weightedCostSum += cost * l;
-            launchSum += l;
+        const decadeYear = sortedDecades[idx];
+        let sumCost = 0;
+        let launchCount = 0;
+        for (const r of costRegions) {
+          const stat = decadeCostSums[r]?.[decadeYear];
+          if (stat && stat.count > 0) {
+            sumCost += stat.sum;
+            launchCount += stat.count;
           }
         }
-        if (launchSum > 0) {
-          const avgCost = round(weightedCostSum / launchSum, 0);
-          if (avgCost < minDecadeAvgCost) {
-            minDecadeAvgCost = avgCost;
+        if (launchCount > 0) {
+          const rawAvgCost = sumCost / launchCount;
+          if (rawAvgCost < minDecadeAvgCost) {
+            minDecadeAvgCost = rawAvgCost;
             bestDecadeAvgCostDecade = d;
           }
-          if (avgCost > maxDecadeAvgCost) {
-            maxDecadeAvgCost = avgCost;
+          if (rawAvgCost > maxDecadeAvgCost) {
+            maxDecadeAvgCost = rawAvgCost;
             worstDecadeAvgCostDecade = d;
           }
         }
       });
 
-      const baselineCost = maxDecadeAvgCost > 0 ? maxDecadeAvgCost : 0;
-      const bestDecadeAvgCost = minDecadeAvgCost < Number.POSITIVE_INFINITY ? minDecadeAvgCost : 0;
+      const baselineCost = maxDecadeAvgCost > 0 ? round(maxDecadeAvgCost, 0) : 0;
+      const bestDecadeAvgCost = minDecadeAvgCost < Number.POSITIVE_INFINITY ? round(minDecadeAvgCost, 0) : 0;
       const costReductionFactor = ratio(baselineCost, bestDecadeAvgCost, 1, 0) ?? 0;
 
       let bestDecadeCountryAvgPayloadKg = 0;
@@ -688,14 +715,12 @@ export async function runSpaceLaunchesPipeline(forceUpdate = false, verbose?: bo
       let worstDecadeAvgPayloadDecade = '';
       let bestDecadeAvgPayloadDecade = '';
 
-      sortedDecades.forEach((_d, idx) => {
+      sortedDecades.forEach((d, idx) => {
         let decMass = 0;
         let decLaunches = 0;
         for (const r of sortedRegions) {
-          const l = avgPayloadLaunchSeries[r]?.[idx] || 0;
-          const avg = avgPayloadSeries[r]?.[idx] || 0;
-          decMass += avg * l;
-          decLaunches += l;
+          decMass += decadeMassMatrix[r]?.[d] || 0;
+          decLaunches += decadeLaunchMatrix[r]?.[d] || 0;
         }
         if (decLaunches > 0) {
           const avgP = decMass / decLaunches;
@@ -717,7 +742,7 @@ export async function runSpaceLaunchesPipeline(forceUpdate = false, verbose?: bo
       let totalAttempts = 0;
       let totalFailures = 0;
 
-      for (const r of sortedRegions) {
+      for (const r of failureRegions) {
         const atts = failureAttemptsSeries[r] || [];
         const fails = failureCountsSeries[r] || [];
         totalAttempts += sum(atts);
@@ -735,7 +760,7 @@ export async function runSpaceLaunchesPipeline(forceUpdate = false, verbose?: bo
       sortedDecades.forEach((_d, idx) => {
         let decAttempts = 0;
         let decFailures = 0;
-        for (const r of sortedRegions) {
+        for (const r of failureRegions) {
           decAttempts += failureAttemptsSeries[r]?.[idx] || 0;
           decFailures += failureCountsSeries[r]?.[idx] || 0;
         }
@@ -834,7 +859,7 @@ export async function runSpaceLaunchesPipeline(forceUpdate = false, verbose?: bo
       };
 
       const failureRatesSectionData: FailureRatesSectionData = {
-        regions: sortedRegions,
+        regions: failureRegions,
         summary: {
           globalSuccessRate,
           worstDecadeReliabilityDecade: worstDecadeLabel,

@@ -17,7 +17,7 @@ export const macroSection: Section = ({ t, fmt, tokens }) => {
         url: 'https://www.imf.org/en/Publications/WEO',
       },
     ],
-    buildView: ({ countryData }, { countryStore }) => {
+    buildView: ({ countryData, deflator }, { countryStore }) => {
       const countryName = fmt.region(countryData.code);
       const title = `${countryName} — ${t.proj.macro.title}`;
       const showLabels = countryStore.labels;
@@ -86,7 +86,7 @@ export const macroSection: Section = ({ t, fmt, tokens }) => {
         const y = visibleTimeline[i];
         const m = y.macro;
         const yr = y.year;
-        const k = useConst && macroK ? (macroK[yr] ?? 1.0) : 1.0;
+        const k = useConst ? (macroK ? (macroK[yr] ?? 1.0) : (deflator?.[yr] ?? 1.0)) : 1.0;
 
         visibleYears[i] = yr;
         visibleBalancesPct[i] = m.govBalancePctGdp;
@@ -107,6 +107,7 @@ export const macroSection: Section = ({ t, fmt, tokens }) => {
       for (let i = 0; i < count; i++) {
         const yr = visibleYears[i];
         const bal = visibleBalances[i];
+        const balPct = visibleBalancesPct[i];
         const m = visibleTimeline[i].macro;
         expendituresData[i] = { value: scaledExp[i], gdpPct: m.govExpenditurePctGdp };
         revenuesData[i] = { value: scaledRev[i], gdpPct: m.govRevenuePctGdp };
@@ -116,8 +117,10 @@ export const macroSection: Section = ({ t, fmt, tokens }) => {
         if (bal == null) {
           budgetXAxisData[i] = `{year|${yr}}`;
         } else {
-          const balSign = `${bal > 0 ? '+' : ''}${fmt.number(bal)}`;
-          const balTag = bal < 0 ? 'balNeg' : 'balPos';
+          const isNeg = bal < 0 || (bal === 0 && (balPct ?? 0) < 0);
+          const isPos = bal > 0 || (bal === 0 && (balPct ?? 0) > 0);
+          const balSign = `${isPos && bal > 0 ? '+' : ''}${fmt.number(bal)}`;
+          const balTag = isNeg ? 'balNeg' : 'balPos';
           budgetXAxisData[i] = `{year|${yr}}\n{${balTag}|${balSign}}`;
         }
       }
@@ -142,12 +145,14 @@ export const macroSection: Section = ({ t, fmt, tokens }) => {
                 const bal = visibleBalances[dataIndex];
                 if (bal == null) return undefined;
                 const balPct = visibleBalancesPct[dataIndex];
+                const isNeg = bal < 0 || (bal === 0 && (balPct ?? 0) < 0);
                 const sign = bal > 0 ? '+' : '';
-                const pctStr = balPct != null ? ` (${sign}${fmt.percent(balPct)} ${t.proj.macro.gdp})` : '';
+                const pctSign = (balPct ?? 0) > 0 ? '+' : '';
+                const pctStr = balPct != null ? ` (${pctSign}${fmt.percent(balPct)} ${t.proj.macro.gdp})` : '';
                 return {
                   label: t.proj.macro.balance,
                   value: `${sign}${fmt.number(bal)}${pctStr}`,
-                  color: bal < 0 ? 'danger' : 'success',
+                  color: isNeg ? 'danger' : 'success',
                 };
               },
             },

@@ -11,7 +11,10 @@ function startServer(port: number, maxAttempts = 10) {
       fetch(req) {
         const url = new URL(req.url);
         const pathname = decodeURIComponent(url.pathname);
-        const fullPath = path.join(distDir, pathname);
+        const fullPath = path.resolve(distDir, `.${pathname}`);
+        if (!fullPath.startsWith(distDir)) {
+          return new Response('403 Forbidden', { status: 403 });
+        }
 
         // 1. Check if path exists directly or as directory
         if (fs.existsSync(fullPath)) {

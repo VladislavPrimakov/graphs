@@ -13,7 +13,7 @@ export const lossesMapSection = defineSection(({ t }: ProjectContext<typeof dict
   data: {
     lossesData: () => loadDataset<LossesMapSectionData>('war-rf-ua', 'losses-map.json'),
   },
-  buildView: ({ lossesData }, { lossesStore }) => ({
-    content: createElement(LossesMap, { data: lossesData, t: t.proj, filters: lossesStore }),
+  buildView: ({ lossesData, toolbarMeta }, { lossesStore }) => ({
+    content: createElement(LossesMap, { data: lossesData, t: t.proj, filters: lossesStore, periods: toolbarMeta?.losses?.periods }),
   }),
 }));

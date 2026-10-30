@@ -1,8 +1,5 @@
 export const dict = {
   country: 'Country',
-  countries: 'Countries',
-  searchCountry: 'Search country...',
-  noCountriesFound: 'No countries found',
   inConstant2021: 'In const 2021 $',
   macro: {
     title: 'State Budget Execution & Gross Sovereign Debt',
@@ -32,15 +29,10 @@ export const dict = {
     imports: 'Imports',
     goods: 'Goods',
     services: 'Services',
-    goodsExports: 'Goods Exports',
-    goodsImports: 'Goods Imports',
-    servicesExports: 'Services Exports',
-    servicesImports: 'Services Imports',
   },
   tradePartners: {
     title: 'Leading Bilateral Trading Partners',
     partners: 'Trading Partners',
-    searchPartners: 'Search partners...',
     noPartnersFound: 'No partners found',
   },
   tradeCategories: {
@@ -50,7 +42,6 @@ export const dict = {
     detailedLevel: 'Detailed',
     macroCategories: 'Macro Categories',
     detailedCategories: 'Detailed Categories',
-    searchCategories: 'Search categories...',
     noCategoriesFound: 'No categories found',
     categories: {
       ag: 'Agro',
@@ -159,6 +150,7 @@ export const dict = {
       '95': 'Toys, games and sports requisites',
       '96': 'Miscellaneous manufactured articles',
       '97': 'Works of art, collectors pieces, antiques',
+      '98': 'Special classification provisions',
       '99': 'Other unclassified goods',
       '205': 'Transportation',
       '236': 'Travel',
@@ -182,4 +174,4 @@ export const dict = {
       '09': 'Coffee, tea, mate and spices',
     },
   },
-} as const;
+};

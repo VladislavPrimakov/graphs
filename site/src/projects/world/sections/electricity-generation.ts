@@ -1,4 +1,4 @@
-import type { ElectricityGenerationSectionData, WorldFilterState } from '@graphs/shared/types/world';
+import type { ElectricityGenerationSectionData } from '@graphs/shared/types/world';
 import type { LineSeriesOption } from 'echarts';
 import { createChart } from '@/components/sections/SectionChart';
 import { chartOption, resolveEffectiveMax, resolveVisiblePeriod } from '@/utils/chart-builder';
@@ -19,7 +19,7 @@ export const electricityGenerationSection = defineSection(({ t, fmt }: ProjectCo
     data: {
       sectionData: () => loadDataset<ElectricityGenerationSectionData>('world', 'electricity-generation.json'),
     },
-    buildView: ({ sectionData }, { worldStore }: { worldStore: WorldFilterState }) => {
+    buildView: ({ sectionData }, { worldStore }) => {
       const isGrowth = worldStore.mode === 'growth';
       const { years, series: chartSeries, growth: growthSeries } = sectionData;
       const { startIdx: rankStartIdx, targetIdx: rankTargetIdx } = resolveVisiblePeriod(years, worldStore.years);
@@ -35,7 +35,8 @@ export const electricityGenerationSection = defineSection(({ t, fmt }: ProjectCo
       const hasSelectedCountries = worldStore.countries.length > 0;
       const candidateCodes = hasSelectedCountries ? (worldStore.countries as string[]).filter((code) => chartSeries[code] != null) : Object.keys(chartSeries);
 
-      const activeCodes = candidateCodes.sort((a, b) => getRankingValue(chartSeries[b]) - getRankingValue(chartSeries[a])).slice(0, hasSelectedCountries ? candidateCodes.length : worldStore.top);
+      const rankValues = new Map(candidateCodes.map((code) => [code, getRankingValue(chartSeries[code])]));
+      const activeCodes = candidateCodes.sort((a, b) => (rankValues.get(b) ?? 0) - (rankValues.get(a) ?? 0)).slice(0, hasSelectedCountries ? candidateCodes.length : worldStore.top);
 
       const formatVolume = (val: number) => fmt.number(val, val >= 100 ? { maximumFractionDigits: 0 } : undefined);
       const formatGrowth = (val: number) => `${val > 0 ? '+' : ''}${fmt.percent(val)}`;
@@ -69,8 +70,12 @@ export const electricityGenerationSection = defineSection(({ t, fmt }: ProjectCo
           };
         });
 
-      const visibleGrowthSeries = activeCodes.map((code) => growthSeries?.[code]?.slice(startIdx, endIdx) ?? []);
-      const yMax = isGrowth ? resolveEffectiveMax(visibleGrowthSeries, { roundStep: 5, fallbackMin: 10 }) : undefined;
+      const yMax = isGrowth
+        ? resolveEffectiveMax(
+            activeCodes.map((code) => growthSeries?.[code]?.slice(startIdx, endIdx) ?? []),
+            { roundStep: 5, fallbackMin: 10 },
+          )
+        : undefined;
 
       return {
         content: createChart(

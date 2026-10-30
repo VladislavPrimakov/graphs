@@ -1,8 +1,7 @@
-export const dict = {
+import type { dict as dictEn } from './dict-en';
+
+export const dict: typeof dictEn = {
   country: 'Страна',
-  countries: 'Страны',
-  searchCountry: 'Поиск страны...',
-  noCountriesFound: 'Страны не найдены',
   inConstant2021: 'В пост. 2021 $',
   macro: {
     title: 'Исполнение госбюджета и государственный долг',
@@ -32,15 +31,10 @@ export const dict = {
     imports: 'Импорт',
     goods: 'Товары',
     services: 'Услуги',
-    goodsExports: 'Экспорт товаров',
-    goodsImports: 'Импорт товаров',
-    servicesExports: 'Экспорт услуг',
-    servicesImports: 'Импорт услуг',
   },
   tradePartners: {
     title: 'Ведущие двусторонние торговые партнеры',
     partners: 'Торговые партнеры',
-    searchPartners: 'Поиск партнеров...',
     noPartnersFound: 'Партнеры не найдены',
   },
   tradeCategories: {
@@ -50,7 +44,6 @@ export const dict = {
     detailedLevel: 'Детальные',
     macroCategories: 'Крупные категории',
     detailedCategories: 'Детальные категории',
-    searchCategories: 'Поиск категорий...',
     noCategoriesFound: 'Категории не найдены',
     categories: {
       ag: 'Агро',
@@ -159,6 +152,7 @@ export const dict = {
       '95': 'Игрушки, игры, спортинвентарь',
       '96': 'Разные готовые изделия',
       '97': 'Предметы искусства и антиквариат',
+      '98': 'Специальные классификационные положения',
       '99': 'Прочие неклассифицированные товары',
       '205': 'Транспортные услуги',
       '236': 'Туризм и поездки',
@@ -182,4 +176,4 @@ export const dict = {
       '09': 'Кофе, чай, пряности',
     },
   },
-} as const;
+};

@@ -1,4 +1,4 @@
-import type { UkraineDataset } from '@graphs/shared/types/ukraine/data';
+import type { UkraineDataset } from '@graphs/shared/types/ukraine';
 import { CONTROL_DELAYS } from '@/projects/constants';
 import { defineProject, loadDataset, type ProjectSection } from '@/utils/project';
 import type { dict } from './locales/dict-en';

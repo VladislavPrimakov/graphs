@@ -13,8 +13,8 @@ export interface SearchSelectItem {
 }
 
 interface SearchSelectBaseProps {
-  /** Array of all candidate items. */
-  items: readonly SearchSelectItem[] | SearchSelectItem[];
+  /** Array of all candidate items, or a lazy getter evaluated only when needed. */
+  items: readonly SearchSelectItem[] | SearchSelectItem[] | (() => readonly SearchSelectItem[] | SearchSelectItem[]);
   /** Optional custom formatter for numerical item counts in badge. */
   formatCount?: (count: number) => string;
   /** Input placeholder label. */
@@ -84,25 +84,31 @@ export const SearchSelect: React.FC<SearchSelectProps> = (props) => {
     return () => document.removeEventListener('mousedown', handleOutsideClick);
   }, [isOpen]);
 
+  const hasSelection = isSingle ? props.value != null && props.value !== '' : props.selectedValues.length > 0;
+  const resolvedItems: readonly SearchSelectItem[] = isOpen || hasSelection ? (typeof items === 'function' ? items() : items) : [];
+
   const selectedSet = isSingle ? new Set(props.value != null && props.value !== '' ? [props.value] : []) : new Set(props.selectedValues);
 
-  // In multi mode: prioritize selected items at top, then by count / label
-  // In single mode: maintain natural list order (by count descending if present, then label)
-  const sortedItems = isOpen
-    ? [...items].sort((a, b) => {
-        if (!isSingle) {
-          const aSel = selectedSet.has(a.value);
-          const bSel = selectedSet.has(b.value);
-          if (aSel && !bSel) return -1;
-          if (!aSel && bSel) return 1;
+  // In multi mode: prioritize selected items at top, preserving natural item order in O(N)
+  // In single mode or empty selection: maintain natural list order directly
+  let sortedItems: readonly SearchSelectItem[] = [];
+  if (isOpen) {
+    if (isSingle || selectedSet.size === 0) {
+      sortedItems = resolvedItems;
+    } else {
+      const selected: SearchSelectItem[] = [];
+      const unselected: SearchSelectItem[] = [];
+      for (let i = 0; i < resolvedItems.length; i++) {
+        const item = resolvedItems[i];
+        if (selectedSet.has(item.value)) {
+          selected.push(item);
+        } else {
+          unselected.push(item);
         }
-        if (a.count !== undefined || b.count !== undefined) {
-          const diff = (b.count ?? 0) - (a.count ?? 0);
-          if (diff !== 0) return diff;
-        }
-        return a.label.localeCompare(b.label);
-      })
-    : [];
+      }
+      sortedItems = selected.concat(unselected);
+    }
+  }
 
   let effectiveAllCount: number | undefined;
   if (!isSingle && props.allLabel) {
@@ -110,7 +116,7 @@ export const SearchSelect: React.FC<SearchSelectProps> = (props) => {
     if (effectiveAllCount === undefined && isOpen) {
       let total = 0;
       let hasCounts = false;
-      for (const it of items) {
+      for (const it of resolvedItems) {
         if (it.count !== undefined) {
           total += it.count;
           hasCounts = true;
@@ -126,7 +132,7 @@ export const SearchSelect: React.FC<SearchSelectProps> = (props) => {
   let singleItem: SearchSelectItem | undefined;
 
   if (isSingle) {
-    singleItem = items.find((it) => it.value === props.value);
+    singleItem = resolvedItems.find((it) => it.value === props.value);
     if (singleItem) {
       displayPlaceholder = singleItem.label;
       inputTitle = singleItem.label;
@@ -134,7 +140,7 @@ export const SearchSelect: React.FC<SearchSelectProps> = (props) => {
   } else {
     const multiSelected = props.selectedValues;
     if (multiSelected.length === 1) {
-      singleItem = items.find((it) => it.value === multiSelected[0]);
+      singleItem = resolvedItems.find((it) => it.value === multiSelected[0]);
       if (singleItem) {
         displayPlaceholder = singleItem.label;
         inputTitle = singleItem.label;
@@ -142,13 +148,12 @@ export const SearchSelect: React.FC<SearchSelectProps> = (props) => {
     } else if (multiSelected.length > 1) {
       displayPlaceholder = `${placeholder} (${multiSelected.length})`;
       inputTitle = multiSelected
-        .map((val) => items.find((it) => it.value === val)?.label)
+        .map((val) => resolvedItems.find((it) => it.value === val)?.label)
         .filter(Boolean)
         .join(', ');
     }
   }
 
-  const hasSelection = isSingle ? props.value != null && props.value !== '' : props.selectedValues.length > 0;
   const isNonDefault = isSingle ? (props.defaultValue !== undefined ? props.value !== props.defaultValue && props.value != null && props.value !== '' : hasSelection) : props.selectedValues.length > 0;
   const isClearVisible = Boolean(query) || isNonDefault;
 

@@ -1,8 +1,7 @@
-export const dict = {
+import type { dict as dictEn } from './dict-en';
+
+export const dict: typeof dictEn = {
   country: 'Країна',
-  countries: 'Країни',
-  searchCountry: 'Пошук країни...',
-  noCountriesFound: 'Країни не знайдено',
   inConstant2021: 'У пост. 2021 $',
   macro: {
     title: 'Виконання держбюджету та державний борг',
@@ -32,15 +31,10 @@ export const dict = {
     imports: 'Імпорт',
     goods: 'Товари',
     services: 'Послуги',
-    goodsExports: 'Експорт товарів',
-    goodsImports: 'Імпорт товарів',
-    servicesExports: 'Експорт послуг',
-    servicesImports: 'Імпорт послуг',
   },
   tradePartners: {
     title: 'Провідні двосторонні торговельні партнери',
     partners: 'Торговельні партнери',
-    searchPartners: 'Пошук партнерів...',
     noPartnersFound: 'Партнерів не знайдено',
   },
   tradeCategories: {
@@ -50,7 +44,6 @@ export const dict = {
     detailedLevel: 'Детальні',
     macroCategories: 'Укрупнені категорії',
     detailedCategories: 'Детальні категорії',
-    searchCategories: 'Пошук категорій...',
     noCategoriesFound: 'Категорій не знайдено',
     categories: {
       ag: 'Агро',
@@ -64,7 +57,7 @@ export const dict = {
       tr: 'Транспорт',
       mi: 'Прилади',
       it: 'IT',
-      ts: 'Логістика',
+      ts: 'Логистика',
       tv: 'Туризм',
       fn: 'Фінанси',
       ip: 'Ліцензії',
@@ -159,6 +152,7 @@ export const dict = {
       '95': 'Іграшки, ігри, спортінвентар',
       '96': 'Різні готові вироби',
       '97': 'Предмети мистецтва та антикваріат',
+      '98': 'Спеціальні класифікаційні положення',
       '99': 'Інші некласифіковані товари',
       '205': 'Транспортні послуги',
       '236': 'Туризм та поїздки',
@@ -182,4 +176,4 @@ export const dict = {
       '09': 'Кава, чай, прянощі',
     },
   },
-} as const;
+};

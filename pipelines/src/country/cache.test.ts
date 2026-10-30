@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { COUNTRIES, COUNTRY_BY_CODE, COUNTRY_BY_ID, COUNTRY_BY_ISO3, SUPPORTED_COUNTRIES } from './countries';
 import {
   BATCH_SIZE_SERVICES_COUNTRIES,
+  buildBilateralImportIndex,
   buildProductionProfile,
   buildUsdDeflator2021,
   CHUNK_SIZE,
@@ -412,9 +413,10 @@ describe('Production Profile Generator & Symmetrical Imports (buildProductionPro
     };
 
     const all = { us: usProfile, cn: cnProfile };
+    const bilateralIndex = buildBilateralImportIndex(all);
 
-    const usProd = buildProductionProfile(usProfile, all);
-    const cnProd = buildProductionProfile(cnProfile, all);
+    const usProd = buildProductionProfile(usProfile, all, bilateralIndex);
+    const cnProd = buildProductionProfile(cnProfile, all, bilateralIndex);
 
     // US goods export in 2023 is 10.0B in USD
     expect(usProd.timeline[0].exports.goods).toBe(10.0e9);
@@ -427,26 +429,26 @@ describe('Production Profile Generator & Symmetrical Imports (buildProductionPro
     expect(cnProd.timeline[0].imports.goods).toBe(10.0e9);
 
     // Verify US bilateral partner imports list cn with 50.0B
-    expect(usProd.timeline[0].imports.partners.cn?.total).toBe(50.0e9);
+    expect(usProd.timeline[0].imports.partners.cn?.t).toBe(50.0e9);
 
     // Verify China bilateral partner imports list us with 10.0B
-    expect(cnProd.timeline[0].imports.partners.us?.total).toBe(10.0e9);
+    expect(cnProd.timeline[0].imports.partners.us?.t).toBe(10.0e9);
 
     // Verify detailed trade breakdowns by partner and category for US exports to cn
-    expect(usProd.timeline[0].exports.partners.cn?.macro.mc).toBe(10.0e9);
-    expect(usProd.timeline[0].exports.partners.cn?.detailed['84']).toBe(10.0e9);
+    expect(usProd.timeline[0].exports.partners.cn?.m.mc).toBe(10.0e9);
+    expect(usProd.timeline[0].exports.partners.cn?.d['84']).toBe(10.0e9);
 
     // Verify symmetrical detailed trade breakdowns for US imports from cn
-    expect(usProd.timeline[0].imports.partners.cn?.macro.mc).toBe(50.0e9);
-    expect(usProd.timeline[0].imports.partners.cn?.detailed['85']).toBe(50.0e9);
+    expect(usProd.timeline[0].imports.partners.cn?.m.mc).toBe(50.0e9);
+    expect(usProd.timeline[0].imports.partners.cn?.d['85']).toBe(50.0e9);
 
     // Symmetrically for China: exports to us
-    expect(cnProd.timeline[0].exports.partners.us?.macro.mc).toBe(50.0e9);
-    expect(cnProd.timeline[0].exports.partners.us?.detailed['85']).toBe(50.0e9);
+    expect(cnProd.timeline[0].exports.partners.us?.m.mc).toBe(50.0e9);
+    expect(cnProd.timeline[0].exports.partners.us?.d['85']).toBe(50.0e9);
 
     // Symmetrically for China: imports from us
-    expect(cnProd.timeline[0].imports.partners.us?.macro.mc).toBe(10.0e9);
-    expect(cnProd.timeline[0].imports.partners.us?.detailed['84']).toBe(10.0e9);
+    expect(cnProd.timeline[0].imports.partners.us?.m.mc).toBe(10.0e9);
+    expect(cnProd.timeline[0].imports.partners.us?.d['84']).toBe(10.0e9);
   });
 
   test('calculates multi-category partner breakdowns with descending sort', () => {
@@ -467,21 +469,21 @@ describe('Production Profile Generator & Symmetrical Imports (buildProductionPro
     const ca = prod.timeline[0].exports.partners.ca;
 
     expect(ca).toBeDefined();
-    expect(ca.total).toBe(10.0e9);
+    expect(ca.t).toBe(10.0e9);
 
     // Total = 10.0B
     // Machinery (ch 84): 6.0B
     // Agriculture (ch 01 + ch 02): 4.0B
-    expect(ca.macro.mc).toBe(6.0e9);
-    expect(ca.macro.ag).toBe(4.0e9);
+    expect(ca.m.mc).toBe(6.0e9);
+    expect(ca.m.ag).toBe(4.0e9);
 
     // Detailed chapters
-    expect(ca.detailed['84']).toBe(6.0e9);
-    expect(ca.detailed['02']).toBe(3.0e9);
-    expect(ca.detailed['01']).toBe(1.0e9);
+    expect(ca.d['84']).toBe(6.0e9);
+    expect(ca.d['02']).toBe(3.0e9);
+    expect(ca.d['01']).toBe(1.0e9);
 
     // Verify descending sort order of keys
-    expect(Object.keys(ca.macro)).toEqual(['mc', 'ag']);
+    expect(Object.keys(ca.m)).toEqual(['mc', 'ag']);
   });
 
   test('all timeline records match consecutive years and valid unified flows', () => {
@@ -496,13 +498,13 @@ describe('Production Profile Generator & Symmetrical Imports (buildProductionPro
     expect(y0.exports.goods).toBe(11.7e9); // 1.5 + 10.2
     expect(y0.exports.services).toBe(21.2e9); // 12.3 + 8.9
     expect(y0.imports.services).toBe(12.6e9); // 8.1 + 4.5
-    expect(y0.exports.total).toBe(32.9e9); // 11.7 + 21.2
+    expect(y0.exports.t).toBe(32.9e9); // 11.7 + 21.2
 
     // Verify services categories in detailed and macro
-    expect(y0.imports.detailed['205']).toBeDefined();
-    expect(y0.imports.detailed['262']).toBeDefined();
-    expect(y0.imports.macro.ts).toBeDefined();
-    expect(y0.imports.macro.it).toBeDefined();
+    expect(y0.imports.d['205']).toBeDefined();
+    expect(y0.imports.d['262']).toBeDefined();
+    expect(y0.imports.m.ts).toBeDefined();
+    expect(y0.imports.m.it).toBeDefined();
 
     expect(prod.activePartners.length).toBeGreaterThan(0);
     expect(prod.activeMacro.length).toBeGreaterThan(0);

@@ -9,31 +9,7 @@ import type { CountryPipelineCache, RawCountryProfile } from './index';
 const LOCALES: readonly Language[] = ['en', 'ru', 'uk', 'de'] as const;
 
 /** UN Comtrade statistical, customs, and non-country area codes that must never appear in partner data. */
-const FORBIDDEN_STATISTICAL_CODES = new Set([
-  '_X',
-  'XX',
-  'X1',
-  'X2',
-  'E19',
-  'F19',
-  'O19',
-  'A79',
-  'A59',
-  'F97',
-  'E29',
-  'A49',
-  'F49',
-  'R91',
-  'R20',
-  'S19',
-  'NTZ',
-  '_AC',
-  '_CI',
-  '_SM',
-  '_TK',
-  '_WI',
-  '_ZP',
-]);
+const FORBIDDEN_STATISTICAL_CODES = new Set(['_X', 'XX', 'X1', 'X2', 'E19', 'F19', 'O19', 'A79', 'A59', 'F97', 'E29', 'A49', 'F49', 'R91', 'R20', 'NTZ', '_AC', '_CI', '_SM', '_TK', '_WI', '_ZP']);
 
 /** Known historical sovereign states and custom unions with dedicated localization entries. */
 const HISTORICAL_CODES = ['SUN', 'YUG', 'SCG', 'CSK', 'DDR', 'ANT', 'ZA1', 'YMD', 'PUS', 'PCI', 'ATB'] as const;

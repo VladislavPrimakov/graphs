@@ -20,10 +20,9 @@ export const tradeStructureSection: Section = ({ t, fmt }) => {
     buildView: ({ countryData, deflator }, { countryStore }) => {
       const countryName = fmt.region(countryData.code);
       const title = `${countryName} — ${t.proj.tradeStructure.title}`;
-      const showLabels = Boolean(countryStore.labels);
       const useConst = Boolean(countryStore.inConstant2021);
       const { startIdx, endIdx } = resolveVisiblePeriod(countryData.years, countryStore.years, {
-        seriesData: [countryData.timeline.map((y) => y.exports.total), countryData.timeline.map((y) => y.imports.total)],
+        seriesData: [countryData.timeline.map((y) => y.exports.t || null), countryData.timeline.map((y) => y.imports.t || null)],
       });
 
       const visibleTimeline = startIdx < endIdx ? countryData.timeline.slice(startIdx, endIdx) : [];
@@ -46,10 +45,10 @@ export const tradeStructureSection: Section = ({ t, fmt }) => {
         const k = useConst ? (deflator?.[y.year] ?? 1) : 1;
         visibleYears[i] = y.year;
         rawBal[i] = y.netBalanceUsd != null ? y.netBalanceUsd * k : null;
-        rawExp[i] = y.exports.total != null ? y.exports.total * k : null;
+        rawExp[i] = y.exports.t > 0 ? y.exports.t * k : null;
         rawGoodsExp[i] = y.exports.goods != null ? y.exports.goods * k : null;
         rawServExp[i] = y.exports.services != null ? y.exports.services * k : null;
-        rawImp[i] = y.imports.total != null ? y.imports.total * k : null;
+        rawImp[i] = y.imports.t > 0 ? y.imports.t * k : null;
         rawGoodsImp[i] = y.imports.goods != null ? y.imports.goods * k : null;
         rawServImp[i] = y.imports.services != null ? y.imports.services * k : null;
       }
@@ -112,7 +111,7 @@ export const tradeStructureSection: Section = ({ t, fmt }) => {
                 color: tradeColors.exportTotal,
                 data: exportsData,
                 label: {
-                  show: showLabels,
+                  show: true,
                   color: tradeColors.exportTotal,
                 },
                 formatLabel: ({ value }) => fmt.number(value),
@@ -123,7 +122,7 @@ export const tradeStructureSection: Section = ({ t, fmt }) => {
                 color: tradeColors.importTotal,
                 data: importsData,
                 label: {
-                  show: showLabels,
+                  show: true,
                   color: tradeColors.importTotal,
                 },
                 formatLabel: ({ value }) => fmt.number(value),
@@ -137,7 +136,7 @@ export const tradeStructureSection: Section = ({ t, fmt }) => {
                 lineStyle: { width: BALANCE_LINE_WIDTH, type: 'dashed' },
                 data: visibleBalances,
                 label: {
-                  show: showLabels,
+                  show: true,
                   formatter: (params: CallbackDataParams) => {
                     const num = Number(params.value);
                     if (Number.isNaN(num)) return '';

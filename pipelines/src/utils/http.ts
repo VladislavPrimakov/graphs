@@ -35,10 +35,9 @@ export async function fetchWithRetry(url: string, options: RequestInit & { retri
 
   let lastError: Error | null = null;
   for (let attempt = 1; attempt <= retries; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
-
       const res = await fetch(url, {
         ...rest,
         headers: defaultHeaders,
@@ -76,6 +75,7 @@ export async function fetchWithRetry(url: string, options: RequestInit & { retri
           const body = await res.text().catch(() => '');
           throw new HttpError(res.status, url, body);
         }
+        await res.body?.cancel().catch(() => {});
         const jitter = Math.floor(Math.random() * 50);
         const wait = backoffMs * 2 ** (attempt - 1) + jitter;
         logger.warn(`HTTP ${res.status}: Retrying ${url} in ${wait}ms (attempt ${attempt}/${retries})...`);
@@ -85,6 +85,7 @@ export async function fetchWithRetry(url: string, options: RequestInit & { retri
 
       return res;
     } catch (err: unknown) {
+      clearTimeout(timer);
       if (err instanceof HttpError) {
         throw err;
       }

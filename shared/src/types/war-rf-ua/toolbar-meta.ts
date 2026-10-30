@@ -2,7 +2,7 @@ import type { WarLossesToolbarMeta, WarLossModelMeta } from './losses';
 
 /** Project-level toolbar metadata for War RF-UA Frontline timeline scrubber. */
 export interface WarFrontlineToolbarMeta {
-  /** Earliest daily period identifier (e.g. '2023-01-28'). */
+  /** Earliest daily period identifier (e.g. '2022-02-23'). */
   minDate: string;
   /** Latest daily period identifier (e.g. '2026-10-16'). */
   maxDate: string;

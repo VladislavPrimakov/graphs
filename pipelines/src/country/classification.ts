@@ -11,7 +11,7 @@ export const GOODS_MACRO_CHAPTERS: Record<GoodsCategoryId, string[]> = {
   mt: ['71', '72', '73', '74', '75', '76', '78', '79', '80', '81', '82', '83'],
   mc: ['84', '85'],
   tr: ['86', '87', '88', '89'],
-  mi: ['90', '91', '92', '93', '94', '95', '96', '97', '99'],
+  mi: ['90', '91', '92', '93', '94', '95', '96', '97', '98', '99'],
 };
 
 /** Index mapping 2-digit HS chapter code to parent goods macro category ID. */

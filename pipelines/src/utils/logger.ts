@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { type ConsolaInstance, createConsola } from 'consola';
 
+/** Canonical string identifier for scoping pipeline log output to a specific project or subsystem. */
 export type LoggerTag = string;
 
 const asyncLoggerStorage = new AsyncLocalStorage<ConsolaInstance>();

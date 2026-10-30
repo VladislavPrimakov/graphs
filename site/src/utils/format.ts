@@ -172,7 +172,7 @@ function formatDate(lang: Language, date: string | Date, options?: Intl.DateTime
   return getDateTimeFormat(lang, options ? { ...options } : defaultOptions).format(d);
 }
 
-/** Formats a numeric value into compact localized notation (e.g., 1.5M, 1,5 млн). */
+/** Formats a numeric value into compact localized notation (e.g., 1.5M, 1.5B). */
 function formatCompactNumber(lang: Language, value: number, options?: Intl.NumberFormatOptions): string {
   return getNumberFormat(lang, {
     notation: 'compact',
@@ -195,14 +195,14 @@ function formatDecade(lang: Language, decade: string): string {
 
 /** Options for localized order-of-magnitude scale formatting. */
 export interface FormatScaleOptions {
-  /** Display format style: 'short' abbreviation (e.g. 'B', 'млрд') or 'long' word (e.g. 'billion', 'миллиард'). @default 'short' */
+  /** Display format style: 'short' abbreviation (e.g. 'B', 'Mrd.') or 'long' word (e.g. 'billion', 'Milliarde'). @default 'short' */
   style?: 'short' | 'long';
   /** Whether to capitalize the first letter. @default true */
   capitalize?: boolean;
 }
 
 /**
- * Resolves a localized scale or order-of-magnitude word/symbol (e.g. 1e9 -> 'Млрд' / 'B', 1e12 -> 'Трлн' / 'T')
+ * Resolves a localized scale or order-of-magnitude word/symbol (e.g. 1e9 -> 'B' / 'Mrd.', 1e12 -> 'T' / 'Bio.')
  * via native browser Intl.NumberFormat token parts (ECMA-402 compact notation).
  */
 function formatScale(lang: Language, value: number, options?: FormatScaleOptions): string {
@@ -218,7 +218,7 @@ function formatScale(lang: Language, value: number, options?: FormatScaleOptions
 
 /** Options for localized measurement unit formatting. */
 export interface FormatUnitOptions {
-  /** Unit display format: 'short' abbreviation (e.g. 't', 'kg') or 'long' word (e.g. 'metric tons', 'килограммов'). @default 'short' */
+  /** Unit display format: 'short' abbreviation (e.g. 't', 'kg') or 'long' word (e.g. 'metric tons', 'kilograms'). @default 'short' */
   style?: UnitDisplayStyle;
   /** Fixed number of decimal fraction digits. */
   digits?: number;
@@ -259,7 +259,7 @@ function formatUnit(lang: Language, value: number, unit: UnitIdentifier, options
 
 /** Options for localized measurement unit name resolution. */
 export interface FormatUnitNameOptions {
-  /** Display format style: 'short' abbreviation (e.g. 't', 'kg') or 'long' full name (e.g. 'metric tons', 'тонны'). @default 'short' */
+  /** Display format style: 'short' abbreviation (e.g. 't', 'kg') or 'long' full name (e.g. 'metric tons', 'tonnes'). @default 'short' */
   style?: UnitDisplayStyle;
   /** Whether to capitalize the first letter. Defaults to true for 'long' style, false for 'short' style. */
   capitalize?: boolean;
@@ -411,7 +411,7 @@ function getRegionColor(regionCode?: string): string {
 export interface LocalizedFormatters {
   /** Formats general numbers (default: up to 1 fraction digit, integers without trailing zeroes). */
   number: (value: number, options?: Intl.NumberFormatOptions) => string;
-  /** Formats monetary currency amount (defaults: USD, compact notation e.g. $1.5M / 1,5 млрд $, narrow symbol). */
+  /** Formats monetary currency amount (defaults: USD, compact notation e.g. $1.5M / $1.5B, narrow symbol). */
   currency: (amount: number, currency?: string, options?: Intl.NumberFormatOptions) => string;
   /** Formats percentage from a 0..100 numeric value. */
   percent: (value: number, options?: Intl.NumberFormatOptions) => string;
@@ -419,13 +419,13 @@ export interface LocalizedFormatters {
   date: (date: string | Date, options?: Intl.DateTimeFormatOptions) => string;
   /** Formats compact number (e.g. 1.5M). */
   compact: (value: number, options?: Intl.NumberFormatOptions) => string;
-  /** Formats decade label (e.g. 1960s -> 1960-е). */
+  /** Formats decade label (e.g. 1960s -> 1960er). */
   decade: (decade: string) => string;
   /** Resolves localized country or region name. */
   region: (code: string | undefined) => string;
   /** Resolves standardized color for a country or region code. */
   regionColor: (code?: string) => string;
-  /** Resolves localized order-of-magnitude unit or word (e.g. 1e9 -> 'Млрд' / 'B', or with style: 'long' -> 'Миллиард' / 'Billion'). */
+  /** Resolves localized order-of-magnitude unit or word (e.g. 1e9 -> 'B' / 'Mrd.', or with style: 'long' -> 'Billion' / 'Milliarde'). */
   scale: (value: number, options?: FormatScaleOptions) => string;
   /** Formats a numeric value with a localized unit (default style: 'short'). */
   unit: (value: number, unit: UnitIdentifier, options?: FormatUnitOptions) => string;

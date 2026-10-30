@@ -29,15 +29,19 @@ function requireEnv(key: string): string {
   return value;
 }
 
-// 1. Cloudflare Account & Authentication
+/** Cloudflare account identifier for R2 storage and Workers deployment. */
 export const CLOUDFLARE_ACCOUNT_ID = requireEnv('CLOUDFLARE_ACCOUNT_ID');
 
-// 2. Cloudflare R2 Storage (Private L1 Snapshot Mirror)
+/** Cloudflare R2 S3-compatible access key identifier. */
 export const R2_ACCESS_KEY_ID = requireEnv('R2_ACCESS_KEY_ID');
+/** Cloudflare R2 S3-compatible secret access key. */
 export const R2_SECRET_ACCESS_KEY = requireEnv('R2_SECRET_ACCESS_KEY');
+/** Private Cloudflare R2 bucket name hosting Tier 1 raw snapshots. */
 export const R2_BUCKET = requireEnv('R2_BUCKET');
+/** S3-compatible HTTPS endpoint URL for Cloudflare R2. */
 export const R2_ENDPOINT = `https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com`;
 
-// 3. Upstream Data Source API Credentials
+/** UN Comtrade API subscription key for bilateral trade queries. */
 export const COMTRADE_API_KEY = requireEnv('COMTRADE_API_KEY');
+/** Kaggle API authentication token for upstream dataset downloads. */
 export const KAGGLE_API_TOKEN = requireEnv('KAGGLE_API_TOKEN');
